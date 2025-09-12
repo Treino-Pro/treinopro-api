@@ -23,9 +23,14 @@ export const users = pgTable('users', {
   documentImageUrl: text('document_image_url').notNull(),
   
   // Campos específicos para Personal Trainers
-  cref: varchar('cref', { length: 20 }),
+  cref: varchar('cref', { length: 20 }), // Formato completo: SP-106227
+  crefUf: varchar('cref_uf', { length: 2 }), // UF separada: SP
+  crefNumber: varchar('cref_number', { length: 10 }), // Número separado: 106227
   crefImageUrl: text('cref_image_url'),
   crefValidated: boolean('cref_validated').default(false),
+  crefValidatedAt: timestamp('cref_validated_at'),
+  crefValidatedName: varchar('cref_validated_name', { length: 200 }), // Nome do CONFEF
+  crefValidatedSituation: varchar('cref_validated_situation', { length: 100 }), // Situação do CONFEF
   specialties: json('specialties').$type<string[]>(),
   
   // Campos para menores de idade

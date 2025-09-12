@@ -61,7 +61,11 @@ export class RegisterDto {
   documentImageUrl: string;
 
   // Campos específicos para Personal Trainers
-  @ApiProperty({ example: 'CREF: 0111212-9', required: false })
+  @ApiProperty({ 
+    example: 'SP-106227', 
+    description: 'CREF no formato UF-NÚMERO (ex: SP-106227)',
+    required: false 
+  })
   @IsString()
   @IsOptional()
   cref?: string;

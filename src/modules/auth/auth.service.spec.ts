@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { ConflictException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, UserType, DocumentType } from './dto/auth.dto';
+import { CrefService } from '../cref/cref.service';
 import * as bcrypt from 'bcryptjs';
 
 // Mock do banco de dados
@@ -27,6 +28,12 @@ const mockConfigService = {
   get: jest.fn(),
 };
 
+// Mock do CrefService
+const mockCrefService = {
+  validateCref: jest.fn(),
+  parseCrefNumber: jest.fn(),
+};
+
 describe('AuthService', () => {
   let service: AuthService;
 
@@ -45,6 +52,10 @@ describe('AuthService', () => {
         {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
+        },
+        {
+          provide: CrefService,
+          useValue: mockCrefService,
         },
       ],
     }).compile();
@@ -85,7 +96,7 @@ describe('AuthService', () => {
       documentType: DocumentType.CNH,
       documentNumber: '12345678901',
       documentImageUrl: 'https://example.com/cnh-maria.jpg',
-      cref: 'CREF: 0111212-9',
+      cref: 'SP-106227',
       crefImageUrl: 'https://example.com/cref-maria.jpg',
       specialties: ['Musculação', 'Funcional'],
       isMinor: false,
@@ -144,6 +155,22 @@ describe('AuthService', () => {
       });
       mockJwtService.signAsync.mockResolvedValue('mock-access-token');
       mockConfigService.get.mockReturnValue('mock-secret');
+      
+      // Mock CrefService
+      mockCrefService.validateCref.mockResolvedValue({
+        isValid: true,
+        crefNumber: 'SP-106227',
+        nome: 'Maria Silva',
+        situacao: 'BACHAREL',
+        uf: 'SP',
+        validatedAt: new Date(),
+        details: 'Validação bem-sucedida'
+      });
+      mockCrefService.parseCrefNumber.mockReturnValue({
+        uf: 'SP',
+        numero: '106227',
+        full: 'SP-106227'
+      });
 
       // Act
       const result = await service.register(validPersonalDto);
@@ -155,6 +182,8 @@ describe('AuthService', () => {
       expect(result.user.email).toBe(validPersonalDto.email);
       expect(result.user.userType).toBe('personal');
       expect(mockDb.insert).toHaveBeenCalledWith(expect.any(Object));
+      expect(mockCrefService.validateCref).toHaveBeenCalledWith('SP-106227');
+      expect(mockCrefService.parseCrefNumber).toHaveBeenCalledWith('SP-106227');
     });
 
     it('deve lançar ConflictException quando email já existe', async () => {
@@ -187,7 +216,7 @@ describe('AuthService', () => {
 
     it('deve lançar BadRequestException quando estudante tem CREF', async () => {
       // Arrange
-      const invalidStudentDto = { ...validStudentDto, cref: 'CREF: 0111212-9' };
+      const invalidStudentDto = { ...validStudentDto, cref: 'SP-106227' };
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
       // Act & Assert
@@ -266,6 +295,20 @@ describe('AuthService', () => {
         BadRequestException,
       );
     });
+
+    it('deve lançar BadRequestException quando CREF é inválido', async () => {
+      // Arrange
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+      mockCrefService.validateCref.mockRejectedValue(
+        new BadRequestException('Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)')
+      );
+
+      // Act & Assert
+      await expect(service.register(validPersonalDto)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockCrefService.validateCref).toHaveBeenCalledWith('SP-106227');
+    });
   });
 
   describe('login', () => {
@@ -330,5 +373,6 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
     });
+
   });
 });

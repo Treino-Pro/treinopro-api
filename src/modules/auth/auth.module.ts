@@ -7,10 +7,12 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { DatabaseModule } from '../../database/database.module';
+import { CrefModule } from '../cref/cref.module';
 
 @Module({
   imports: [
     DatabaseModule,
+    CrefModule, // Importar o módulo CREF
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

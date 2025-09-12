@@ -6,6 +6,7 @@ import { Inject } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
 import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
+import { CrefService } from '../cref/cref.service';
 
 @Injectable()
 export class AuthService {
@@ -13,6 +14,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     @Inject('DATABASE_CONNECTION') private db: any,
+    private crefService: CrefService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -99,6 +101,9 @@ export class AuthService {
       }
 
       // Validar CREF para Personal Trainers
+      let crefValidation = null;
+      let crefParsed = null;
+      
       if (userType === 'personal') {
         if (!cref) {
           throw new BadRequestException('CREF é obrigatório para Personal Trainers');
@@ -106,8 +111,18 @@ export class AuthService {
         if (!crefImageUrl) {
           throw new BadRequestException('Imagem da carteirinha do CREF é obrigatória para Personal Trainers');
         }
-        // TODO: Implementar validação do CREF via API
+        
         console.log('🔍 [AUTH] Validando CREF:', cref);
+        
+        // Validar CREF via API do CONFEF
+        try {
+          crefValidation = await this.crefService.validateCref(cref);
+          crefParsed = this.crefService.parseCrefNumber(cref);
+          console.log('✅ [AUTH] CREF validado com sucesso:', crefValidation);
+        } catch (error) {
+          console.error('❌ [AUTH] Erro na validação do CREF:', error.message);
+          throw new BadRequestException(`Erro na validação do CREF: ${error.message}`);
+        }
       }
 
       console.log('✅ [AUTH] Todas as validações passaram');
@@ -142,8 +157,13 @@ export class AuthService {
         documentNumber,
         documentImageUrl,
         cref,
+        crefUf: userType === 'personal' && crefParsed ? crefParsed.uf : null,
+        crefNumber: userType === 'personal' && crefParsed ? crefParsed.numero : null,
         crefImageUrl,
-        crefValidated: userType === 'personal' ? false : null,
+        crefValidated: userType === 'personal' && crefValidation ? true : false,
+        crefValidatedAt: userType === 'personal' && crefValidation ? new Date() : null,
+        crefValidatedName: userType === 'personal' && crefValidation ? crefValidation.nome : null,
+        crefValidatedSituation: userType === 'personal' && crefValidation ? crefValidation.categoria : null,
         specialties,
         isMinor,
         guardianName: isMinor ? guardianName : null,

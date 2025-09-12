@@ -15,6 +15,13 @@
       "when": 1757655140386,
       "tag": "0001_glossy_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1757660933199,
+      "tag": "0002_far_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }
