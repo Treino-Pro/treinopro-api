@@ -6,6 +6,7 @@ import { PassportModule } from '@nestjs/passport';
 import * as request from 'supertest';
 import { AuthModule } from '../../src/modules/auth/auth.module';
 import { DatabaseModule } from '../../src/database/database.module';
+import { HealthController } from '../../src/common/health/health.controller';
 import { UserType, DocumentType } from '../../src/modules/auth/dto/auth.dto';
 
 // Mock do banco de dados para testes de integração
@@ -21,20 +22,37 @@ const mockDb = {
 
 // Mock do JwtService
 const mockJwtService = {
-  sign: jest.fn(),
-  signAsync: jest.fn(),
+  sign: jest.fn().mockReturnValue('mock-jwt-token'),
+  signAsync: jest.fn().mockImplementation((payload, options) => {
+    // Simular diferentes tokens baseado nas opções
+    if (options?.secret === 'test-refresh-secret-key') {
+      return Promise.resolve('mock-refresh-token');
+    }
+    return Promise.resolve('mock-access-token');
+  }),
+  verify: jest.fn().mockReturnValue({ sub: 'mock-user-id', email: 'test@example.com', userType: 'student' }),
 };
 
-// Mock do ConfigService
-const mockConfigService = {
-  get: jest.fn((key: string) => {
-    const config = {
-      JWT_SECRET: 'test-secret-key',
-      JWT_EXPIRATION_TIME: '3600', // 1 hora em segundos
-    };
-    return config[key];
+// Mock do CrefService
+const mockCrefService = {
+  validateCref: jest.fn().mockResolvedValue({
+    isValid: true,
+    crefNumber: 'SP-106227',
+    nome: 'João Silva',
+    categoria: 'ATIVO',
+    uf: 'SP',
+    naturezaTitulo: 'BACHAREL',
+    validatedAt: new Date(),
+    details: 'Validação bem-sucedida'
+  }),
+  parseCrefNumber: jest.fn().mockReturnValue({
+    uf: 'SP',
+    numero: '106227',
+    full: 'SP-106227'
   }),
 };
+
+// Mock do ConfigService removido - usando ConfigModule.load
 
 describe('Auth Integration Tests (Mock Database)', () => {
   let app: INestApplication;
@@ -46,17 +64,24 @@ describe('Auth Integration Tests (Mock Database)', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
+          load: [() => ({
+            JWT_SECRET: 'test-secret-key',
+            JWT_EXPIRES_IN: '1h',
+            JWT_REFRESH_SECRET: 'test-refresh-secret-key',
+            JWT_REFRESH_EXPIRES_IN: '7d',
+          })],
         }),
         DatabaseModule,
         AuthModule,
       ],
+      controllers: [HealthController],
     })
     .overrideProvider('DATABASE_CONNECTION')
     .useValue(mockDb)
     .overrideProvider('JwtService')
     .useValue(mockJwtService)
-    .overrideProvider('ConfigService')
-    .useValue(mockConfigService)
+    .overrideProvider('CrefService')
+    .useValue(mockCrefService)
     .compile();
 
     app = moduleRef.createNestApplication();
@@ -87,25 +112,55 @@ describe('Auth Integration Tests (Mock Database)', () => {
     jest.clearAllMocks();
     
     // Configurar mocks padrão
-    mockJwtService.signAsync.mockResolvedValue('mock-access-token');
+    mockJwtService.signAsync.mockImplementation((payload, options) => {
+      if (options?.secret === 'test-refresh-secret-key') {
+        return Promise.resolve('mock-refresh-token');
+      }
+      return Promise.resolve('mock-access-token');
+    });
     mockJwtService.sign.mockReturnValue('mock-refresh-token');
     mockDb.query.users.findFirst.mockResolvedValue(null); // Usuário não existe por padrão
+    
+    // Reset CrefService mock
+    mockCrefService.validateCref.mockResolvedValue({
+      isValid: true,
+      crefNumber: 'SP-106227',
+      nome: 'João Silva',
+      categoria: 'ATIVO',
+      uf: 'SP',
+      naturezaTitulo: 'BACHAREL',
+      validatedAt: new Date(),
+      details: 'Validação bem-sucedida'
+    });
+    mockCrefService.parseCrefNumber.mockReturnValue({
+      uf: 'SP',
+      numero: '106227',
+      full: 'SP-106227'
+    });
+    
+    // Mock do insert que retorna dados baseados no input
+    let capturedValues: any = {};
     mockDb.insert.mockReturnValue({
-      values: jest.fn().mockReturnValue({
-        returning: jest.fn().mockResolvedValue([{
-          id: 'mock-user-id',
-          email: 'test@example.com',
-          firstName: 'Test',
-          lastName: 'User',
-          userType: 'student',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        }])
+      values: jest.fn().mockImplementation((data) => {
+        // Capturar os dados passados para values()
+        capturedValues = Array.isArray(data) ? data[0] : data || {};
+        return {
+          returning: jest.fn().mockResolvedValue([{
+            id: 'mock-user-id',
+            email: capturedValues.email || 'test@example.com',
+            firstName: capturedValues.firstName || 'Test',
+            lastName: capturedValues.lastName || 'User',
+            userType: capturedValues.userType || 'student',
+            isVerified: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }])
+        };
       })
     });
     
-    // Mock do bcrypt para login
-    jest.spyOn(require('bcryptjs'), 'compare').mockResolvedValue(true);
+    // Mock do bcrypt para login - será sobrescrito nos testes específicos
+    // Não aplicar mock global aqui, será feito nos testes específicos
   });
 
   describe('POST /auth/register', () => {
@@ -140,7 +195,7 @@ describe('Auth Integration Tests (Mock Database)', () => {
       
       // Verificar se o mock foi chamado corretamente
       expect(mockDb.query.users.findFirst).toHaveBeenCalledWith({
-        where: expect.any(Function)
+        where: expect.any(Object) // Drizzle ORM passa um objeto SQL, não uma função
       });
       expect(mockDb.insert).toHaveBeenCalled();
     });
@@ -157,7 +212,7 @@ describe('Auth Integration Tests (Mock Database)', () => {
         documentType: DocumentType.CNH,
         documentNumber: '12345678901',
         documentImageUrl: 'https://example.com/cnh-carlos.jpg',
-        cref: 'CREF: 0111212-9',
+        cref: 'SP-106227',
         crefImageUrl: 'https://example.com/cref-carlos.jpg',
         specialties: ['Musculação', 'Funcional'],
         isMinor: false,
@@ -284,7 +339,7 @@ describe('Auth Integration Tests (Mock Database)', () => {
   });
 
   describe('POST /auth/login', () => {
-    beforeEach(() => {
+    it('deve fazer login com credenciais válidas', async () => {
       // Mock: usuário existe para login
       mockDb.query.users.findFirst.mockResolvedValue({
         id: 'login-user-id',
@@ -295,9 +350,10 @@ describe('Auth Integration Tests (Mock Database)', () => {
         userType: 'student',
         isVerified: true,
       });
-    });
 
-    it('deve fazer login com credenciais válidas', async () => {
+      // Mock bcrypt para retornar true para senha correta
+      jest.spyOn(require('bcryptjs'), 'compare').mockResolvedValue(true);
+
       const loginData = {
         email: 'login@test.com',
         password: '123456',
@@ -315,6 +371,20 @@ describe('Auth Integration Tests (Mock Database)', () => {
     });
 
     it('deve retornar erro 401 para credenciais inválidas', async () => {
+      // Mock: usuário existe para login
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'login-user-id',
+        email: 'login@test.com',
+        passwordHash: '$2a$12$mock.hash.for.testing',
+        firstName: 'Login',
+        lastName: 'Test',
+        userType: 'student',
+        isVerified: true,
+      });
+
+      // Mock bcrypt para retornar false para senha incorreta
+      jest.spyOn(require('bcryptjs'), 'compare').mockResolvedValue(false);
+
       const invalidLoginData = {
         email: 'login@test.com',
         password: 'wrong-password',

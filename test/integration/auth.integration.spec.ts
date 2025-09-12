@@ -6,6 +6,7 @@ import { PassportModule } from '@nestjs/passport';
 import * as request from 'supertest';
 import { AuthModule } from '../../src/modules/auth/auth.module';
 import { DatabaseModule } from '../../src/database/database.module';
+import { HealthController } from '../../src/common/health/health.controller';
 import { UserType, DocumentType } from '../../src/modules/auth/dto/auth.dto';
 
 describe('Auth Integration Tests', () => {
@@ -23,6 +24,7 @@ describe('Auth Integration Tests', () => {
         DatabaseModule,
         AuthModule,
       ],
+      controllers: [HealthController],
     }).compile();
 
     app = moduleRef.createNestApplication();
@@ -51,13 +53,17 @@ describe('Auth Integration Tests', () => {
   beforeEach(async () => {
     // Limpar banco de dados antes de cada teste
     const db = moduleRef.get('DATABASE_CONNECTION');
-    if (db && db.query) {
+    if (db) {
       try {
-        await db.query.users.findMany().then(users => {
-          if (users.length > 0) {
-            console.log(`🧹 Limpando ${users.length} usuários do banco de teste`);
-          }
-        });
+        // Verificar se é o banco real ou mock
+        if (db.query && typeof db.query === 'function') {
+          // Banco real - usar SQL direto
+          await db.query('DELETE FROM users');
+          console.log('🧹 Banco de dados limpo para o teste');
+        } else if (db.query && db.query.users && db.query.users.clear) {
+          // Mock database - usar método clear
+          db.query.users.clear();
+        }
       } catch (error) {
         console.log('⚠️ Erro ao limpar banco:', error.message);
       }
@@ -107,7 +113,7 @@ describe('Auth Integration Tests', () => {
         documentType: DocumentType.CNH,
         documentNumber: '12345678901',
         documentImageUrl: 'https://example.com/cnh-carlos.jpg',
-        cref: 'CREF: 0111212-9',
+        cref: 'SP-106227',
         crefImageUrl: 'https://example.com/cref-carlos.jpg',
         specialties: ['Musculação', 'Funcional'],
         isMinor: false,

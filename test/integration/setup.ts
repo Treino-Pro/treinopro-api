@@ -4,8 +4,9 @@ import 'reflect-metadata';
 // Configurações específicas para testes de integração
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-key-for-integration-tests';
-process.env.JWT_EXPIRATION_TIME = '1h';
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/treinopro_test';
+process.env.JWT_EXPIRES_IN = '1h';
+// Forçar uso do mock database para testes
+process.env.DATABASE_URL = 'mock://test';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
 process.env.PORT = '3001'; // Porta diferente para testes
 

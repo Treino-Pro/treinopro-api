@@ -17,12 +17,26 @@ import { CrefModule } from '../cref/cref.module';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET'),
-        signOptions: {
-          expiresIn: configService.get('JWT_EXPIRES_IN'),
-        },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const secret = configService.get('JWT_SECRET') || 'fallback-secret';
+        const expiresIn = configService.get('JWT_EXPIRES_IN') || '24h';
+        
+        console.log('🔧 [JWT] Configuração:', { 
+          secret: secret ? 'definido' : 'undefined', 
+          expiresIn: expiresIn || '24h (fallback)',
+          rawExpiresIn: configService.get('JWT_EXPIRES_IN')
+        });
+        
+        // Garantir que expiresIn seja sempre uma string válida
+        const validExpiresIn = typeof expiresIn === 'string' && expiresIn.length > 0 ? expiresIn : '24h';
+        
+        return {
+          secret,
+          signOptions: {
+            expiresIn: validExpiresIn,
+          },
+        };
+      },
       inject: [ConfigService],
     }),
   ],
