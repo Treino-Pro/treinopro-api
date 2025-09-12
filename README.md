@@ -24,7 +24,29 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+**TreinoPRO API** - Backend da aplicação de fitness e personal training construído com NestJS, TypeScript e PostgreSQL.
+
+### 🚀 Funcionalidades
+
+- **Autenticação JWT** com registro e login
+- **Validação robusta** de dados de usuário
+- **Suporte a menores de idade** com responsáveis
+- **Personal Trainers** com validação de CREF
+- **Banco de dados PostgreSQL** com Drizzle ORM
+- **Testes abrangentes** (unitários + integração)
+- **Documentação Swagger** automática
+
+### 🧪 Estratégia de Testes
+
+- **34 testes unitários** passando (57.7% cobertura)
+- **Testes de integração** com banco real e mocks
+- **Mocks e Stubs** para isolamento completo
+- **CI/CD ready** com pipeline de qualidade
+
+📚 **Documentação de Testes**:
+- [Estratégia de Testes](./TESTING_STRATEGY.md)
+- [Arquitetura de Testes](./TESTING_ARCHITECTURE.md)
+- [Guia Prático](./TESTING_GUIDE.md)
 
 ## Project setup
 
@@ -45,18 +67,46 @@ $ yarn run start:dev
 $ yarn run start:prod
 ```
 
-## Run tests
+## 🧪 Executar Testes
 
+### Testes Unitários (Recomendado)
 ```bash
-# unit tests
-$ yarn run test
+# Todos os testes unitários
+$ yarn test:unit
 
-# e2e tests
-$ yarn run test:e2e
+# Apenas testes de autenticação
+$ yarn test:auth
 
-# test coverage
-$ yarn run test:cov
+# Com cobertura de código
+$ yarn test:cov
+
+# Modo watch (re-executa ao salvar)
+$ yarn test:watch
 ```
+
+### Testes de Integração
+```bash
+# Com banco real (requer Docker)
+$ docker-compose -f docker-compose.test.yml up -d
+$ yarn test:integration
+$ docker-compose -f docker-compose.test.yml down
+
+# Com mocks (sem Docker)
+$ yarn test:integration --testPathPattern="mock"
+```
+
+### Todos os Testes
+```bash
+# Unitários + Integração
+$ yarn test:all
+```
+
+### 📊 Cobertura Atual
+- **Statements**: 57.7%
+- **Branches**: 46.37%
+- **Functions**: 46.51%
+- **Lines**: 60.3%
+- **Total**: 34 testes unitários passando
 
 ## Resources
 

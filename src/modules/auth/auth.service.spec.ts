@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ConflictException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto, UserType } from './dto/auth.dto';
+import { RegisterDto, UserType, DocumentType } from './dto/auth.dto';
 import * as bcrypt from 'bcryptjs';
 
 // Mock do banco de dados
@@ -65,6 +65,13 @@ describe('AuthService', () => {
       phone: '11999999999',
       birthDate: '1990-01-01',
       userType: UserType.STUDENT,
+      documentType: DocumentType.RG,
+      documentNumber: '12345678901',
+      documentImageUrl: 'https://example.com/rg-joao.jpg',
+      isMinor: false,
+      guardianConsent: false,
+      termsAccepted: true,
+      privacyPolicyAccepted: true,
     };
 
     const validPersonalDto: RegisterDto = {
@@ -75,8 +82,16 @@ describe('AuthService', () => {
       phone: '11999999999',
       birthDate: '1985-01-01',
       userType: UserType.PERSONAL,
+      documentType: DocumentType.CNH,
+      documentNumber: '12345678901',
+      documentImageUrl: 'https://example.com/cnh-maria.jpg',
       cref: 'CREF: 0111212-9',
+      crefImageUrl: 'https://example.com/cref-maria.jpg',
       specialties: ['Musculação', 'Funcional'],
+      isMinor: false,
+      guardianConsent: false,
+      termsAccepted: true,
+      privacyPolicyAccepted: true,
     };
 
     it('deve registrar um estudante com sucesso', async () => {
@@ -160,7 +175,7 @@ describe('AuthService', () => {
 
     it('deve lançar BadRequestException quando personal trainer não tem CREF', async () => {
       // Arrange
-      const invalidPersonalDto = { ...validPersonalDto, cref: undefined };
+      const invalidPersonalDto = { ...validPersonalDto, cref: undefined, crefImageUrl: undefined };
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
       // Act & Assert
@@ -207,6 +222,49 @@ describe('AuthService', () => {
       expect(mockDb.insert).toHaveBeenCalled();
       const insertCall = mockDb.insert.mock.calls[0];
       expect(insertCall[0]).toBeDefined(); // Verifica se foi chamado com o schema users
+    });
+
+    it('deve lançar BadRequestException quando termos não são aceitos', async () => {
+      // Arrange
+      const invalidDto = { ...validStudentDto, termsAccepted: false };
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(service.register(invalidDto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('deve lançar BadRequestException quando menor de idade não tem responsável', async () => {
+      // Arrange
+      const minorDto = { 
+        ...validStudentDto, 
+        birthDate: '2010-01-01',
+        isMinor: true,
+        guardianName: undefined,
+        guardianEmail: undefined
+      };
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(service.register(minorDto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('deve lançar BadRequestException quando idade não confere com data de nascimento', async () => {
+      // Arrange
+      const invalidAgeDto = { 
+        ...validStudentDto, 
+        birthDate: '2010-01-01',
+        isMinor: false
+      };
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(service.register(invalidAgeDto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

@@ -20,7 +20,27 @@ export class AuthService {
     console.log('📝 [AUTH] Dados recebidos:', JSON.stringify(registerDto, null, 2));
     
     try {
-      const { email, password, firstName, lastName, phone, birthDate, userType, cref, specialties } = registerDto;
+      const { 
+        email, 
+        password, 
+        firstName, 
+        lastName, 
+        phone, 
+        birthDate, 
+        userType, 
+        documentType,
+        documentNumber,
+        documentImageUrl,
+        cref, 
+        crefImageUrl,
+        specialties,
+        isMinor,
+        guardianName,
+        guardianEmail,
+        guardianConsent,
+        termsAccepted,
+        privacyPolicyAccepted
+      } = registerDto;
 
       console.log('🔍 [AUTH] Verificando se usuário já existe...');
       console.log('🔍 [AUTH] Email a verificar:', email);
@@ -54,6 +74,44 @@ export class AuthService {
 
       console.log('✅ [AUTH] Validações de CREF passaram');
 
+      // Validar idade e campos para menores
+      const birthDateObj = new Date(birthDate);
+      const today = new Date();
+      const age = today.getFullYear() - birthDateObj.getFullYear();
+      const isActuallyMinor = age < 18;
+
+      if (isActuallyMinor !== isMinor) {
+        throw new BadRequestException('A idade informada não confere com a data de nascimento');
+      }
+
+      if (isMinor) {
+        if (!guardianName || !guardianEmail) {
+          throw new BadRequestException('Nome e email do responsável são obrigatórios para menores de idade');
+        }
+        if (!guardianConsent) {
+          throw new BadRequestException('Consentimento do responsável é obrigatório para menores de idade');
+        }
+      }
+
+      // Validar termos e políticas
+      if (!termsAccepted || !privacyPolicyAccepted) {
+        throw new BadRequestException('Aceite dos Termos de Uso e Política de Privacidade é obrigatório');
+      }
+
+      // Validar CREF para Personal Trainers
+      if (userType === 'personal') {
+        if (!cref) {
+          throw new BadRequestException('CREF é obrigatório para Personal Trainers');
+        }
+        if (!crefImageUrl) {
+          throw new BadRequestException('Imagem da carteirinha do CREF é obrigatória para Personal Trainers');
+        }
+        // TODO: Implementar validação do CREF via API
+        console.log('🔍 [AUTH] Validando CREF:', cref);
+      }
+
+      console.log('✅ [AUTH] Todas as validações passaram');
+
       // Hash da senha
       console.log('🔐 [AUTH] Gerando hash da senha...');
       const passwordHash = await bcrypt.hash(password, 12);
@@ -78,10 +136,23 @@ export class AuthService {
         firstName,
         lastName,
         phone,
-        birthDate: birthDate ? new Date(birthDate) : null,
+        birthDate: new Date(birthDate),
         userType,
+        documentType,
+        documentNumber,
+        documentImageUrl,
         cref,
+        crefImageUrl,
+        crefValidated: userType === 'personal' ? false : null,
         specialties,
+        isMinor,
+        guardianName: isMinor ? guardianName : null,
+        guardianEmail: isMinor ? guardianEmail : null,
+        guardianConsent: isMinor ? guardianConsent : false,
+        guardianConsentDate: isMinor && guardianConsent ? new Date() : null,
+        termsAccepted,
+        privacyPolicyAccepted,
+        termsAcceptedDate: new Date(),
       }).returning();
 
       console.log('✅ [AUTH] Usuário criado com sucesso:', {

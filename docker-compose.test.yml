@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: treinopro-postgres-test
+    environment:
+      POSTGRES_DB: treinopro_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./init-test.sql:/docker-entrypoint-initdb.d/init-test.sql
+    networks:
+      - treinopro-test-network
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: treinopro-redis-test
+    ports:
+      - "6380:6379"
+    networks:
+      - treinopro-test-network
+
+volumes:
+  postgres_test_data:
+
+networks:
+  treinopro-test-network:
+    driver: bridge

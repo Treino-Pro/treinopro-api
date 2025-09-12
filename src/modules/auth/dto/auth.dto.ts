@@ -1,9 +1,14 @@
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, IsDateString, IsArray, ValidateIf, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum UserType {
   STUDENT = 'student',
   PERSONAL = 'personal',
+}
+
+export enum DocumentType {
+  RG = 'RG',
+  CNH = 'CNH',
 }
 
 export class RegisterDto {
@@ -18,10 +23,12 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'João' })
   @IsString()
+  @IsNotEmpty()
   firstName: string;
 
   @ApiProperty({ example: 'Silva' })
   @IsString()
+  @IsNotEmpty()
   lastName: string;
 
   @ApiProperty({ example: '11999999999', required: false })
@@ -29,14 +36,29 @@ export class RegisterDto {
   @IsOptional()
   phone?: string;
 
-  @ApiProperty({ example: '1990-01-01', required: false })
-  @IsString()
-  @IsOptional()
-  birthDate?: string;
+  @ApiProperty({ example: '1990-01-01' })
+  @IsDateString()
+  @IsNotEmpty()
+  birthDate: string;
 
   @ApiProperty({ enum: UserType, example: UserType.STUDENT })
   @IsEnum(UserType)
   userType: UserType;
+
+  // Documentos de identificação (obrigatórios)
+  @ApiProperty({ enum: DocumentType, example: DocumentType.RG })
+  @IsEnum(DocumentType)
+  documentType: DocumentType;
+
+  @ApiProperty({ example: '12345678901' })
+  @IsString()
+  @IsNotEmpty()
+  documentNumber: string;
+
+  @ApiProperty({ example: 'https://example.com/document.jpg' })
+  @IsString()
+  @IsNotEmpty()
+  documentImageUrl: string;
 
   // Campos específicos para Personal Trainers
   @ApiProperty({ example: 'CREF: 0111212-9', required: false })
@@ -44,9 +66,45 @@ export class RegisterDto {
   @IsOptional()
   cref?: string;
 
+  @ApiProperty({ example: 'https://example.com/cref.jpg', required: false })
+  @IsString()
+  @IsOptional()
+  crefImageUrl?: string;
+
   @ApiProperty({ example: ['Musculação', 'Funcional'], required: false })
+  @IsArray()
   @IsOptional()
   specialties?: string[];
+
+  // Campos para menores de idade
+  @ApiProperty({ example: false })
+  @IsBoolean()
+  isMinor: boolean;
+
+  @ApiProperty({ example: 'Maria Silva', required: false })
+  @IsString()
+  @ValidateIf(o => o.isMinor === true)
+  @IsNotEmpty()
+  guardianName?: string;
+
+  @ApiProperty({ example: 'maria@email.com', required: false })
+  @IsEmail()
+  @ValidateIf(o => o.isMinor === true)
+  @IsNotEmpty()
+  guardianEmail?: string;
+
+  @ApiProperty({ example: false })
+  @IsBoolean()
+  guardianConsent: boolean;
+
+  // Termos e políticas (obrigatórios)
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  termsAccepted: boolean;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  privacyPolicyAccepted: boolean;
 }
 
 export class LoginDto {

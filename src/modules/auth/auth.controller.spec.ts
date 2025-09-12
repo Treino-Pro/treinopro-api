@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, UserType } from './dto/auth.dto';
+import { RegisterDto, LoginDto, UserType, DocumentType } from './dto/auth.dto';
 
 // Mock do JwtAuthGuard
 jest.mock('./guards/jwt-auth.guard', () => ({
@@ -52,6 +52,13 @@ describe('AuthController', () => {
         phone: '11999999999',
         birthDate: '1990-01-01',
         userType: UserType.STUDENT,
+        documentType: DocumentType.RG,
+        documentNumber: '12345678901',
+        documentImageUrl: 'https://example.com/rg-joao.jpg',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
       };
 
       const expectedResult = {
@@ -87,6 +94,13 @@ describe('AuthController', () => {
         phone: '11999999999',
         birthDate: '1990-01-01',
         userType: UserType.STUDENT,
+        documentType: DocumentType.RG,
+        documentNumber: '12345678901',
+        documentImageUrl: 'https://example.com/rg-joao.jpg',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
       };
 
       const error = new Error('Database error');
@@ -113,6 +127,13 @@ describe('AuthController', () => {
           firstName: 'João',
           lastName: 'Silva',
           userType: UserType.STUDENT,
+        documentType: DocumentType.RG,
+        documentNumber: '12345678901',
+        documentImageUrl: 'https://example.com/rg-joao.jpg',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
           isVerified: true,
         },
         accessToken: 'mock-access-token',
