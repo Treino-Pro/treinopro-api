@@ -2,10 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { CrefService } from './cref.service';
 import { BadRequestException } from '@nestjs/common';
-import axios from 'axios';
-
-jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+// Mock fetch globally
+global.fetch = jest.fn();
+const mockedFetch = global.fetch as jest.MockedFunction<typeof fetch>;
 
 describe('CrefService', () => {
   let service: CrefService;
@@ -33,6 +32,7 @@ describe('CrefService', () => {
 
     // Reset mocks before each test
     jest.clearAllMocks();
+    mockedFetch.mockClear();
   });
 
   it('should be defined', () => {
@@ -98,17 +98,25 @@ describe('CrefService', () => {
 
   // Test getToken
   it('should fetch and cache token', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'new-test-token' } });
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'new-test-token' }),
+    } as Response);
     const token = await service['getToken']();
     expect(token).toBe('new-test-token');
-    expect(mockedAxios.get).toHaveBeenCalledWith(service['TOKEN_URL'], expect.any(Object));
+    expect(mockedFetch).toHaveBeenCalledWith(service['TOKEN_URL'], expect.any(Object));
     // Subsequent call should use cache
     await service['getToken']();
-    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
   it('should throw error if token not found in response', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { someOtherKey: 'value' } });
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ someOtherKey: 'value' }),
+    } as Response);
     await expect(service['getToken']()).rejects.toThrow('Falha ao obter token de acesso');
   });
 
@@ -134,8 +142,16 @@ describe('CrefService', () => {
         },
       ],
     };
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } }); // For getToken
-    mockedAxios.get.mockResolvedValueOnce({ data: mockConfefResponse }); // For fetchFromConfef
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response); // For getToken
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockConfefResponse,
+    } as Response); // For fetchFromConfef
 
     const result = await service['fetchFromConfef']('SP-123456');
     expect(result).toEqual({
@@ -145,7 +161,7 @@ describe('CrefService', () => {
       cref: 'SP-123456',
       naturezaTitulo: 'LICENCIADO/BACHAREL',
     });
-    expect(mockedAxios.get).toHaveBeenCalledWith(service['API_URL'], expect.any(Object));
+    expect(mockedFetch).toHaveBeenCalledWith(expect.stringContaining(service['API_URL']), expect.any(Object));
   });
 
   it('should return null if CREF not found in CONFEF API', async () => {
@@ -154,25 +170,43 @@ describe('CrefService', () => {
         { registro: 'RJ-987654', nome: 'Maria Souza', categoria: 'LICENCIADO', uf: 'RJ' },
       ],
     };
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } }); // For getToken
-    mockedAxios.get.mockResolvedValueOnce({ data: mockConfefResponse }); // For fetchFromConfef
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response); // For getToken
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockConfefResponse,
+    } as Response); // For fetchFromConfef
 
     const result = await service['fetchFromConfef']('SP-123456');
     expect(result).toBeNull();
   });
 
   it('should throw error if CONFEF API call fails', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } }); // For getToken
-    mockedAxios.get.mockRejectedValueOnce(new Error('Network error')); // For fetchFromConfef
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response); // For getToken
+    mockedFetch.mockRejectedValueOnce(new Error('Network error')); // For fetchFromConfef
 
     await expect(service['fetchFromConfef']('SP-123456')).rejects.toThrow('Falha na consulta ao CONFEF');
   });
 
   // Test validateCref (main method)
   it('should successfully validate a valid CREF', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } });
-    mockedAxios.get.mockResolvedValueOnce({
-      data: { 
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response);
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ 
         data: [{ 
           registro: 'SP-123456', 
           nome: 'João Silva', 
@@ -181,8 +215,8 @@ describe('CrefService', () => {
           naturezaTitulo: 'LICENCIADO/BACHAREL',
           NUM_REGISTRO: 'SP-123456'
         }] 
-      },
-    });
+      }),
+    } as Response);
 
     const result = await service.validateCref('SP-123456');
     expect(result.isValid).toBe(true);
@@ -197,12 +231,17 @@ describe('CrefService', () => {
 
   it('should throw BadRequestException if CREF not found in CONFEF', async () => {
     // Mock do getToken
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } });
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response);
     // Mock do fetchFromConfef - retorna dados vazios
-    mockedAxios.get.mockResolvedValueOnce({ 
-      data: { data: [] }, // No data found
-      status: 200 
-    });
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [] }), // No data found
+    } as Response);
 
     try {
       await service.validateCref('SP-123456');
@@ -214,9 +253,15 @@ describe('CrefService', () => {
   });
 
   it('should throw BadRequestException for invalid graduation type (only LICENCIADO)', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } });
-    mockedAxios.get.mockResolvedValueOnce({
-      data: { 
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response);
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ 
         data: [{ 
           registro: 'SP-123456', 
           nome: 'João Silva', 
@@ -225,9 +270,8 @@ describe('CrefService', () => {
           naturezaTitulo: 'LICENCIADO',
           NUM_REGISTRO: 'SP-123456'
         }] 
-      },
-      status: 200
-    });
+      }),
+    } as Response);
 
     try {
       await service.validateCref('SP-123456');
@@ -239,8 +283,12 @@ describe('CrefService', () => {
   });
 
   it('should throw BadRequestException if CONFEF API call fails', async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: { token: 'test-token' } });
-    mockedAxios.get.mockRejectedValueOnce(new Error('API is down'));
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'test-token' }),
+    } as Response);
+    mockedFetch.mockRejectedValueOnce(new Error('API is down'));
 
     await expect(service.validateCref('SP-123456')).rejects.toThrow(BadRequestException);
     await expect(service.validateCref('SP-123456')).rejects.toThrow('Erro na validação do CREF: Falha na consulta ao CONFEF');

@@ -1,6 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import { CrefValidationResult, ConfefData, CrefFormatted } from './interfaces/cref.interface';
 
 @Injectable()
@@ -11,7 +10,8 @@ export class CrefService {
   private readonly API_URL = `${this.CONFEF_BASE}/includes/api/registrados_pf/get_registrados.php`;
   
   private tokenCache: { token: string; expires: number } | null = null;
-  private readonly TOKEN_TTL = 5 * 60 * 1000; // 5 minutos
+  private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 minutos - aumentar cache
+  private readonly REQUEST_TIMEOUT = 8000; // 8 segundos
 
   constructor(private configService: ConfigService) {}
 
@@ -113,67 +113,65 @@ export class CrefService {
   }
 
   private async makeConfefRequest(token: string, crefNumber: string) {
-    return await axios.get(this.API_URL, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Origin': 'https://www.confef.org.br',
-        'Referer': `${this.CONFEF_BASE}/registrados/`,
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-      params: {
-        draw: '1',
-        start: '0',
-        length: '200',
-        'search[value]': crefNumber,
-        'search[regex]': 'false',
-      },
-      timeout: 12000
-    });
+    const url = new URL(this.API_URL);
+    url.searchParams.set('draw', '1');
+    url.searchParams.set('start', '0');
+    url.searchParams.set('length', '50');
+    url.searchParams.set('search[value]', crefNumber);
+    url.searchParams.set('search[regex]', 'false');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Origin': 'https://www.confef.org.br',
+          'Referer': `${this.CONFEF_BASE}/registrados/`,
+          'X-Requested-With': 'XMLHttpRequest',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok && response.status >= 500) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return { data, status: response.status };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
+      throw error;
+    }
   }
 
   private processConfefResponse(responseData: any, crefNumber: string): ConfefData | null {
     const data = responseData?.data || [];
     
-    // Debug: Log da resposta completa
-    console.log('🔍 [CREF] Resposta completa da API CONFEF:', JSON.stringify(responseData, null, 2));
-    console.log('🔍 [CREF] Dados extraídos:', JSON.stringify(data, null, 2));
-    console.log('🔍 [CREF] Número de registros encontrados:', data.length);
+    this.logger.log(`🔍 [CREF] Número de registros encontrados: ${data.length}`);
     
-    // Buscar correspondência
-    console.log('🔍 [CREF] Buscando correspondência para CREF:', crefNumber);
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      
+    // Buscar correspondência - otimizado para performance
+    for (const row of data) {
       // Mapear campos corretos da resposta da API
       const nome = row.Nome || row.nome || row['2'];
       const situacao = row.Categoria || row.categoria || row['4'];
       const uf = row.UF || row.uf || row['0'];
       const naturezaTitulo = row.NaturezaTitulo || row.naturezaTitulo || row['5'];
       const crefCompleto = row.NUM_REGISTRO || row.numeroRegistro || row['7'];
-      const registroOriginal = row.Registro || row.registro || row['1'];
       
-      console.log(`🔍 [CREF] Registro ${i + 1}:`, {
-        nome,
-        situacao,
-        uf,
-        naturezaTitulo,
-        crefCompleto,
-        registroOriginal
-      });
-      
-      // Verificar se o CREF completo corresponde
-      const crefMatch = crefCompleto === crefNumber;
-      
-      console.log(`🔍 [CREF] Match tests:`, {
-        crefMatch,
-        crefNumber,
-        crefCompleto,
-        naturezaTitulo
-      });
-      
-      if (crefMatch) {
+      // Verificar se o CREF completo corresponde - parar no primeiro match
+      if (crefCompleto === crefNumber) {
         this.logger.log(`✅ [CREF] Registro encontrado: ${nome}`);
         return {
           nome,
@@ -196,26 +194,39 @@ export class CrefService {
       return this.tokenCache.token;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
+
     try {
       this.logger.log(`🔑 [CREF] Obtendo novo token do CONFEF`);
       
-      const response = await axios.get(this.TOKEN_URL, {
-        timeout: 10000,
+      const response = await fetch(this.TOKEN_URL, {
+        method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
           'Accept': 'application/json, text/javascript, */*; q=0.01',
           'Origin': 'https://www.confef.org.br',
           'Referer': `${this.CONFEF_BASE}/registrados/`,
           'X-Requested-With': 'XMLHttpRequest',
-        }
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache',
+        },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok && response.status >= 500) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       let token = '';
       try {
-        const json = response.data;
+        const json = await response.json();
         token = json.token || json.jwt || '';
       } catch {
-        token = response.data?.toString().trim() || '';
+        const text = await response.text();
+        token = text?.trim() || '';
       }
 
       if (!token) {
@@ -231,6 +242,11 @@ export class CrefService {
       this.logger.log(`✅ [CREF] Token obtido com sucesso`);
       return token;
     } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        this.logger.error(`💥 [CREF] Timeout ao obter token`);
+        throw new Error('Timeout ao obter token de acesso');
+      }
       this.logger.error(`💥 [CREF] Erro ao obter token: ${error.message}`);
       throw new Error('Falha ao obter token de acesso');
     }
