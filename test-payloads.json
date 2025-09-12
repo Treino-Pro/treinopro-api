@@ -1,0 +1,26 @@
+{
+  "student_registration": {
+    "email": "joao@email.com",
+    "password": "123456",
+    "firstName": "João",
+    "lastName": "Silva",
+    "phone": "11999999999",
+    "birthDate": "1990-01-01",
+    "userType": "student"
+  },
+  "personal_registration": {
+    "email": "maria@email.com",
+    "password": "123456",
+    "firstName": "Maria",
+    "lastName": "Santos",
+    "phone": "11988888888",
+    "birthDate": "1985-03-15",
+    "userType": "personal",
+    "cref": "CREF: 0111212-9",
+    "specialties": ["Musculação", "Funcional"]
+  },
+  "login": {
+    "email": "joao@email.com",
+    "password": "123456"
+  }
+}
