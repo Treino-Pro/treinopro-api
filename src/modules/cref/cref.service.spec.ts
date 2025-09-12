@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { CrefService } from './cref.service';
+import { CrefCacheService } from './cref-cache.service';
 import { BadRequestException } from '@nestjs/common';
 // Mock fetch globally
 global.fetch = jest.fn();
@@ -22,6 +23,17 @@ describe('CrefService', () => {
               if (key === 'CREF_API_TOKEN') return 'mock-token';
               return null;
             }),
+          },
+        },
+        {
+          provide: CrefCacheService,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            delete: jest.fn(),
+            clear: jest.fn(),
+            healthCheck: jest.fn(),
+            getStats: jest.fn(),
           },
         },
       ],

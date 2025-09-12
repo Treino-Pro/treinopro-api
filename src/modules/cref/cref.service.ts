@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CrefValidationResult, ConfefData, CrefFormatted } from './interfaces/cref.interface';
+import { CrefCacheService } from './cref-cache.service';
 
 @Injectable()
 export class CrefService {
@@ -13,7 +14,10 @@ export class CrefService {
   private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 minutos - aumentar cache
   private readonly REQUEST_TIMEOUT = 8000; // 8 segundos
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private crefCacheService: CrefCacheService,
+  ) {}
 
   async validateCref(crefNumber: string): Promise<CrefValidationResult> {
     this.logger.log(`🔍 [CREF] Iniciando validação do CREF: ${crefNumber}`);
@@ -25,7 +29,15 @@ export class CrefService {
         throw new BadRequestException('Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)');
       }
 
-      // 2. Buscar no CONFEF
+      // 2. Verificar cache primeiro
+      this.logger.log(`🔍 [CACHE] Verificando cache para CREF: ${crefNumber}`);
+      const cachedResult = await this.crefCacheService.get(crefNumber);
+      if (cachedResult) {
+        this.logger.log(`🎯 [CACHE] CREF encontrado no cache: ${crefNumber}`);
+        return cachedResult;
+      }
+
+      // 3. Buscar no CONFEF
       this.logger.log(`🌐 [CREF] Buscando no CONFEF: ${crefNumber}`);
       const confefData = await this.fetchFromConfef(crefNumber);
       
@@ -34,7 +46,7 @@ export class CrefService {
         throw new BadRequestException('CREF não encontrado no CONFEF');
       }
 
-      // 3. Validar tipo de graduação (apenas BACHAREL)
+      // 4. Validar tipo de graduação (apenas BACHAREL)
       if (!this.isValidGraduationType(confefData.naturezaTitulo)) {
         this.logger.warn(`❌ [CREF] Graduação inválida: ${confefData.naturezaTitulo}`);
         throw new BadRequestException(`Personal Trainer deve ser BACHAREL. Tipo encontrado: ${confefData.naturezaTitulo}`);
@@ -42,7 +54,7 @@ export class CrefService {
 
       this.logger.log(`✅ [CREF] Validação bem-sucedida: ${crefNumber} - ${confefData.nome}`);
 
-      return {
+      const validationResult: CrefValidationResult = {
         isValid: true,
         crefNumber,
         nome: confefData.nome,
@@ -52,6 +64,12 @@ export class CrefService {
         validatedAt: new Date(),
         details: 'Validação bem-sucedida'
       };
+
+      // 5. Armazenar no cache
+      await this.crefCacheService.set(crefNumber, validationResult);
+      this.logger.log(`💾 [CACHE] CREF armazenado no cache: ${crefNumber}`);
+
+      return validationResult;
 
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na validação: ${error.message}`);

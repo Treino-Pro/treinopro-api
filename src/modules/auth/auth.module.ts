@@ -11,6 +11,7 @@ import { CrefModule } from '../cref/cref.module';
 
 @Module({
   imports: [
+    ConfigModule,
     DatabaseModule,
     CrefModule, // Importar o módulo CREF
     PassportModule,

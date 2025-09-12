@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, Matches } from 'class-validator';
+import { IsString, IsNotEmpty, Matches, IsOptional, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ValidateCrefDto {
@@ -12,6 +12,18 @@ export class ValidateCrefDto {
     message: 'Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)'
   })
   crefNumber: string;
+
+  @ApiProperty({ 
+    example: 'personal',
+    description: 'Tipo de usuário (personal ou student)',
+    required: false,
+    enum: ['personal', 'student']
+  })
+  @IsOptional()
+  @IsIn(['personal', 'student'], {
+    message: 'userType deve ser "personal" ou "student"'
+  })
+  userType?: 'personal' | 'student';
 }
 
 export class CrefValidationResponseDto {
@@ -25,7 +37,10 @@ export class CrefValidationResponseDto {
   nome?: string;
 
   @ApiProperty({ example: 'BACHAREL', required: false })
-  situacao?: string;
+  categoria?: string;
+
+  @ApiProperty({ example: 'LICENCIADO/BACHAREL', required: false })
+  naturezaTitulo?: string;
 
   @ApiProperty({ example: 'SP', required: false })
   uf?: string;
