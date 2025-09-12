@@ -91,7 +91,7 @@ describe('MockDatabase', () => {
       // Assert
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
-        id: expect.stringMatching(/^mock-\d+$/),
+        id: expect.stringMatching(/^mock-user-\d+$/),
         email: userData.email,
         firstName: userData.firstName,
         lastName: userData.lastName,
@@ -113,8 +113,8 @@ describe('MockDatabase', () => {
       const result2 = await mockDatabase.insert('users').values(userData2).returning();
 
       // Assert
-      expect(result1[0].id).toBe('mock-1');
-      expect(result2[0].id).toBe('mock-2');
+      expect(result1[0].id).toBe('mock-user-1');
+      expect(result2[0].id).toBe('mock-user-2');
     });
   });
 
