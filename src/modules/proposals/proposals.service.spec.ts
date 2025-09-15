@@ -1,17 +1,37 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProposalsService } from './proposals.service';
-import { DatabaseModule } from '../../database/database.module';
+
+// Mock do banco de dados
+const mockDb = {
+  query: {
+    proposals: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+    },
+  },
+  insert: jest.fn(),
+  update: jest.fn(),
+};
 
 describe('ProposalsService', () => {
   let service: ProposalsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [DatabaseModule],
-      providers: [ProposalsService],
+      providers: [
+        ProposalsService,
+        {
+          provide: 'DATABASE_CONNECTION',
+          useValue: mockDb,
+        },
+      ],
     }).compile();
 
     service = module.get<ProposalsService>(ProposalsService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   it('should be defined', () => {

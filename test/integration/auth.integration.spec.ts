@@ -51,7 +51,7 @@ describe('Auth Integration Tests', () => {
   });
 
   beforeEach(async () => {
-    // Limpar banco de dados antes de cada teste
+    // Limpar banco de dados antes de cada teste APENAS para este arquivo
     const db = moduleRef.get('DATABASE_CONNECTION');
     if (db) {
       try {
@@ -59,13 +59,14 @@ describe('Auth Integration Tests', () => {
         if (db.query && typeof db.query === 'function') {
           // Banco real - usar SQL direto
           await db.query('DELETE FROM users');
-          console.log('🧹 Banco de dados limpo para o teste');
+          console.log('🧹 [AUTH TEST] Banco de dados limpo para o teste');
         } else if (db.query && db.query.users && db.query.users.clear) {
           // Mock database - usar método clear
           db.query.users.clear();
+          console.log('🧹 [AUTH TEST] Mock database limpo para o teste');
         }
       } catch (error) {
-        console.log('⚠️ Erro ao limpar banco:', error.message);
+        console.log('⚠️ [AUTH TEST] Erro ao limpar banco:', error.message);
       }
     }
   });
@@ -239,8 +240,8 @@ describe('Auth Integration Tests', () => {
   });
 
   describe('POST /auth/login', () => {
-    beforeEach(async () => {
-      // Criar usuário para teste de login
+    it('deve fazer login com credenciais válidas após registro', async () => {
+      // Primeiro, registrar o usuário
       const userData = {
         email: 'login@test.com',
         password: '123456',
@@ -259,10 +260,10 @@ describe('Auth Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post('/auth/register')
-        .send(userData);
-    });
+        .send(userData)
+        .expect(201);
 
-    it('deve fazer login com credenciais válidas', async () => {
+      // Depois, fazer login
       const loginData = {
         email: 'login@test.com',
         password: '123456',
@@ -280,8 +281,31 @@ describe('Auth Integration Tests', () => {
     });
 
     it('deve retornar erro 401 para credenciais inválidas', async () => {
+      // Primeiro, registrar o usuário
+      const userData = {
+        email: 'login2@test.com',
+        password: '123456',
+        firstName: 'Login2',
+        lastName: 'Test',
+        birthDate: '1990-01-01',
+        userType: UserType.STUDENT,
+        documentType: DocumentType.RG,
+        documentNumber: '12345678902',
+        documentImageUrl: 'https://example.com/rg.jpg',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      };
+
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send(userData)
+        .expect(201);
+
+      // Depois, tentar login com senha errada
       const invalidLoginData = {
-        email: 'login@test.com',
+        email: 'login2@test.com',
         password: 'wrong-password',
       };
 

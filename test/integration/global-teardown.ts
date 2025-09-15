@@ -7,7 +7,7 @@ export default async function globalTeardown() {
   try {
     // Parar containers de teste
     try {
-      execSync('docker-compose -f docker-compose.test.yml down', { 
+      execSync('zsh -c "docker compose -f docker-compose.test.yml down"', { 
         stdio: 'pipe',
         cwd: process.cwd()
       });

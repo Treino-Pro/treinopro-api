@@ -10,13 +10,37 @@ export class JwtAuthGuard {
   ) {}
 
   canActivate(context: ExecutionContext) {
-    console.log('🔐 [JWT GUARD] ===== INÍCIO DA VERIFICAÇÃO =====');
     const request = context.switchToHttp().getRequest();
+    
+    // Lista de rotas que não precisam de autenticação
+    const publicRoutes = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/refresh',
+      '/health',
+      '/api/docs',
+      '/api/docs-json',
+    ];
+
+    // Verificar se a rota é pública
+    const isPublicRoute = publicRoutes.some(route => 
+      request.url.startsWith(route) || 
+      request.url === route ||
+      request.url.includes('/api/docs')
+    );
+
+    if (isPublicRoute) {
+      console.log('🔓 [JWT GUARD] Rota pública - permitindo acesso:', request.url);
+      return true;
+    }
+
+    console.log('🔐 [JWT GUARD] ===== INÍCIO DA VERIFICAÇÃO =====');
     const token = this.extractTokenFromHeader(request);
 
     console.log('🔐 [JWT GUARD] URL:', request.url);
     console.log('🔐 [JWT GUARD] Method:', request.method);
-    console.log('🔐 [JWT GUARD] Headers:', JSON.stringify(request.headers, null, 2));
     console.log('🔐 [JWT GUARD] Authorization header:', request.headers.authorization);
     console.log('🔐 [JWT GUARD] Token extraído:', token ? `Presente (${token.substring(0, 20)}...)` : 'AUSENTE');
 
@@ -39,7 +63,6 @@ export class JwtAuthGuard {
       return true;
     } catch (error) {
       console.log('❌ [JWT GUARD] Erro ao verificar token:', error.message);
-      console.log('❌ [JWT GUARD] Stack trace:', error.stack);
       console.log('🔐 [JWT GUARD] ===== VERIFICAÇÃO FALHOU =====');
       throw new UnauthorizedException('Token inválido');
     }

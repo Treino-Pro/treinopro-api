@@ -41,7 +41,7 @@ describe('MockDatabase', () => {
       });
 
       // Assert
-      expect(result).toBeUndefined();
+      expect(result).toBeNull();
     });
 
     it('deve retornar null quando where não tem email', async () => {

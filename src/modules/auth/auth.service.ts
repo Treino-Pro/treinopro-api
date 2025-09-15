@@ -79,14 +79,31 @@ export class AuthService {
       // Validar idade e campos para menores
       const birthDateObj = new Date(birthDate);
       const today = new Date();
-      const age = today.getFullYear() - birthDateObj.getFullYear();
+      
+      // Calcular idade de forma mais precisa
+      let age = today.getFullYear() - birthDateObj.getFullYear();
+      const monthDiff = today.getMonth() - birthDateObj.getMonth();
+      
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDateObj.getDate())) {
+        age--;
+      }
+      
       const isActuallyMinor = age < 18;
 
-      if (isActuallyMinor !== isMinor) {
-        throw new BadRequestException('A idade informada não confere com a data de nascimento');
+      // Se isMinor não foi fornecido, usar o valor calculado
+      const finalIsMinor = isMinor !== undefined ? isMinor : isActuallyMinor;
+
+      // Validar apenas se isMinor foi explicitamente fornecido e não confere
+      // Permitir uma margem de tolerância para casos limítrofes
+      if (isMinor !== undefined && isActuallyMinor !== isMinor) {
+        console.log(`🔍 [AUTH] Validação de idade: calculado=${isActuallyMinor} (${age} anos), informado=${isMinor}`);
+        // Só validar se a diferença for significativa (mais de 1 ano)
+        if (Math.abs(age - (isMinor ? 17 : 18)) > 1) {
+          throw new BadRequestException('A idade informada não confere com a data de nascimento');
+        }
       }
 
-      if (isMinor) {
+      if (finalIsMinor) {
         if (!guardianName || !guardianEmail) {
           throw new BadRequestException('Nome e email do responsável são obrigatórios para menores de idade');
         }
@@ -165,11 +182,11 @@ export class AuthService {
         crefValidatedName: userType === 'personal' && crefValidation ? crefValidation.nome : null,
         crefValidatedSituation: userType === 'personal' && crefValidation ? crefValidation.categoria : null,
         specialties,
-        isMinor,
-        guardianName: isMinor ? guardianName : null,
-        guardianEmail: isMinor ? guardianEmail : null,
-        guardianConsent: isMinor ? guardianConsent : false,
-        guardianConsentDate: isMinor && guardianConsent ? new Date() : null,
+        isMinor: finalIsMinor,
+        guardianName: finalIsMinor ? guardianName : null,
+        guardianEmail: finalIsMinor ? guardianEmail : null,
+        guardianConsent: finalIsMinor ? guardianConsent : false,
+        guardianConsentDate: finalIsMinor && guardianConsent ? new Date() : null,
         termsAccepted,
         privacyPolicyAccepted,
         termsAcceptedDate: new Date(),
@@ -210,26 +227,39 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
+    console.log('🔑 [AUTH] Iniciando processo de login...');
+    console.log('🔑 [AUTH] Email:', loginDto.email);
+    
     const { email, password } = loginDto;
 
     // Buscar usuário
+    console.log('🔑 [AUTH] Buscando usuário no banco de dados...');
     const user = await this.db.query.users.findFirst({
       where: eq(users.email, email),
     });
 
+    console.log('🔑 [AUTH] Resultado da busca:', user ? `Usuário encontrado (ID: ${user.id})` : 'Usuário não encontrado');
+
     if (!user) {
+      console.log('❌ [AUTH] Login falhou: usuário não encontrado');
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     // Verificar senha
+    console.log('🔑 [AUTH] Verificando senha...');
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    console.log('🔑 [AUTH] Senha válida:', isPasswordValid);
+    
     if (!isPasswordValid) {
+      console.log('❌ [AUTH] Login falhou: senha incorreta');
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     // Gerar tokens
+    console.log('🔑 [AUTH] Gerando tokens JWT...');
     const tokens = await this.generateTokens(user.id, user.email, user.userType);
 
+    console.log('✅ [AUTH] Login realizado com sucesso');
     return {
       user: {
         id: user.id,

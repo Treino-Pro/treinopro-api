@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CrefModule } from './modules/cref/cref.module';
 import { ProposalsModule } from './modules/proposals/proposals.module';
 import { LocationsModule } from './modules/locations/locations.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { SharedCacheModule } from './shared/cache.module';
 import { HealthController } from './common/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -35,6 +36,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     CrefModule,
     ProposalsModule,
     LocationsModule,
+    ChatModule,
   ],
   controllers: [HealthController],
   providers: [

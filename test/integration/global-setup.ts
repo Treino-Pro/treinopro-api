@@ -7,12 +7,12 @@ export default async function globalSetup() {
   try {
     // Verificar se o Docker está disponível
     try {
-      execSync('docker ps', { stdio: 'pipe' });
+      execSync('zsh -c "docker ps"', { stdio: 'pipe' });
       console.log('✅ Docker está disponível');
       
       // Tentar iniciar banco de teste se não estiver rodando
       try {
-        execSync('docker-compose -f docker-compose.test.yml up -d', { 
+        execSync('zsh -c "docker compose -f docker-compose.test.yml up -d"', { 
           stdio: 'pipe',
           cwd: process.cwd()
         });
@@ -25,7 +25,7 @@ export default async function globalSetup() {
       }
     } catch (dockerError) {
       console.log('⚠️ Docker não disponível, usando banco mock para testes');
-      console.log('💡 Para testes completos, instale o Docker e execute: docker-compose -f docker-compose.test.yml up -d');
+      console.log('💡 Para testes completos, instale o Docker e execute: docker compose -f docker-compose.test.yml up -d');
     }
     
     console.log('✅ Setup global concluído');
