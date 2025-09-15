@@ -28,9 +28,6 @@ export class NotificationJobsProcessor {
         case 'push':
           await this.notificationsService.sendPushNotification(userId, template, data);
           break;
-        case 'sms':
-          await this.notificationsService.sendSMS(userId, template, data);
-          break;
         default:
           throw new Error(`Tipo de notificação não suportado: ${type}`);
       }
@@ -73,7 +70,7 @@ export class NotificationJobsProcessor {
             profileUrl: `${process.env.FRONTEND_URL}/profile`,
           });
 
-          // Também enviar push notification se disponível
+          // Também enviar push notification
           await this.notificationsService.sendPushNotification(user.id, 'profile-reminder', {
             title: 'Complete seu perfil',
             body: 'Finalize seu perfil para receber mais propostas!',

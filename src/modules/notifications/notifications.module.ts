@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
 import { EmailService } from './services/email.service';
+import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
-import { SMSService } from './services/sms.service';
 import { DatabaseModule } from '../../database/database.module';
 
 @Module({
@@ -12,14 +12,14 @@ import { DatabaseModule } from '../../database/database.module';
   providers: [
     NotificationsService,
     EmailService,
+    InAppNotificationService,
     PushNotificationService,
-    SMSService,
   ],
   exports: [
     NotificationsService,
     EmailService,
+    InAppNotificationService,
     PushNotificationService,
-    SMSService,
   ],
 })
 export class NotificationsModule {}

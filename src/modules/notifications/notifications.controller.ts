@@ -2,6 +2,8 @@ import {
   Controller, 
   Post, 
   Get, 
+  Put,
+  Delete,
   Body, 
   Request, 
   UseGuards,
@@ -9,7 +11,8 @@ import {
   HttpStatus,
   ValidationPipe,
   Param,
-  ParseUUIDPipe
+  ParseUUIDPipe,
+  Query
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -45,6 +48,22 @@ export class NotificationsController {
     return { message: 'Email enviado com sucesso' };
   }
 
+  @Post('send/in-app')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Criar notificação in-app',
+    description: 'Cria uma notificação in-app para um usuário específico'
+  })
+  @ApiResponse({ status: 200, description: 'Notificação in-app criada com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async sendInAppNotification(
+    @Body() body: { userId: string; template: string; data: Record<string, any> },
+    @Request() req: any,
+  ): Promise<{ message: string }> {
+    await this.notificationsService.sendInAppNotification(body.userId, body.template, body.data);
+    return { message: 'Notificação in-app criada com sucesso' };
+  }
+
   @Post('send/push')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -61,22 +80,6 @@ export class NotificationsController {
     return { message: 'Push notification enviado com sucesso' };
   }
 
-  @Post('send/sms')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
-    summary: 'Enviar SMS',
-    description: 'Envia um SMS baseado em template para um usuário específico'
-  })
-  @ApiResponse({ status: 200, description: 'SMS enviado com sucesso' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos' })
-  async sendSMS(
-    @Body() body: { userId: string; template: string; data: Record<string, any> },
-    @Request() req: any,
-  ): Promise<{ message: string }> {
-    await this.notificationsService.sendSMS(body.userId, body.template, body.data);
-    return { message: 'SMS enviado com sucesso' };
-  }
-
   @Post('send/multi-channel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -89,7 +92,7 @@ export class NotificationsController {
       userId: string; 
       template: string; 
       data: Record<string, any>;
-      channels?: ('email' | 'push' | 'sms')[];
+      channels?: ('email' | 'in-app' | 'push')[];
     },
     @Request() req: any,
   ): Promise<{ message: string }> {
@@ -193,6 +196,84 @@ export class NotificationsController {
     return { message: 'Notificação de reembolso enviada' };
   }
 
+  // ===== GERENCIAMENTO DE NOTIFICAÇÕES IN-APP =====
+
+  @Get('in-app')
+  @ApiOperation({ 
+    summary: 'Obter notificações in-app do usuário',
+    description: 'Retorna as notificações in-app do usuário autenticado'
+  })
+  @ApiResponse({ status: 200, description: 'Notificações obtidas com sucesso' })
+  async getUserNotifications(
+    @Request() req: any,
+    @Query('limit') limit?: number,
+  ): Promise<any[]> {
+    return this.notificationsService.getUserNotifications(req.user.sub, limit);
+  }
+
+  @Get('in-app/unread')
+  @ApiOperation({ 
+    summary: 'Obter notificações não lidas',
+    description: 'Retorna apenas as notificações não lidas do usuário autenticado'
+  })
+  @ApiResponse({ status: 200, description: 'Notificações não lidas obtidas com sucesso' })
+  async getUnreadNotifications(@Request() req: any): Promise<any[]> {
+    return this.notificationsService.getUnreadNotifications(req.user.sub);
+  }
+
+  @Get('in-app/unread/count')
+  @ApiOperation({ 
+    summary: 'Obter contagem de notificações não lidas',
+    description: 'Retorna o número de notificações não lidas do usuário'
+  })
+  @ApiResponse({ status: 200, description: 'Contagem obtida com sucesso' })
+  async getUnreadCount(@Request() req: any): Promise<{ count: number }> {
+    const count = await this.notificationsService.getUnreadCount(req.user.sub);
+    return { count };
+  }
+
+  @Put('in-app/:id/read')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Marcar notificação como lida',
+    description: 'Marca uma notificação específica como lida'
+  })
+  @ApiResponse({ status: 200, description: 'Notificação marcada como lida' })
+  async markNotificationAsRead(
+    @Param('id') notificationId: string,
+    @Request() req: any,
+  ): Promise<{ message: string }> {
+    await this.notificationsService.markNotificationAsRead(notificationId, req.user.sub);
+    return { message: 'Notificação marcada como lida' };
+  }
+
+  @Put('in-app/read-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Marcar todas as notificações como lidas',
+    description: 'Marca todas as notificações do usuário como lidas'
+  })
+  @ApiResponse({ status: 200, description: 'Todas as notificações marcadas como lidas' })
+  async markAllNotificationsAsRead(@Request() req: any): Promise<{ message: string }> {
+    await this.notificationsService.markAllNotificationsAsRead(req.user.sub);
+    return { message: 'Todas as notificações marcadas como lidas' };
+  }
+
+  @Delete('in-app/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Deletar notificação',
+    description: 'Remove uma notificação específica'
+  })
+  @ApiResponse({ status: 200, description: 'Notificação deletada com sucesso' })
+  async deleteNotification(
+    @Param('id') notificationId: string,
+    @Request() req: any,
+  ): Promise<{ message: string }> {
+    await this.notificationsService.deleteNotification(notificationId, req.user.sub);
+    return { message: 'Notificação deletada com sucesso' };
+  }
+
   // ===== PREFERÊNCIAS DO USUÁRIO =====
 
   @Get('preferences')
@@ -260,6 +341,20 @@ export class NotificationsController {
     return { message: 'Email de teste enviado' };
   }
 
+  @Post('test/in-app')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Testar notificação in-app',
+    description: 'Cria uma notificação in-app de teste para o usuário autenticado'
+  })
+  async testInAppNotification(@Request() req: any): Promise<{ message: string }> {
+    await this.notificationsService.sendInAppNotification(req.user.sub, 'profile-reminder', {
+      title: 'Teste de Notificação',
+      message: 'Esta é uma notificação de teste!',
+    });
+    return { message: 'Notificação in-app de teste criada' };
+  }
+
   @Post('test/push')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -272,19 +367,5 @@ export class NotificationsController {
       body: 'Esta é uma notificação de teste!',
     });
     return { message: 'Push notification de teste enviada' };
-  }
-
-  @Post('test/sms')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
-    summary: 'Testar SMS',
-    description: 'Envia um SMS de teste para o usuário autenticado'
-  })
-  async testSMS(@Request() req: any): Promise<{ message: string }> {
-    await this.notificationsService.sendSMS(req.user.sub, 'verification-code', {
-      firstName: 'Teste',
-      code: '123456',
-    });
-    return { message: 'SMS de teste enviado' };
   }
 }

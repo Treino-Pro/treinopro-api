@@ -1,13 +1,13 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EmailService } from './services/email.service';
+import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
-import { SMSService } from './services/sms.service';
 import { users } from '../../database/schema';
 import { eq } from 'drizzle-orm';
 
 export interface NotificationData {
   userId: string;
-  type: 'email' | 'push' | 'sms';
+  type: 'email' | 'in-app' | 'push';
   template: string;
   data: Record<string, any>;
   priority?: 'low' | 'normal' | 'high' | 'critical';
@@ -20,8 +20,8 @@ export class NotificationsService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly emailService: EmailService,
+    private readonly inAppService: InAppNotificationService,
     private readonly pushService: PushNotificationService,
-    private readonly smsService: SMSService,
   ) {}
 
   // ===== MÉTODOS PRINCIPAIS =====
@@ -50,6 +50,34 @@ export class NotificationsService {
     } catch (error) {
       this.logger.error(`❌ Erro ao enviar email para usuário ${userId}:`, error);
       await this.saveNotificationRecord(userId, 'email', template, data, 'failed', error.message);
+      throw error;
+    }
+  }
+
+  async sendInAppNotification(userId: string, template: string, data: Record<string, any>): Promise<void> {
+    try {
+      // Buscar dados do usuário
+      const user = await this.getUserById(userId);
+      if (!user) {
+        throw new Error(`Usuário não encontrado: ${userId}`);
+      }
+
+      // Criar notificação in-app baseada no template
+      await this.createInAppNotificationFromTemplate(userId, template, {
+        ...data,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        userType: user.userType,
+      });
+
+      // Salvar registro da notificação
+      await this.saveNotificationRecord(userId, 'in-app', template, data, 'sent');
+
+      this.logger.log(`🔔 Notificação in-app criada para usuário ${userId} (${template})`);
+
+    } catch (error) {
+      this.logger.error(`❌ Erro ao criar notificação in-app para usuário ${userId}:`, error);
+      await this.saveNotificationRecord(userId, 'in-app', template, data, 'failed', error.message);
       throw error;
     }
   }
@@ -88,55 +116,22 @@ export class NotificationsService {
     }
   }
 
-  async sendSMS(userId: string, template: string, data: Record<string, any>): Promise<void> {
-    try {
-      // Buscar dados do usuário
-      const user = await this.getUserById(userId);
-      if (!user) {
-        throw new Error(`Usuário não encontrado: ${userId}`);
-      }
-
-      if (!user.phone) {
-        this.logger.warn(`⚠️ Usuário ${userId} não possui número de telefone`);
-        await this.saveNotificationRecord(userId, 'sms', template, data, 'skipped', 'No phone number');
-        return;
-      }
-
-      // Enviar SMS
-      await this.smsService.sendTemplateSMS(user.phone, template, {
-        ...data,
-        firstName: user.firstName,
-        userType: user.userType,
-      });
-
-      // Salvar registro da notificação
-      await this.saveNotificationRecord(userId, 'sms', template, data, 'sent');
-
-      this.logger.log(`📱 SMS enviado com sucesso para ${user.phone} (${template})`);
-
-    } catch (error) {
-      this.logger.error(`❌ Erro ao enviar SMS para usuário ${userId}:`, error);
-      await this.saveNotificationRecord(userId, 'sms', template, data, 'failed', error.message);
-      throw error;
-    }
-  }
-
   // ===== MÉTODOS DE CONVENIÊNCIA =====
 
   async sendMultiChannelNotification(
     userId: string,
     template: string,
     data: Record<string, any>,
-    channels: ('email' | 'push' | 'sms')[] = ['push', 'email']
+    channels: ('email' | 'in-app' | 'push')[] = ['in-app', 'push', 'email']
   ): Promise<void> {
     const promises = channels.map(channel => {
       switch (channel) {
         case 'email':
           return this.sendEmail(userId, template, data);
+        case 'in-app':
+          return this.sendInAppNotification(userId, template, data);
         case 'push':
           return this.sendPushNotification(userId, template, data);
-        case 'sms':
-          return this.sendSMS(userId, template, data);
       }
     });
 
@@ -150,15 +145,75 @@ export class NotificationsService {
       switch (type) {
         case 'email':
           return this.sendEmail(userId, template, data);
+        case 'in-app':
+          return this.sendInAppNotification(userId, template, data);
         case 'push':
           return this.sendPushNotification(userId, template, data);
-        case 'sms':
-          return this.sendSMS(userId, template, data);
       }
     });
 
     await Promise.allSettled(promises);
     this.logger.log(`📬 ${notifications.length} notificações em lote processadas`);
+  }
+
+  // ===== CRIAÇÃO DE NOTIFICAÇÕES IN-APP BASEADAS EM TEMPLATES =====
+
+  private async createInAppNotificationFromTemplate(userId: string, template: string, data: Record<string, any>): Promise<void> {
+    switch (template) {
+      case 'proposal-match':
+        await this.inAppService.createProposalMatchNotification(userId, data);
+        break;
+      
+      case 'payment-confirmation':
+        await this.inAppService.createPaymentConfirmationNotification(userId, data);
+        break;
+      
+      case 'class-reminder':
+        await this.inAppService.createClassReminderNotification(userId, data);
+        break;
+      
+      case 'class-started':
+        await this.inAppService.createClassStartedNotification(userId, data);
+        break;
+      
+      case 'refund-processed':
+        await this.inAppService.createRefundNotification(userId, data);
+        break;
+      
+      case 'rating-request':
+        await this.inAppService.createRatingRequestNotification(userId, data);
+        break;
+      
+      case 'profile-reminder':
+        await this.inAppService.createProfileReminderNotification(userId);
+        break;
+
+      case 'payment-reminder':
+        await this.inAppService.createPaymentReminderNotification(userId, data);
+        break;
+
+      case 'class-cancellation':
+        await this.inAppService.createClassCancellationNotification(userId, data);
+        break;
+
+      case 'new-message':
+        await this.inAppService.createNewMessageNotification(userId, data);
+        break;
+
+      case 'dispute-update':
+        await this.inAppService.createDisputeUpdateNotification(userId, data);
+        break;
+      
+      default:
+        // Template genérico
+        await this.inAppService.createNotification(
+          userId,
+          'TreinoPro',
+          data.message || 'Você tem uma nova notificação',
+          'info',
+          data
+        );
+    }
   }
 
   // ===== TEMPLATES ESPECÍFICOS =====
@@ -172,7 +227,7 @@ export class NotificationsService {
       time: proposalData.trainingTime,
       price: proposalData.price,
       modality: proposalData.modalityName,
-    }, ['push', 'email']);
+    }, ['in-app', 'push', 'email']);
   }
 
   async sendPaymentConfirmationNotification(userId: string, paymentData: any): Promise<void> {
@@ -182,7 +237,7 @@ export class NotificationsService {
       method: paymentData.method,
       classDate: paymentData.classDate,
       location: paymentData.location,
-    }, ['push', 'email']);
+    }, ['in-app', 'push', 'email']);
   }
 
   async sendClassReminderNotification(userId: string, classData: any): Promise<void> {
@@ -192,7 +247,7 @@ export class NotificationsService {
       time: classData.time,
       location: classData.location,
       partnerName: classData.partnerName, // Nome do aluno ou personal
-    }, ['push']);
+    }, ['in-app', 'push']);
   }
 
   async sendClassCancellationNotification(userId: string, classData: any, reason: string): Promise<void> {
@@ -204,7 +259,7 @@ export class NotificationsService {
       partnerName: classData.partnerName,
       reason: reason,
       refundInfo: classData.refundInfo,
-    }, ['push', 'email']);
+    }, ['in-app', 'push', 'email']);
   }
 
   async sendRefundNotification(userId: string, refundData: any): Promise<void> {
@@ -213,7 +268,7 @@ export class NotificationsService {
       amount: refundData.amount,
       reason: refundData.reason,
       estimatedDays: refundData.estimatedDays || 5,
-    }, ['push', 'email']);
+    }, ['in-app', 'push', 'email']);
   }
 
   // ===== MÉTODOS AUXILIARES =====
@@ -230,8 +285,34 @@ export class NotificationsService {
 
   private async getUserPushTokens(userId: string): Promise<string[]> {
     // TODO: Implementar tabela de push tokens
-    // Por enquanto, retornar array vazio
+    // Por enquanto, retornar array vazio para desenvolvimento
     return [];
+  }
+
+  // ===== MÉTODOS ESPECÍFICOS PARA IN-APP =====
+
+  async getUserNotifications(userId: string, limit: number = 50): Promise<any[]> {
+    return this.inAppService.getUserNotifications(userId, limit);
+  }
+
+  async getUnreadNotifications(userId: string): Promise<any[]> {
+    return this.inAppService.getUnreadNotifications(userId);
+  }
+
+  async getUnreadCount(userId: string): Promise<number> {
+    return this.inAppService.getUnreadCount(userId);
+  }
+
+  async markNotificationAsRead(notificationId: string, userId: string): Promise<void> {
+    return this.inAppService.markAsRead(notificationId, userId);
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    return this.inAppService.markAllAsRead(userId);
+  }
+
+  async deleteNotification(notificationId: string, userId: string): Promise<void> {
+    return this.inAppService.deleteNotification(notificationId, userId);
   }
 
   private async saveNotificationRecord(

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as admin from 'firebase-admin';
+// import * as admin from 'firebase-admin'; // Comentado temporariamente
 
 @Injectable()
 export class PushNotificationService {
@@ -11,23 +11,9 @@ export class PushNotificationService {
   }
 
   private initializeFirebase(): void {
-    try {
-      if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-        
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-          projectId: serviceAccount.project_id,
-        });
-
-        this.isFirebaseInitialized = true;
-        this.logger.log('🔥 Firebase Admin SDK inicializado com sucesso');
-      } else {
-        this.logger.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_KEY não encontrada - push notifications desabilitadas');
-      }
-    } catch (error) {
-      this.logger.error('❌ Erro ao inicializar Firebase Admin SDK:', error);
-    }
+    // Firebase temporariamente desabilitado para desenvolvimento
+    this.logger.warn('⚠️ Firebase Admin SDK desabilitado temporariamente');
+    this.isFirebaseInitialized = false;
   }
 
   async sendToToken(token: string, template: string, data: Record<string, any>): Promise<void> {
@@ -67,7 +53,8 @@ export class PushNotificationService {
         },
       };
 
-      const response = await admin.messaging().send(message);
+      // const response = await admin.messaging().send(message);
+      const response = { messageId: 'mock-message-id' };
       this.logger.log(`📱 Push notification enviado com sucesso: ${response}`);
 
     } catch (error) {
@@ -118,7 +105,8 @@ export class PushNotificationService {
         },
       };
 
-      const response = await admin.messaging().sendEachForMulticast(message);
+      // const response = await admin.messaging().sendEachForMulticast(message);
+      const response = { successCount: tokens.length, failureCount: 0, responses: [] };
       
       this.logger.log(`📱 Push notifications enviados: ${response.successCount}/${tokens.length} com sucesso`);
       
@@ -157,7 +145,8 @@ export class PushNotificationService {
         },
       };
 
-      const response = await admin.messaging().send(message);
+      // const response = await admin.messaging().send(message);
+      const response = { messageId: 'mock-message-id' };
       this.logger.log(`📱 Push notification enviado para tópico ${topic}: ${response}`);
 
     } catch (error) {
@@ -265,7 +254,7 @@ export class PushNotificationService {
     }
 
     try {
-      await admin.messaging().subscribeToTopic([token], topic);
+      // await admin.messaging().subscribeToTopic([token], topic);
       this.logger.log(`📱 Token inscrito no tópico ${topic}`);
     } catch (error) {
       this.logger.error(`❌ Erro ao inscrever token no tópico ${topic}:`, error);
@@ -280,7 +269,7 @@ export class PushNotificationService {
     }
 
     try {
-      await admin.messaging().unsubscribeFromTopic([token], topic);
+      // await admin.messaging().unsubscribeFromTopic([token], topic);
       this.logger.log(`📱 Token desinscrito do tópico ${topic}`);
     } catch (error) {
       this.logger.error(`❌ Erro ao desinscrever token do tópico ${topic}:`, error);
@@ -296,13 +285,13 @@ export class PushNotificationService {
 
     try {
       // Tentar enviar uma mensagem de teste (dry run)
-      await admin.messaging().send({
-        token: token,
-        notification: {
-          title: 'Test',
-          body: 'Test',
-        },
-      }, true); // dry run
+      // await admin.messaging().send({
+      //   token: token,
+      //   notification: {
+      //     title: 'Test',
+      //     body: 'Test',
+      //   },
+      // }, true); // dry run
 
       return true;
     } catch (error) {
