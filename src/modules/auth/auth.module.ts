@@ -5,7 +5,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { DatabaseModule } from '../../database/database.module';
 import { CrefModule } from '../cref/cref.module';
 
@@ -21,19 +20,15 @@ import { CrefModule } from '../cref/cref.module';
         const secret = configService.get('JWT_SECRET') || 'fallback-secret';
         const expiresIn = configService.get('JWT_EXPIRES_IN') || '24h';
         
-        console.log('🔧 [JWT] Configuração:', { 
+        console.log('🔧 [AUTH JWT] Configuração:', { 
           secret: secret ? 'definido' : 'undefined', 
-          expiresIn: expiresIn || '24h (fallback)',
-          rawExpiresIn: configService.get('JWT_EXPIRES_IN')
+          expiresIn: expiresIn || '24h (fallback)'
         });
-        
-        // Garantir que expiresIn seja sempre uma string válida
-        const validExpiresIn = typeof expiresIn === 'string' && expiresIn.length > 0 ? expiresIn : '24h';
         
         return {
           secret,
           signOptions: {
-            expiresIn: validExpiresIn,
+            expiresIn: typeof expiresIn === 'string' && expiresIn.length > 0 ? expiresIn : '24h',
           },
         };
       },
@@ -41,7 +36,7 @@ import { CrefModule } from '../cref/cref.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard],
-  exports: [AuthService, JwtAuthGuard],
+  providers: [AuthService, JwtStrategy],
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

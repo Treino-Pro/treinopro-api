@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './common/config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CrefModule } from './modules/cref/cref.module';
+import { ProposalsModule } from './modules/proposals/proposals.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { SharedCacheModule } from './shared/cache.module';
 import { HealthController } from './common/health/health.controller';
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -29,8 +33,12 @@ import { HealthController } from './common/health/health.controller';
     }),
     AuthModule,
     CrefModule,
+    ProposalsModule,
+    LocationsModule,
   ],
   controllers: [HealthController],
-  providers: [],
+  providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+  ],
 })
 export class AppModule {}

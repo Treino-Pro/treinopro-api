@@ -332,8 +332,11 @@ export class AuthService {
   private async generateTokens(userId: string, email: string, userType: string) {
     const payload = { sub: userId, email, userType };
 
-    // Usar as configurações padrão do JWT module para access token
-    const accessToken = await this.jwtService.signAsync(payload);
+    // Usar explicitamente o secret do .env para access token
+    const accessToken = await this.jwtService.signAsync(payload, {
+      secret: this.configService.get('JWT_SECRET'),
+      expiresIn: this.configService.get('JWT_EXPIRES_IN') || '24h',
+    });
     
     // Para refresh token, usar configurações específicas
     const refreshToken = await this.jwtService.signAsync(payload, {

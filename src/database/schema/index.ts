@@ -6,6 +6,7 @@ export * from './chat';
 export * from './health';
 export * from './evaluations';
 export * from './financial';
+export * from './locations';
 
 // Export all enums
 export * from './users';
