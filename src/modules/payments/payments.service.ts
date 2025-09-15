@@ -1,0 +1,943 @@
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
+import { eq, and, or, desc, count, sum, sql } from 'drizzle-orm';
+import { payments, paymentDisputes, paymentTransactions, userWallets, users, classes } from '../../database/schema';
+import { MercadoPagoService, CreatePreferenceData } from './mercadopago.service';
+import { 
+  CreatePaymentDto,
+  CreatePaymentPreferenceDto,
+  UpdatePaymentDto,
+  CreateDisputeDto,
+  SubmitEvidenceDto,
+  ResolveDisputeDto,
+  UpdateWalletDto,
+  WithdrawRequestDto,
+  PaymentResponseDto,
+  DisputeResponseDto,
+  WalletResponseDto,
+  TransactionResponseDto,
+  PaymentStatsDto,
+  WalletStatsDto,
+  PaymentFiltersDto,
+  DisputeFiltersDto,
+  PaymentStatus,
+  PaymentType,
+  DisputeStatus,
+  MercadoPagoWebhookDto,
+  MercadoPagoSplitDto
+} from './dto/payments.dto';
+
+@Injectable()
+export class PaymentsService {
+  constructor(
+    @Inject('DATABASE_CONNECTION') private db: any,
+    private readonly mercadoPagoService: MercadoPagoService,
+  ) {}
+
+  // Criar preferência de pagamento no Mercado Pago
+  async createPaymentPreference(createDto: CreatePaymentPreferenceDto, userId: string): Promise<any> {
+    // Verificar configuração do Mercado Pago
+    if (!this.mercadoPagoService.isConfigured()) {
+      throw new BadRequestException('Mercado Pago não está configurado corretamente');
+    }
+
+    // Verificar se a aula existe e o usuário é o aluno
+    const classData = await this.db.query.classes.findFirst({
+      where: eq(classes.id, createDto.classId),
+      with: {
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!classData) {
+      throw new NotFoundException('Aula não encontrada');
+    }
+
+    if (classData.studentId !== userId) {
+      throw new ForbiddenException('Apenas o aluno pode criar pagamento para esta aula');
+    }
+
+    // Verificar se já existe pagamento para esta aula
+    const existingPayment = await this.db.query.payments.findFirst({
+      where: and(
+        eq(payments.classId, createDto.classId),
+        eq(payments.studentId, userId)
+      ),
+    });
+
+    if (existingPayment) {
+      throw new BadRequestException('Já existe um pagamento para esta aula');
+    }
+
+    // Calcular valores usando variável de ambiente
+    const platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
+    const platformFee = createDto.totalAmount * platformFeePercentage;
+    const personalAmount = createDto.totalAmount - platformFee;
+
+    // Criar registro de pagamento no banco
+    const [newPayment] = await this.db
+      .insert(payments)
+      .values({
+        classId: createDto.classId,
+        studentId: userId,
+        personalId: classData.personalId,
+        totalAmount: createDto.totalAmount.toString(),
+        platformFee: platformFee.toString(),
+        personalAmount: personalAmount.toString(),
+        status: PaymentStatus.PENDING,
+        type: PaymentType.CLASS_PAYMENT,
+      })
+      .returning();
+
+    // Preparar dados para o Mercado Pago
+    const preferenceData: CreatePreferenceData = {
+      classId: createDto.classId,
+      title: `${classData.location} - ${classData.date.toLocaleDateString()}`,
+      totalAmount: createDto.totalAmount,
+      platformFee,
+      personalAmount,
+      studentEmail: classData.student.email,
+      personalEmail: classData.personal.email,
+      externalReference: newPayment.id,
+    };
+
+    // Criar preferência no Mercado Pago
+    const mpPreference = await this.mercadoPagoService.createPreference(preferenceData);
+
+    // Atualizar registro com ID da preferência
+    await this.db
+      .update(payments)
+      .set({
+        mpPreferenceId: mpPreference.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, newPayment.id));
+
+    return {
+      preferenceId: mpPreference.id,
+      initPoint: mpPreference.initPoint,
+      sandboxInitPoint: mpPreference.sandboxInitPoint,
+      paymentId: newPayment.id,
+      totalAmount: createDto.totalAmount,
+      platformFee,
+      personalAmount,
+    };
+  }
+
+  // Processar webhook do Mercado Pago
+  async processWebhook(webhookDto: MercadoPagoWebhookDto, headers?: any): Promise<void> {
+    const { id, type, action, data } = webhookDto;
+
+    // Validar webhook
+    if (headers && !this.mercadoPagoService.validateWebhook(webhookDto, headers)) {
+      throw new BadRequestException('Webhook inválido');
+    }
+
+    if (type === 'payment') {
+      // Buscar informações do pagamento no Mercado Pago
+      const mpPaymentData = await this.mercadoPagoService.getPayment(id);
+      
+      if (!mpPaymentData || !mpPaymentData.external_reference) {
+        throw new NotFoundException('Pagamento não encontrado no Mercado Pago');
+      }
+
+      // Buscar pagamento no banco usando external_reference (nosso ID)
+      const payment = await this.db.query.payments.findFirst({
+        where: eq(payments.id, mpPaymentData.external_reference),
+        with: {
+          class: true,
+          student: true,
+          personal: true,
+        },
+      });
+
+      if (!payment) {
+        throw new NotFoundException('Pagamento não encontrado no banco de dados');
+      }
+
+      // Mapear status do MP para nosso sistema
+      const newStatus = this.mercadoPagoService.mapPaymentStatus(
+        mpPaymentData.status,
+        mpPaymentData.status_detail
+      );
+
+      // Atualizar status do pagamento
+      await this.updatePaymentStatus(payment.id, newStatus as PaymentStatus, id, mpPaymentData);
+
+      // Log para auditoria
+      console.log(`Webhook processado: Payment ${id} -> Status ${newStatus}`);
+    }
+  }
+
+  // Atualizar status do pagamento
+  async updatePaymentStatus(paymentId: string, status: PaymentStatus, mpPaymentId?: string, mpData?: any): Promise<void> {
+    const updateData: any = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    if (mpPaymentId) {
+      updateData.mpPaymentId = mpPaymentId;
+    }
+
+    // Salvar dados completos do MP para auditoria
+    if (mpData) {
+      updateData.splitData = {
+        mpPaymentData: mpData,
+        processedAt: new Date(),
+      };
+    }
+
+    if (status === PaymentStatus.AUTHORIZED) {
+      updateData.authorizedAt = new Date();
+      console.log(`💰 Pagamento ${paymentId} AUTORIZADO (em custódia)`);
+    } else if (status === PaymentStatus.CAPTURED) {
+      updateData.capturedAt = new Date();
+      console.log(`✅ Pagamento ${paymentId} CAPTURADO - aplicando split`);
+      // Aplicar split e liberar valores
+      await this.capturePayment(paymentId);
+    } else if (status === PaymentStatus.REFUNDED) {
+      updateData.refundedAt = new Date();
+      console.log(`🔄 Pagamento ${paymentId} REEMBOLSADO`);
+    } else if (status === PaymentStatus.CANCELLED) {
+      console.log(`❌ Pagamento ${paymentId} CANCELADO`);
+    }
+
+    await this.db
+      .update(payments)
+      .set(updateData)
+      .where(eq(payments.id, paymentId));
+  }
+
+  // Capturar pagamento e aplicar split
+  async capturePayment(paymentId: string): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.id, paymentId),
+      with: {
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    // Aplicar split do Mercado Pago
+    const splitData: MercadoPagoSplitDto = {
+      marketplace: process.env.MP_MARKETPLACE_ID || 'marketplace_id',
+      marketplace_fee: payment.platformFee,
+      application_fee: '0',
+      amount: payment.personalAmount,
+    };
+
+    // Atualizar split data
+    await this.db
+      .update(payments)
+      .set({
+        splitData,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, paymentId));
+
+    // Atualizar carteiras
+    await this.updateWallets(payment);
+  }
+
+  // Atualizar carteiras dos usuários
+  async updateWallets(payment: any): Promise<void> {
+    // Buscar carteira atual do personal
+    const personalWallet = await this.getUserWallet(payment.personalId);
+    
+    // Atualizar carteira do personal (somar ganhos)
+    await this.updateWallet(payment.personalId, {
+      availableBalance: personalWallet.availableBalance + parseFloat(payment.personalAmount),
+      totalEarned: personalWallet.totalEarned + parseFloat(payment.personalAmount),
+    });
+
+    console.log(`💳 Carteira do personal ${payment.personalId} atualizada: +R$ ${payment.personalAmount}`);
+
+    // Criar transações
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.personalId,
+      type: PaymentType.PERSONAL_EARNINGS,
+      amount: parseFloat(payment.personalAmount),
+      description: `Ganhos da aula ${payment.classId}`,
+      status: PaymentStatus.CAPTURED,
+    });
+
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.studentId,
+      type: PaymentType.CLASS_PAYMENT,
+      amount: -parseFloat(payment.totalAmount),
+      description: `Pagamento da aula ${payment.classId}`,
+      status: PaymentStatus.CAPTURED,
+    });
+  }
+
+  // Criar disputa
+  async createDispute(createDto: CreateDisputeDto, userId: string): Promise<DisputeResponseDto> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.id, createDto.paymentId),
+      with: {
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    // Verificar se o usuário pode criar disputa
+    if (payment.studentId !== userId && payment.personalId !== userId) {
+      throw new ForbiddenException('Usuário não autorizado a criar disputa para este pagamento');
+    }
+
+    // Verificar se já existe disputa ativa
+    const existingDispute = await this.db.query.paymentDisputes.findFirst({
+      where: and(
+        eq(paymentDisputes.paymentId, createDto.paymentId),
+        eq(paymentDisputes.status, DisputeStatus.PENDING)
+      ),
+    });
+
+    if (existingDispute) {
+      throw new BadRequestException('Já existe uma disputa ativa para este pagamento');
+    }
+
+    // Calcular expiração (48h)
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 48);
+
+    // Buscar contadores de disputas
+    const studentDisputes = await this.db
+      .select({ count: count() })
+      .from(paymentDisputes)
+      .where(and(
+        eq(paymentDisputes.reportedBy, payment.studentId),
+        eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_PERSONAL)
+      ));
+
+    const personalDisputes = await this.db
+      .select({ count: count() })
+      .from(paymentDisputes)
+      .where(and(
+        eq(paymentDisputes.reportedBy, payment.personalId),
+        eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_STUDENT)
+      ));
+
+    const [newDispute] = await this.db
+      .insert(paymentDisputes)
+      .values({
+        paymentId: createDto.paymentId,
+        reportedBy: userId,
+        reason: createDto.reason,
+        description: createDto.description,
+        status: DisputeStatus.PENDING,
+        expiresAt,
+        studentDisputeCount: studentDisputes[0]?.count || 0,
+        personalDisputeCount: personalDisputes[0]?.count || 0,
+      })
+      .returning();
+
+    // Atualizar status do pagamento para disputado
+    await this.updatePaymentStatus(createDto.paymentId, PaymentStatus.DISPUTED);
+
+    return this.formatDisputeResponse(newDispute);
+  }
+
+  // Submeter evidências
+  async submitEvidence(disputeId: string, evidenceDto: SubmitEvidenceDto, userId: string): Promise<DisputeResponseDto> {
+    const dispute = await this.db.query.paymentDisputes.findFirst({
+      where: eq(paymentDisputes.id, disputeId),
+      with: {
+        payment: true,
+      },
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada');
+    }
+
+    // Verificar se o usuário pode submeter evidências
+    if (dispute.payment.studentId !== userId && dispute.payment.personalId !== userId) {
+      throw new ForbiddenException('Usuário não autorizado a submeter evidências para esta disputa');
+    }
+
+    // Verificar se a disputa ainda está ativa
+    if (dispute.status !== DisputeStatus.PENDING) {
+      throw new BadRequestException('Disputa não está mais ativa');
+    }
+
+    // Verificar se não expirou
+    if (new Date() > dispute.expiresAt) {
+      await this.db
+        .update(paymentDisputes)
+        .set({
+          status: DisputeStatus.EXPIRED,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentDisputes.id, disputeId));
+
+      throw new BadRequestException('Disputa expirada');
+    }
+
+    // Determinar se é evidência do aluno ou personal
+    const isStudent = dispute.payment.studentId === userId;
+    const updateData: any = {
+      updatedAt: new Date(),
+    };
+
+    if (isStudent) {
+      updateData.studentEvidence = evidenceDto.evidence;
+    } else {
+      updateData.personalEvidence = evidenceDto.evidence;
+    }
+
+    // Se ambos submeteram evidências, mover para análise
+    if (dispute.studentEvidence && dispute.personalEvidence) {
+      updateData.status = DisputeStatus.UNDER_REVIEW;
+    }
+
+    const [updatedDispute] = await this.db
+      .update(paymentDisputes)
+      .set(updateData)
+      .where(eq(paymentDisputes.id, disputeId))
+      .returning();
+
+    return this.formatDisputeResponse(updatedDispute);
+  }
+
+  // Resolver disputa (admin)
+  async resolveDispute(disputeId: string, resolveDto: ResolveDisputeDto, adminId: string): Promise<DisputeResponseDto> {
+    const dispute = await this.db.query.paymentDisputes.findFirst({
+      where: eq(paymentDisputes.id, disputeId),
+      with: {
+        payment: true,
+      },
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada');
+    }
+
+    if (dispute.status !== DisputeStatus.UNDER_REVIEW) {
+      throw new BadRequestException('Disputa não está em análise');
+    }
+
+    const [updatedDispute] = await this.db
+      .update(paymentDisputes)
+      .set({
+        status: resolveDto.resolution,
+        resolution: resolveDto.resolution,
+        adminNotes: resolveDto.adminNotes,
+        resolvedBy: adminId,
+        resolvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(paymentDisputes.id, disputeId))
+      .returning();
+
+    // Aplicar resolução
+    if (resolveDto.resolution === DisputeStatus.RESOLVED_PRO_PERSONAL) {
+      // Capturar pagamento (personal ganha)
+      await this.capturePayment(dispute.paymentId);
+    } else if (resolveDto.resolution === DisputeStatus.RESOLVED_PRO_STUDENT) {
+      // Reembolsar aluno
+      await this.refundPayment(dispute.paymentId);
+    }
+
+    return this.formatDisputeResponse(updatedDispute);
+  }
+
+  // Reembolsar pagamento
+  async refundPayment(paymentId: string, reason?: string): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.id, paymentId),
+      with: {
+        class: true,
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    if (payment.status === PaymentStatus.REFUNDED) {
+      throw new BadRequestException('Pagamento já foi reembolsado');
+    }
+
+    // Reembolsar no Mercado Pago se tiver mpPaymentId
+    if (payment.mpPaymentId) {
+      await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
+      console.log(`🔄 Reembolso processado no MP: ${payment.mpPaymentId}`);
+    }
+
+    // Atualizar status
+    await this.updatePaymentStatus(paymentId, PaymentStatus.REFUNDED);
+
+    // Reverter saldo da carteira do personal se já foi creditado
+    if (payment.status === PaymentStatus.CAPTURED) {
+      const personalWallet = await this.getUserWallet(payment.personalId);
+      await this.updateWallet(payment.personalId, {
+        availableBalance: personalWallet.availableBalance - parseFloat(payment.personalAmount),
+        totalEarned: personalWallet.totalEarned - parseFloat(payment.personalAmount),
+      });
+      
+      console.log(`💳 Carteira do personal ${payment.personalId} revertida: -R$ ${payment.personalAmount}`);
+    }
+
+    // Criar transação de reembolso
+    await this.createTransaction({
+      paymentId,
+      userId: payment.studentId,
+      type: PaymentType.REFUND,
+      amount: parseFloat(payment.totalAmount),
+      description: reason || `Reembolso da aula ${payment.classId}`,
+      status: PaymentStatus.REFUNDED,
+    });
+
+    console.log(`✅ Reembolso completo para pagamento ${paymentId}: R$ ${payment.totalAmount}`);
+  }
+
+  // Capturar pagamento após aula concluída (fluxo normal)
+  async capturePaymentAfterClass(classId: string, reason: string = 'Aula concluída'): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.classId, classId),
+      with: {
+        class: true,
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado para esta aula');
+    }
+
+    if (payment.status !== PaymentStatus.AUTHORIZED) {
+      throw new BadRequestException(`Pagamento não está em custódia. Status atual: ${payment.status}`);
+    }
+
+    // Capturar no Mercado Pago
+    if (payment.mpPaymentId) {
+      await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
+      console.log(`✅ Captura processada no MP: ${payment.mpPaymentId}`);
+    }
+
+    // Atualizar status para capturado (isso vai aplicar o split)
+    await this.updatePaymentStatus(payment.id, PaymentStatus.CAPTURED);
+
+    console.log(`🎯 Pagamento capturado após conclusão da aula ${classId}: R$ ${payment.totalAmount}`);
+  }
+
+  // Cancelar pagamento (personal cancela antes da aula)
+  async cancelPaymentBeforeClass(classId: string, reason: string = 'Aula cancelada pelo personal'): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.classId, classId),
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado para esta aula');
+    }
+
+    if (payment.status === PaymentStatus.CANCELLED || payment.status === PaymentStatus.REFUNDED) {
+      throw new BadRequestException('Pagamento já foi cancelado ou reembolsado');
+    }
+
+    // Reembolsar totalmente
+    await this.refundPayment(payment.id, reason);
+
+    console.log(`❌ Pagamento cancelado antes da aula ${classId} - reembolso total`);
+  }
+
+  // Processar disputa de no-show
+  async processNoShowDispute(disputeId: string, resolution: 'pro_student' | 'pro_personal', adminNotes?: string): Promise<void> {
+    const dispute = await this.db.query.paymentDisputes.findFirst({
+      where: eq(paymentDisputes.id, disputeId),
+      with: {
+        payment: {
+          with: {
+            class: true,
+            student: true,
+            personal: true,
+          },
+        },
+      },
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada');
+    }
+
+    const payment = dispute.payment;
+
+    if (resolution === 'pro_personal') {
+      // Personal tinha razão - aluno não compareceu
+      // Capturar pagamento (split aplicado)
+      if (payment.status === PaymentStatus.AUTHORIZED) {
+        await this.capturePaymentAfterClass(payment.classId, 'No-show confirmado - ausência do aluno');
+      }
+      
+      console.log(`⚖️ Disputa resolvida PRÓ-PERSONAL: Pagamento ${payment.id} capturado`);
+      
+    } else if (resolution === 'pro_student') {
+      // Aluno tinha razão - estava presente
+      // Reembolsar totalmente
+      await this.refundPayment(payment.id, 'Disputa resolvida - aluno estava presente');
+      
+      console.log(`⚖️ Disputa resolvida PRÓ-ALUNO: Pagamento ${payment.id} reembolsado`);
+    }
+
+    // Atualizar status do pagamento para dispute_resolved
+    await this.updatePaymentStatus(payment.id, PaymentStatus.DISPUTE_RESOLVED);
+  }
+
+  // Obter pagamento por ID
+  async getPaymentById(paymentId: string, userId: string): Promise<PaymentResponseDto> {
+    const payment = await this.db.query.payments.findFirst({
+      where: and(
+        eq(payments.id, paymentId),
+        or(eq(payments.studentId, userId), eq(payments.personalId, userId))
+      ),
+      with: {
+        class: true,
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    return this.formatPaymentResponse(payment);
+  }
+
+  // Listar pagamentos com filtros
+  async getPayments(filters: PaymentFiltersDto, userId: string): Promise<PaymentResponseDto[]> {
+    const whereConditions = [
+      or(eq(payments.studentId, userId), eq(payments.personalId, userId))
+    ];
+
+    if (filters.status) {
+      whereConditions.push(eq(payments.status, filters.status));
+    }
+
+    if (filters.type) {
+      whereConditions.push(eq(payments.type, filters.type));
+    }
+
+    if (filters.classId) {
+      whereConditions.push(eq(payments.classId, filters.classId));
+    }
+
+    if (filters.minAmount) {
+      whereConditions.push(sql`${payments.totalAmount} >= ${filters.minAmount}`);
+    }
+
+    if (filters.maxAmount) {
+      whereConditions.push(sql`${payments.totalAmount} <= ${filters.maxAmount}`);
+    }
+
+    if (filters.startDate) {
+      whereConditions.push(sql`${payments.createdAt} >= ${filters.startDate}`);
+    }
+
+    if (filters.endDate) {
+      whereConditions.push(sql`${payments.createdAt} <= ${filters.endDate}`);
+    }
+
+    const paymentsList = await this.db.query.payments.findMany({
+      where: and(...whereConditions),
+      with: {
+        class: true,
+        student: true,
+        personal: true,
+      },
+      orderBy: [desc(payments.createdAt)],
+    });
+
+    return paymentsList.map(payment => this.formatPaymentResponse(payment));
+  }
+
+  // Obter carteira do usuário
+  async getUserWallet(userId: string): Promise<WalletResponseDto> {
+    let wallet = await this.db.query.userWallets.findFirst({
+      where: eq(userWallets.userId, userId),
+      with: {
+        user: true,
+      },
+    });
+
+    if (!wallet) {
+      // Criar carteira se não existir
+      const [newWallet] = await this.db
+        .insert(userWallets)
+        .values({
+          userId,
+          availableBalance: '0.00',
+          pendingBalance: '0.00',
+          totalEarned: '0.00',
+          totalWithdrawn: '0.00',
+        })
+        .returning();
+
+      wallet = newWallet;
+    }
+
+    return this.formatWalletResponse(wallet);
+  }
+
+  // Atualizar carteira
+  async updateWallet(userId: string, updateDto: UpdateWalletDto): Promise<WalletResponseDto> {
+    const [updatedWallet] = await this.db
+      .update(userWallets)
+      .set({
+        ...updateDto,
+        updatedAt: new Date(),
+      })
+      .where(eq(userWallets.userId, userId))
+      .returning();
+
+    return this.formatWalletResponse(updatedWallet);
+  }
+
+  // Solicitar saque
+  async requestWithdrawal(userId: string, withdrawDto: WithdrawRequestDto): Promise<TransactionResponseDto> {
+    const wallet = await this.getUserWallet(userId);
+
+    if (wallet.availableBalance < withdrawDto.amount) {
+      throw new BadRequestException('Saldo insuficiente para saque');
+    }
+
+    // Criar transação de saque
+    const transaction = await this.createTransaction({
+      paymentId: null, // Saque não está vinculado a um pagamento
+      userId,
+      type: PaymentType.REFUND, // Usando REFUND para saque
+      amount: -withdrawDto.amount,
+      description: withdrawDto.description || 'Solicitação de saque',
+      status: PaymentStatus.PENDING,
+    });
+
+    // Atualizar carteira
+    await this.updateWallet(userId, {
+      availableBalance: wallet.availableBalance - withdrawDto.amount,
+      totalWithdrawn: wallet.totalWithdrawn + withdrawDto.amount,
+    });
+
+    return transaction;
+  }
+
+  // Obter estatísticas de pagamentos
+  async getPaymentStats(userId?: string): Promise<PaymentStatsDto> {
+    const whereConditions = userId ? [
+      or(eq(payments.studentId, userId), eq(payments.personalId, userId))
+    ] : [];
+
+    // Total de pagamentos
+    const [totalPayments] = await this.db
+      .select({ count: count() })
+      .from(payments)
+      .where(whereConditions.length ? and(...whereConditions) : undefined);
+
+    // Total de valores
+    const [totalAmount] = await this.db
+      .select({ sum: sum(payments.totalAmount) })
+      .from(payments)
+      .where(whereConditions.length ? and(...whereConditions) : undefined);
+
+    // Estatísticas por status
+    const statusBreakdown = await this.getStatusBreakdown(whereConditions);
+
+    // Estatísticas por período
+    const periodStats = await this.getPeriodStats(whereConditions);
+
+    return {
+      totalPayments: totalPayments.count,
+      totalAmount: parseFloat(totalAmount.sum || '0'),
+      platformEarnings: 0, // Calcular baseado nos pagamentos
+      personalEarnings: 0, // Calcular baseado nos pagamentos
+      pendingAmount: 0, // Calcular baseado nos pagamentos
+      refundedAmount: 0, // Calcular baseado nos pagamentos
+      statusBreakdown,
+      periodStats,
+    };
+  }
+
+  // Métodos auxiliares privados
+  private async createTransaction(data: any): Promise<TransactionResponseDto> {
+    const [transaction] = await this.db
+      .insert(paymentTransactions)
+      .values({
+        ...data,
+        processedAt: data.status === PaymentStatus.CAPTURED ? new Date() : null,
+      })
+      .returning();
+
+    return this.formatTransactionResponse(transaction);
+  }
+
+  private async getStatusBreakdown(whereConditions: any[]): Promise<any> {
+    const statuses = Object.values(PaymentStatus);
+    const breakdown: any = {};
+
+    for (const status of statuses) {
+      const [result] = await this.db
+        .select({ count: count() })
+        .from(payments)
+        .where(and(...whereConditions, eq(payments.status, status)));
+
+      breakdown[status] = result.count;
+    }
+
+    return breakdown;
+  }
+
+  private async getPeriodStats(whereConditions: any[]): Promise<any> {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [todayStats] = await this.db
+      .select({ count: count(), sum: sum(payments.totalAmount) })
+      .from(payments)
+      .where(and(...whereConditions, sql`${payments.createdAt} >= ${today}`));
+
+    const [weekStats] = await this.db
+      .select({ count: count(), sum: sum(payments.totalAmount) })
+      .from(payments)
+      .where(and(...whereConditions, sql`${payments.createdAt} >= ${weekAgo}`));
+
+    const [monthStats] = await this.db
+      .select({ count: count(), sum: sum(payments.totalAmount) })
+      .from(payments)
+      .where(and(...whereConditions, sql`${payments.createdAt} >= ${monthAgo}`));
+
+    return {
+      today: { count: todayStats.count, amount: parseFloat(todayStats.sum || '0') },
+      thisWeek: { count: weekStats.count, amount: parseFloat(weekStats.sum || '0') },
+      thisMonth: { count: monthStats.count, amount: parseFloat(monthStats.sum || '0') },
+    };
+  }
+
+  private formatPaymentResponse(payment: any): PaymentResponseDto {
+    return {
+      id: payment.id,
+      classId: payment.classId,
+      studentId: payment.studentId,
+      personalId: payment.personalId,
+      mpPaymentId: payment.mpPaymentId,
+      mpPreferenceId: payment.mpPreferenceId,
+      totalAmount: parseFloat(payment.totalAmount),
+      platformFee: parseFloat(payment.platformFee),
+      personalAmount: parseFloat(payment.personalAmount),
+      status: payment.status,
+      type: payment.type,
+      splitData: payment.splitData,
+      class: payment.class ? {
+        id: payment.class.id,
+        date: payment.class.date,
+        time: payment.class.time,
+        location: payment.class.location,
+        duration: payment.class.duration,
+      } : undefined,
+      student: payment.student ? {
+        id: payment.student.id,
+        name: payment.student.name,
+        email: payment.student.email,
+      } : undefined,
+      personal: payment.personal ? {
+        id: payment.personal.id,
+        name: payment.personal.name,
+        email: payment.personal.email,
+      } : undefined,
+      createdAt: payment.createdAt,
+      updatedAt: payment.updatedAt,
+      authorizedAt: payment.authorizedAt,
+      capturedAt: payment.capturedAt,
+      refundedAt: payment.refundedAt,
+    };
+  }
+
+  private formatDisputeResponse(dispute: any): DisputeResponseDto {
+    return {
+      id: dispute.id,
+      paymentId: dispute.paymentId,
+      reportedBy: dispute.reportedBy,
+      reason: dispute.reason,
+      description: dispute.description,
+      status: dispute.status,
+      studentEvidence: dispute.studentEvidence,
+      personalEvidence: dispute.personalEvidence,
+      adminNotes: dispute.adminNotes,
+      resolution: dispute.resolution,
+      resolvedBy: dispute.resolvedBy,
+      resolvedAt: dispute.resolvedAt,
+      studentDisputeCount: dispute.studentDisputeCount,
+      personalDisputeCount: dispute.personalDisputeCount,
+      expiresAt: dispute.expiresAt,
+      payment: dispute.payment ? this.formatPaymentResponse(dispute.payment) : undefined,
+      reportedByUser: dispute.reportedByUser ? {
+        id: dispute.reportedByUser.id,
+        name: dispute.reportedByUser.name,
+        email: dispute.reportedByUser.email,
+        role: dispute.reportedByUser.role,
+      } : undefined,
+      createdAt: dispute.createdAt,
+      updatedAt: dispute.updatedAt,
+    };
+  }
+
+  private formatWalletResponse(wallet: any): WalletResponseDto {
+    return {
+      id: wallet.id,
+      userId: wallet.userId,
+      availableBalance: parseFloat(wallet.availableBalance),
+      pendingBalance: parseFloat(wallet.pendingBalance),
+      totalEarned: parseFloat(wallet.totalEarned),
+      totalWithdrawn: parseFloat(wallet.totalWithdrawn),
+      bankAccount: wallet.bankAccount,
+      isActive: wallet.isActive,
+      lastWithdrawalAt: wallet.lastWithdrawalAt,
+      user: wallet.user ? {
+        id: wallet.user.id,
+        name: wallet.user.name,
+        email: wallet.user.email,
+        role: wallet.user.role,
+      } : undefined,
+      createdAt: wallet.createdAt,
+      updatedAt: wallet.updatedAt,
+    };
+  }
+
+  private formatTransactionResponse(transaction: any): TransactionResponseDto {
+    return {
+      id: transaction.id,
+      paymentId: transaction.paymentId,
+      userId: transaction.userId,
+      type: transaction.type,
+      amount: parseFloat(transaction.amount),
+      description: transaction.description,
+      mpTransactionId: transaction.mpTransactionId,
+      mpOperationId: transaction.mpOperationId,
+      status: transaction.status,
+      metadata: transaction.metadata,
+      user: transaction.user ? {
+        id: transaction.user.id,
+        name: transaction.user.name,
+        email: transaction.user.email,
+      } : undefined,
+      createdAt: transaction.createdAt,
+      processedAt: transaction.processedAt,
+    };
+  }
+}

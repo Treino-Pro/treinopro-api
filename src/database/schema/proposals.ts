@@ -20,6 +20,14 @@ export const proposals = pgTable('proposals', {
   additionalNotes: text('additional_notes'),
   status: proposalStatusEnum('status').default('pending'),
   
+  // Campos de pagamento
+  paymentId: varchar('payment_id', { length: 255 }), // ID do pagamento processado
+  paymentMethod: varchar('payment_method', { length: 50 }), // credit_card, debit_card, pix, etc
+  paymentStatus: varchar('payment_status', { length: 50 }), // pending, approved, rejected, etc
+  
+  // Referência à aula criada (quando aceita)
+  classId: uuid('class_id'), // ID da aula criada automaticamente
+  
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

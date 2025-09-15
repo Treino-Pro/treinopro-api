@@ -10,6 +10,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { SharedCacheModule } from './shared/cache.module';
 import { HealthController } from './common/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -41,6 +42,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ChatModule,
     ClassesModule,
     RatingsModule,
+    PaymentsModule,
   ],
   controllers: [HealthController],
   providers: [

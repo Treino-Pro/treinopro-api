@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProposalsService } from './proposals.service';
+import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -13,6 +14,16 @@ const mockDb = {
   update: jest.fn(),
 };
 
+// Mock do StudentPaymentMethodsService
+const mockStudentPaymentService = {
+  processClassPayment: jest.fn(),
+  getStudentPaymentMethods: jest.fn(),
+  updatePaymentMethods: jest.fn(),
+  saveCard: jest.fn(),
+  validateCard: jest.fn(),
+  removeCard: jest.fn(),
+};
+
 describe('ProposalsService', () => {
   let service: ProposalsService;
 
@@ -23,6 +34,10 @@ describe('ProposalsService', () => {
         {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
+        },
+        {
+          provide: StudentPaymentMethodsService,
+          useValue: mockStudentPaymentService,
         },
       ],
     }).compile();

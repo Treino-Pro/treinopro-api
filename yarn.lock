@@ -2287,6 +2287,11 @@
   dependencies:
     "@types/node" "*"
 
+"@types/mercadopago@^1.5.11":
+  version "1.5.11"
+  resolved "https://registry.yarnpkg.com/@types/mercadopago/-/mercadopago-1.5.11.tgz#682b010e4c9d0d4d1fceeabd688d93529044efba"
+  integrity sha512-ligRLboSSLYRzwI1oE27wO+AkZXvCsq2YwBThfH5H+byqCkQEAnmr6Nl1HRAdiZCfIPK2eK0b1rgiuatjZWd2g==
+
 "@types/methods@^1.1.4":
   version "1.1.4"
   resolved "https://registry.yarnpkg.com/@types/methods/-/methods-1.1.4.tgz#d3b7ac30ac47c91054ea951ce9eed07b1051e547"
@@ -5640,6 +5645,14 @@ memoizee@^0.4.15:
     next-tick "^1.1.0"
     timers-ext "^0.1.7"
 
+mercadopago@^2.9.0:
+  version "2.9.0"
+  resolved "https://registry.yarnpkg.com/mercadopago/-/mercadopago-2.9.0.tgz#0258e4cc08de8d6424b43a3e4f21a47e126b7290"
+  integrity sha512-C7iqIxeDjlSVmvNSJlTbzlxmNkOxPG0g9iQyIA03T05Y+AK8bIwRZ0Nr/VDmGyhSov76y1oOP0ZuDafs9c8B5Q==
+  dependencies:
+    node-fetch "^2.7.0"
+    uuid "^9.0.0"
+
 merge-descriptors@1.0.3:
   version "1.0.3"
   resolved "https://registry.yarnpkg.com/merge-descriptors/-/merge-descriptors-1.0.3.tgz#d80319a65f3c7935351e5cfdac8f9318504dbed5"
@@ -5848,7 +5861,7 @@ node-emoji@1.11.0:
   dependencies:
     lodash "^4.17.21"
 
-node-fetch@^2.6.1:
+node-fetch@^2.6.1, node-fetch@^2.7.0:
   version "2.7.0"
   resolved "https://registry.yarnpkg.com/node-fetch/-/node-fetch-2.7.0.tgz#d0f0fa6e3e2dc1d27efcd8ad99d550bda94d187d"
   integrity sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==
@@ -7147,7 +7160,7 @@ uuid@^8.3.0:
   resolved "https://registry.yarnpkg.com/uuid/-/uuid-8.3.2.tgz#80d5b5ced271bb9af6c445f21a1a04c606cefbe2"
   integrity sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==
 
-uuid@^9.0.1:
+uuid@^9.0.0, uuid@^9.0.1:
   version "9.0.1"
   resolved "https://registry.yarnpkg.com/uuid/-/uuid-9.0.1.tgz#e188d4c8853cc722220392c424cd637f32293f30"
   integrity sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength, IsIn, IsBoolean } from 'class-validator';
 
 export enum ProposalStatus {
   PENDING = 'pending',
@@ -94,6 +94,66 @@ export class CreateProposalDto {
   @IsOptional()
   @IsString()
   additionalNotes?: string;
+
+  // ===== NOVOS CAMPOS PARA PAGAMENTO =====
+  
+  @ApiProperty({
+    description: 'Método de pagamento escolhido',
+    example: 'credit_card',
+    enum: ['credit_card', 'debit_card', 'mercado_pago', 'pix'],
+  })
+  @IsString()
+  @IsIn(['credit_card', 'debit_card', 'mercado_pago', 'pix'])
+  paymentMethod: string;
+
+  @ApiProperty({
+    description: 'ID do cartão salvo (se aplicável)',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID()
+  cardId?: string;
+
+  @ApiProperty({
+    description: 'Dados do cartão (se não usar cartão salvo)',
+    required: false,
+  })
+  @IsOptional()
+  cardData?: {
+    cardNumber: string;
+    cardHolderName: string;
+    expirationDate: string;
+    cvv: string;
+    cardType: 'credit' | 'debit';
+  };
+
+  @ApiProperty({
+    description: 'Número de parcelas (1-12)',
+    example: '1',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  installments?: string;
+
+  @ApiProperty({
+    description: 'Salvar cartão para futuras compras',
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  saveCard?: boolean;
+
+  @ApiProperty({
+    description: 'Apelido para o cartão (se salvar)',
+    example: 'Cartão Principal',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  cardNickname?: string;
 }
 
 export class UpdateProposalDto {
@@ -186,6 +246,13 @@ export class ProposalResponseDto {
   status: ProposalStatus;
 
   @ApiProperty({
+    description: 'Status do pagamento',
+    example: 'pending',
+    required: false,
+  })
+  paymentStatus?: string;
+
+  @ApiProperty({
     description: 'Data de criação',
     example: '2024-01-10T10:00:00.000Z',
   })
@@ -196,6 +263,24 @@ export class ProposalResponseDto {
     example: '2024-01-10T10:00:00.000Z',
   })
   updatedAt: Date;
+
+  // ===== CAMPOS DE PAGAMENTO (OPCIONAIS) =====
+  
+  @ApiProperty({
+    description: 'Dados do pagamento processado',
+    required: false,
+  })
+  payment?: {
+    paymentId: string;
+    status: string;
+    method: string;
+    amount: number;
+    checkoutUrl?: string; // Para MP/PIX
+    qrCode?: string; // Para PIX
+    qrCodeBase64?: string; // QR Code em base64
+    message?: string;
+    expiresAt?: Date; // Quando o pagamento expira
+  };
 }
 
 export class ProposalListResponseDto {

@@ -256,4 +256,47 @@ export class ProposalsController {
     
     return this.proposalsService.acceptProposal(id, req.user.sub);
   }
+
+  // ===== WEBHOOK PARA PAGAMENTOS =====
+
+  @Post('webhook/payment-status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Webhook para atualização de status de pagamento',
+    description: 'Endpoint interno para receber atualizações de status de pagamento'
+  })
+  async updatePaymentStatus(
+    @Body() webhookData: { proposalId: string; paymentStatus: string; mpPaymentId?: string },
+  ): Promise<{ message: string }> {
+    await this.proposalsService.updatePaymentStatus(
+      webhookData.proposalId,
+      webhookData.paymentStatus,
+      webhookData.mpPaymentId
+    );
+    
+    return { message: 'Status do pagamento atualizado com sucesso' };
+  }
+
+  @Get('by-payment/:paymentId')
+  @ApiOperation({ 
+    summary: 'Buscar proposta por ID do pagamento',
+    description: 'Endpoint interno para encontrar proposta pelo ID do pagamento'
+  })
+  async getProposalByPaymentId(
+    @Param('paymentId') paymentId: string,
+  ): Promise<any> {
+    return this.proposalsService.findProposalByPaymentId(paymentId);
+  }
+
+  // ===== LIMPEZA DE PROPOSTAS EXPIRADAS =====
+
+  @Post('cleanup/expired')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Cancelar propostas expiradas',
+    description: 'Endpoint para cancelar propostas com pagamento pendente há mais de 30 minutos'
+  })
+  async cancelExpiredProposals(): Promise<{ cancelled: number }> {
+    return this.proposalsService.cancelExpiredProposals();
+  }
 }
