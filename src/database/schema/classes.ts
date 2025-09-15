@@ -2,7 +2,23 @@ import { pgTable, uuid, varchar, text, timestamp, integer, pgEnum } from 'drizzl
 import { relations } from 'drizzle-orm';
 
 // Enums
-export const classStatusEnum = pgEnum('class_status', ['scheduled', 'active', 'completed', 'cancelled']);
+export const classStatusEnum = pgEnum('class_status', [
+  'scheduled', 
+  'pending_confirmation', 
+  'active', 
+  'completed', 
+  'cancelled',
+  'no_show_dispute',
+  'custody'
+]);
+
+export const classDisputeStatusEnum = pgEnum('class_dispute_status', [
+  'pending',
+  'student_confirmed_absence',
+  'student_denied_absence', 
+  'resolved_for_student',
+  'resolved_for_personal'
+]);
 
 // Classes table
 export const classes = pgTable('classes', {
@@ -17,6 +33,19 @@ export const classes = pgTable('classes', {
   status: classStatusEnum('status').default('scheduled'),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
+  
+  // Novos campos para lógica de aulas
+  pendingConfirmationAt: timestamp('pending_confirmation_at'),
+  confirmedAt: timestamp('confirmed_at'),
+  noShowReportedAt: timestamp('no_show_reported_at'),
+  noShowReportedBy: varchar('no_show_reported_by', { length: 20 }), // 'student' ou 'personal'
+  disputeStatus: classDisputeStatusEnum('dispute_status'),
+  custodyExpiresAt: timestamp('custody_expires_at'),
+  evidenceDeadline: timestamp('evidence_deadline'),
+  studentEvidence: text('student_evidence'),
+  personalEvidence: text('personal_evidence'),
+  resolution: text('resolution'),
+  resolvedAt: timestamp('resolved_at'),
   
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
