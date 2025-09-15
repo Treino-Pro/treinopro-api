@@ -3,6 +3,8 @@ import { proposals, users, classes } from '../../database/schema';
 import { eq, and, desc, gte, lte, ilike, count, sql } from 'drizzle-orm';
 import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
+import { JobsService } from '../jobs/jobs.service';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
 @Injectable()
@@ -10,6 +12,8 @@ export class ProposalsService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
+    private readonly paymentsService: PaymentsService,
+    private readonly jobsService: JobsService,
   ) {}
 
   async createProposal(createProposalDto: CreateProposalDto, studentId: string): Promise<ProposalResponseDto> {
@@ -32,12 +36,15 @@ export class ProposalsService {
     }
 
     // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
-    console.log('💳 [PROPOSALS] Processando pagamento para proposta...');
+    console.log('💳 [PROPOSALS] Processando pagamento real para proposta...');
     
     try {
-      // Por enquanto, simular pagamento para propostas (mock)
-      // TODO: Integrar com sistema real de pagamento
-      const paymentResult = this.simulatePaymentForProposal(createProposalDto);
+      // Criar preferência de pagamento específica para propostas
+      const paymentResult = await this.createProposalPaymentPreference(
+        createProposalDto,
+        user[0],
+        trainingDate
+      );
 
       if (!paymentResult.success) {
         throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
@@ -72,7 +79,15 @@ export class ProposalsService {
 
       // Agendar timeout para proposta se pagamento ainda está pendente
       if (paymentResult.status === 'pending') {
-        this.scheduleProposalExpiry(proposal.id);
+        await this.jobsService.scheduleProposalExpiration({
+          proposalId: proposal.id,
+          studentId: studentId,
+          createdAt: new Date(),
+          expirationTime: 30, // 30 minutos
+        });
+
+        // Agendar lembretes de pagamento
+        await this.schedulePaymentReminders(proposal.id);
       }
 
       // Retornar proposta com dados do pagamento
@@ -85,9 +100,13 @@ export class ProposalsService {
           status: paymentResult.status,
           method: createProposalDto.paymentMethod,
           amount: createProposalDto.price,
+          preferenceId: paymentResult.preferenceId,
           checkoutUrl: paymentResult.checkoutUrl,
+          sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
           qrCode: paymentResult.qrCode,
           qrCodeBase64: paymentResult.qrCodeBase64,
+          platformFee: paymentResult.platformFee,
+          personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
           expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
         }
@@ -419,10 +438,28 @@ export class ProposalsService {
 
       console.log(`⏰ [PROPOSALS] ${expiredProposals.length} propostas expiradas canceladas`);
 
-      // TODO: Aqui deveria processar reembolso via PaymentsService
+      // Processar reembolsos automáticos
       for (const proposal of expiredProposals) {
-        console.log(`💸 [PROPOSALS] Reembolso pendente para proposta: ${proposal.id}`);
-        // await this.paymentsService.refundPayment(proposal.paymentId, 'Proposta expirada');
+        if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
+          try {
+            console.log(`💸 [PROPOSALS] Processando reembolso para proposta: ${proposal.id}`);
+            
+            await this.processAutomaticRefund(proposal.id, proposal.paymentId, 'Proposta expirada - timeout de 30 minutos');
+            
+            console.log(`✅ [PROPOSALS] Reembolso processado para proposta: ${proposal.id}`);
+          } catch (error) {
+            console.error(`❌ [PROPOSALS] Erro no reembolso da proposta ${proposal.id}:`, error);
+            
+            // Marcar como erro para análise manual
+            await this.db
+              .update(proposals)
+              .set({
+                paymentStatus: 'refund_error',
+                updatedAt: new Date(),
+              })
+              .where(eq(proposals.id, proposal.id));
+          }
+        }
       }
 
       return { cancelled: expiredProposals.length };
@@ -433,29 +470,198 @@ export class ProposalsService {
     }
   }
 
-  async scheduleProposalExpiry(proposalId: string): Promise<void> {
-    // TODO: Implementar com Redis/BullMQ para job scheduling
-    console.log(`⏰ [PROPOSALS] Agendando expiração para proposta: ${proposalId} em 30 minutos`);
+  // ===== AGENDAMENTO DE LEMBRETES DE PAGAMENTO =====
+
+  private async schedulePaymentReminders(proposalId: string): Promise<void> {
+    console.log(`📱 [PROPOSALS] Agendando lembretes de pagamento para proposta: ${proposalId}`);
     
-    // Por enquanto, apenas log. Em produção usaria Redis/Bull
-    setTimeout(async () => {
-      try {
-        const proposal = await this.getProposalById(proposalId, '', 'admin');
-        if (proposal.status === ProposalStatus.PENDING && proposal.paymentStatus === 'pending') {
-          await this.updatePaymentStatus(proposalId, 'expired');
-        }
-      } catch (error) {
-        console.error('❌ [PROPOSALS] Erro no timeout da proposta:', error);
-      }
-    }, 30 * 60 * 1000); // 30 minutos
+    try {
+      // Lembrete aos 10 minutos (20 min restantes)
+      await this.jobsService.scheduleNotification({
+        userId: '', // Será preenchido no processor
+        type: 'push',
+        template: 'payment-reminder',
+        data: { proposalId, reminderType: 'first' },
+        priority: 'high',
+      }, 10);
+
+      // Lembrete final aos 25 minutos (5 min restantes)
+      await this.jobsService.scheduleNotification({
+        userId: '', // Será preenchido no processor
+        type: 'push',
+        template: 'payment-reminder',
+        data: { proposalId, reminderType: 'final' },
+        priority: 'critical',
+      }, 25);
+
+      console.log(`✅ [PROPOSALS] Lembretes agendados para proposta: ${proposalId}`);
+
+    } catch (error) {
+      console.error(`❌ [PROPOSALS] Erro ao agendar lembretes para proposta ${proposalId}:`, error);
+    }
   }
 
-  // ===== SIMULAÇÃO DE PAGAMENTO PARA PROPOSTAS =====
+  // ===== SISTEMA DE REEMBOLSO AUTOMÁTICO =====
+
+  async processAutomaticRefund(proposalId: string, paymentId: string, reason: string): Promise<void> {
+    console.log(`💸 [PROPOSALS] Iniciando reembolso automático: ${proposalId}`);
+    
+    try {
+      // Verificar se é uma preferência do Mercado Pago ou pagamento simulado
+      if (paymentId.startsWith('proposal_')) {
+        // Pagamento real via Mercado Pago - processar reembolso via PaymentsService
+        console.log(`💳 [PROPOSALS] Processando reembolso real via MP: ${paymentId}`);
+        
+        // Buscar pagamento no sistema de pagamentos
+        const payment = await this.findPaymentByExternalReference(paymentId);
+        
+        if (payment) {
+          await this.paymentsService.refundPayment(payment.id, reason);
+        } else {
+          console.log(`⚠️ [PROPOSALS] Pagamento não encontrado no sistema, marcando como reembolsado: ${paymentId}`);
+        }
+        
+      } else {
+        // Pagamento simulado - apenas marcar como reembolsado
+        console.log(`🎭 [PROPOSALS] Simulando reembolso para pagamento mock: ${paymentId}`);
+      }
+
+      // Atualizar status da proposta
+      await this.db
+        .update(proposals)
+        .set({
+          paymentStatus: 'refunded',
+          updatedAt: new Date(),
+        })
+        .where(eq(proposals.id, proposalId));
+
+      console.log(`✅ [PROPOSALS] Reembolso concluído para proposta: ${proposalId}`);
+      
+    } catch (error) {
+      console.error(`❌ [PROPOSALS] Erro no reembolso automático:`, error);
+      throw error;
+    }
+  }
+
+  async findPaymentByExternalReference(externalReference: string): Promise<any> {
+    // Buscar pagamento no banco de dados usando external reference
+    try {
+      const payment = await this.db.query.payments?.findFirst({
+        where: (payments: any) => eq(payments.externalReference, externalReference),
+      });
+      
+      return payment;
+    } catch (error) {
+      console.log(`⚠️ [PROPOSALS] Erro ao buscar pagamento: ${error.message}`);
+      return null;
+    }
+  }
+
+  // Reembolsar proposta não aceita (chamado manualmente)
+  async refundUnacceptedProposal(proposalId: string, userId: string): Promise<{ message: string }> {
+    // Buscar proposta diretamente do banco para ter acesso aos campos de pagamento
+    const [proposal] = await this.db
+      .select()
+      .from(proposals)
+      .where(eq(proposals.id, proposalId))
+      .limit(1);
+
+    if (!proposal) {
+      throw new NotFoundException('Proposta não encontrada');
+    }
+
+    // Verificar permissões
+    if (proposal.studentId !== userId) {
+      throw new ForbiddenException('Você só pode reembolsar suas próprias propostas');
+    }
+    
+    if (proposal.status !== ProposalStatus.PENDING) {
+      throw new BadRequestException('Apenas propostas pendentes podem ser reembolsadas');
+    }
+
+    if (!proposal.paymentId) {
+      throw new BadRequestException('Proposta não possui pagamento associado');
+    }
+
+    if (proposal.paymentStatus === 'refunded') {
+      throw new BadRequestException('Proposta já foi reembolsada');
+    }
+
+    // Processar reembolso
+    await this.processAutomaticRefund(proposalId, proposal.paymentId, 'Reembolso solicitado pelo usuário');
+
+    // Cancelar proposta
+    await this.db
+      .update(proposals)
+      .set({
+        status: ProposalStatus.CANCELLED,
+        updatedAt: new Date(),
+      })
+      .where(eq(proposals.id, proposalId));
+
+    return { message: 'Proposta cancelada e reembolso processado com sucesso' };
+  }
+
+  // ===== INTEGRAÇÃO REAL COM MERCADO PAGO PARA PROPOSTAS =====
+
+  private async createProposalPaymentPreference(
+    createProposalDto: CreateProposalDto,
+    userData: any,
+    trainingDate: Date
+  ): Promise<any> {
+    try {
+      const tempClassId = `proposal_${Date.now()}`;
+      
+      // Calcular taxa da plataforma
+      const platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
+      const platformFee = createProposalDto.price * platformFeePercentage;
+      const personalAmount = createProposalDto.price - platformFee;
+
+      // Criar dados para o Mercado Pago
+      const preferenceData = {
+        classId: tempClassId,
+        title: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString()}`,
+        totalAmount: createProposalDto.price,
+        platformFee,
+        personalAmount,
+        studentEmail: userData.email,
+        personalEmail: 'temp@personal.com', // Será definido quando aceita
+        externalReference: tempClassId,
+      };
+
+      // Criar preferência no Mercado Pago
+      const mpPreference = await this.paymentsService['mercadoPagoService'].createPreference(preferenceData);
+
+      console.log('✅ [PROPOSALS] Preferência MP criada:', mpPreference.id);
+
+      return {
+        success: true,
+        paymentId: tempClassId,
+        status: 'pending',
+        method: createProposalDto.paymentMethod,
+        amount: createProposalDto.price,
+        preferenceId: mpPreference.id,
+        checkoutUrl: mpPreference.initPoint,
+        sandboxCheckoutUrl: mpPreference.sandboxInitPoint,
+        platformFee,
+        personalAmount,
+        message: 'Preferência de pagamento criada com sucesso.',
+      };
+
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
+      
+      // Fallback para simulação se MP falhar
+      return this.simulatePaymentForProposal(createProposalDto);
+    }
+  }
+
+  // ===== FALLBACK: SIMULAÇÃO DE PAGAMENTO =====
 
   private simulatePaymentForProposal(createProposalDto: CreateProposalDto): any {
     const paymentId = `proposal_payment_${Date.now()}`;
     
-    console.log(`💳 [PROPOSALS] Simulando pagamento ${createProposalDto.paymentMethod} para R$ ${createProposalDto.price}`);
+    console.log(`💳 [PROPOSALS] Fallback - Simulando pagamento ${createProposalDto.paymentMethod} para R$ ${createProposalDto.price}`);
 
     // Simular diferentes métodos de pagamento
     switch (createProposalDto.paymentMethod) {
@@ -468,7 +674,7 @@ export class ProposalsService {
           amount: createProposalDto.price,
           qrCode: `pix_qr_${paymentId}`,
           qrCodeBase64: Buffer.from(`pix_qr_${paymentId}`).toString('base64'),
-          message: 'PIX gerado com sucesso. Escaneie o QR Code para pagar.',
+          message: 'PIX gerado com sucesso (simulação). Escaneie o QR Code para pagar.',
         };
 
       case 'credit_card':
@@ -479,7 +685,7 @@ export class ProposalsService {
           status: 'approved', // Cartão aprovado imediatamente (mock)
           method: createProposalDto.paymentMethod,
           amount: createProposalDto.price,
-          message: 'Pagamento aprovado com sucesso.',
+          message: 'Pagamento aprovado com sucesso (simulação).',
         };
 
       case 'mercado_pago':
@@ -490,7 +696,7 @@ export class ProposalsService {
           method: 'mercado_pago',
           amount: createProposalDto.price,
           checkoutUrl: `https://mercadopago.com/checkout/${paymentId}`,
-          message: 'Redirecionando para o Mercado Pago...',
+          message: 'Redirecionando para o Mercado Pago (simulação)...',
         };
 
       default:

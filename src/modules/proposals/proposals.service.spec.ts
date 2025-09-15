@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProposalsService } from './proposals.service';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
+import { PaymentsService } from '../payments/payments.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -24,6 +25,21 @@ const mockStudentPaymentService = {
   removeCard: jest.fn(),
 };
 
+// Mock do PaymentsService
+const mockPaymentsService = {
+  createPaymentPreference: jest.fn(),
+  processWebhook: jest.fn(),
+  getPayment: jest.fn(),
+  refundPayment: jest.fn(),
+  mercadoPagoService: {
+    createPreference: jest.fn().mockResolvedValue({
+      id: 'pref_123',
+      initPoint: 'https://mp.com/init',
+      sandboxInitPoint: 'https://mp.com/sandbox',
+    }),
+  },
+};
+
 describe('ProposalsService', () => {
   let service: ProposalsService;
 
@@ -38,6 +54,10 @@ describe('ProposalsService', () => {
         {
           provide: StudentPaymentMethodsService,
           useValue: mockStudentPaymentService,
+        },
+        {
+          provide: PaymentsService,
+          useValue: mockPaymentsService,
         },
       ],
     }).compile();

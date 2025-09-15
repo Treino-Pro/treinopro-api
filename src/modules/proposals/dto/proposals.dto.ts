@@ -275,9 +275,13 @@ export class ProposalResponseDto {
     status: string;
     method: string;
     amount: number;
-    checkoutUrl?: string; // Para MP/PIX
+    preferenceId?: string; // ID da preferência MP
+    checkoutUrl?: string; // URL de checkout MP
+    sandboxCheckoutUrl?: string; // URL de checkout MP sandbox
     qrCode?: string; // Para PIX
     qrCodeBase64?: string; // QR Code em base64
+    platformFee?: number; // Taxa da plataforma
+    personalAmount?: number; // Valor para o personal
     message?: string;
     expiresAt?: Date; // Quando o pagamento expira
   };

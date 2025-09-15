@@ -11,7 +11,8 @@ import {
   Request,
   HttpCode,
   HttpStatus,
-  ParseUUIDPipe
+  ParseUUIDPipe,
+  ForbiddenException
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -298,5 +299,38 @@ export class ProposalsController {
   })
   async cancelExpiredProposals(): Promise<{ cancelled: number }> {
     return this.proposalsService.cancelExpiredProposals();
+  }
+
+  // ===== SISTEMA DE REEMBOLSO =====
+
+  @Post(':id/refund')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Solicitar reembolso de proposta',
+    description: 'Permite que o aluno solicite reembolso de uma proposta não aceita'
+  })
+  @ApiParam({ name: 'id', description: 'ID da proposta' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Reembolso processado com sucesso'
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Proposta não pode ser reembolsada'
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Proposta não encontrada'
+  })
+  async refundProposal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ): Promise<{ message: string }> {
+    // Verificar se o usuário é um aluno
+    if (req.user.userType !== 'student') {
+      throw new ForbiddenException('Apenas alunos podem solicitar reembolso');
+    }
+    
+    return this.proposalsService.refundUnacceptedProposal(id, req.user.sub);
   }
 }
