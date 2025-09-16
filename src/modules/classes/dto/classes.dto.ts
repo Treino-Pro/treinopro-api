@@ -125,6 +125,17 @@ export class ClassResponseDto {
   status: ClassStatus;
   startedAt?: Date;
   completedAt?: Date;
+  pendingConfirmationAt?: Date;
+  confirmedAt?: Date;
+  noShowReportedAt?: Date;
+  noShowReportedBy?: 'student' | 'personal';
+  disputeStatus?: ClassDisputeStatus;
+  custodyExpiresAt?: Date;
+  evidenceDeadline?: Date;
+  studentEvidence?: string;
+  personalEvidence?: string;
+  resolution?: string;
+  resolvedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   

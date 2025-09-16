@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ClassesService } from './classes.service';
 import { CreateClassDto, ClassStatus, StartClassDto, CompleteClassDto } from './dto/classes.dto';
+import { GamificationService } from '../gamification/gamification.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -19,6 +20,14 @@ const mockDb = {
   select: jest.fn(),
 };
 
+// Mock do GamificationService
+const mockGamificationService = {
+  processClassCompletion: jest.fn(),
+  addXP: jest.fn(),
+  updateMissionProgress: jest.fn(),
+  updateAchievementProgress: jest.fn(),
+};
+
 describe('ClassesService', () => {
   let service: ClassesService;
 
@@ -29,6 +38,10 @@ describe('ClassesService', () => {
         {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
+        },
+        {
+          provide: GamificationService,
+          useValue: mockGamificationService,
         },
       ],
     }).compile();
@@ -172,8 +185,9 @@ describe('ClassesService', () => {
         notes: 'Aula iniciada com sucesso',
       };
 
+      // Usar uma data atual para evitar problemas de timing
       const now = new Date();
-      const classTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutos no futuro (dentro da janela de 10 min)
+      const classTime = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutos no futuro
       const mockClass = {
         id: 'class-1',
         personalId: 'personal-1',
@@ -185,8 +199,8 @@ describe('ClassesService', () => {
 
       const updatedClass = {
         ...mockClass,
-        status: ClassStatus.ACTIVE,
-        startedAt: new Date(),
+        status: ClassStatus.PENDING_CONFIRMATION, // O status correto após startClass
+        pendingConfirmationAt: new Date(),
       };
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
@@ -202,8 +216,8 @@ describe('ClassesService', () => {
       const result = await service.startClass(classId, startClassDto, userId);
 
       // Assert
-      expect(result.status).toBe(ClassStatus.ACTIVE);
-      expect(result.startedAt).toBeDefined();
+      expect(result.status).toBe(ClassStatus.PENDING_CONFIRMATION);
+      expect(result.pendingConfirmationAt).toBeDefined();
     });
 
     it('deve lançar erro se usuário não for o personal trainer', async () => {
@@ -258,7 +272,7 @@ describe('ClassesService', () => {
         id: 'class-1',
         personalId: 'personal-1',
         status: ClassStatus.ACTIVE,
-        startedAt: new Date(Date.now() - 30 * 60 * 1000), // 30 minutos atrás
+        startedAt: new Date('2024-01-01T09:30:00.000Z'), // 30 minutos atrás
       };
 
       const updatedClass = {

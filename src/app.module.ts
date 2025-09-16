@@ -13,6 +13,7 @@ import { RatingsModule } from './modules/ratings/ratings.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { GamificationModule } from './modules/gamification/gamification.module';
 import { SharedCacheModule } from './shared/cache.module';
 import { HealthController } from './common/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -47,6 +48,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     PaymentsModule,
     JobsModule,
     NotificationsModule,
+    GamificationModule,
   ],
   controllers: [HealthController],
   providers: [

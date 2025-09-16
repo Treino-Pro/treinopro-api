@@ -9,6 +9,7 @@ export * from './financial';
 export * from './locations';
 export * from './ratings';
 export * from './payments';
+export * from './gamification';
 
 // Export all enums
 export * from './users';
@@ -18,3 +19,4 @@ export * from './evaluations';
 export * from './financial';
 export * from './ratings';
 export * from './payments';
+export * from './gamification';
