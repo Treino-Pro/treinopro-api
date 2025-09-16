@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProposalsService } from './proposals.service';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
+import { JobsService } from '../jobs/jobs.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -40,6 +41,13 @@ const mockPaymentsService = {
   },
 };
 
+// Mock do JobsService
+const mockJobsService = {
+  scheduleProposalExpiration: jest.fn(),
+  scheduleNotification: jest.fn(),
+  schedulePaymentTimeout: jest.fn(),
+};
+
 describe('ProposalsService', () => {
   let service: ProposalsService;
 
@@ -58,6 +66,10 @@ describe('ProposalsService', () => {
         {
           provide: PaymentsService,
           useValue: mockPaymentsService,
+        },
+        {
+          provide: JobsService,
+          useValue: mockJobsService,
         },
       ],
     }).compile();

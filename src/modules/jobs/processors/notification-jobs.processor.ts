@@ -4,6 +4,7 @@ import { Job } from 'bull';
 import { eq, and, or, gt, count } from 'drizzle-orm';
 import { NotificationJobData } from '../jobs.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { users, proposals, classes, messages } from '../../../database/schema';
 
 @Processor('notification-jobs')
 export class NotificationJobsProcessor {
@@ -48,14 +49,13 @@ export class NotificationJobsProcessor {
       // Buscar usuários com perfil incompleto
       const incompleteUsers = await this.db
         .select()
-        .from(this.db.users)
+        .from(users)
         .where(
           and(
-            eq(this.db.users.isVerified, true),
+            eq(users.isVerified, true),
             or(
-              eq(this.db.users.profilePicture, null),
-              eq(this.db.users.bio, null),
-              eq(this.db.users.bio, '')
+              eq(users.profileImageUrl, null),
+              eq(users.profileImageUrl, '')
             )
           )
         );
@@ -96,14 +96,14 @@ export class NotificationJobsProcessor {
     try {
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-      // Buscar usuários ativos
+      // Buscar usuários ativos (baseado na última atualização)
       const activeUsers = await this.db
         .select()
-        .from(this.db.users)
+        .from(users)
         .where(
           and(
-            eq(this.db.users.isVerified, true),
-            gt(this.db.users.lastLoginAt, oneWeekAgo)
+            eq(users.isVerified, true),
+            gt(users.updatedAt, oneWeekAgo)
           )
         );
 
@@ -144,7 +144,7 @@ export class NotificationJobsProcessor {
     try {
       // Buscar proposta e usuário
       const proposal = await this.db.query.proposals.findFirst({
-        where: eq(this.db.proposals.id, proposalId),
+        where: eq(proposals.id, proposalId),
         with: { student: true },
       });
 
@@ -190,25 +190,25 @@ export class NotificationJobsProcessor {
       // Buscar estatísticas da semana para o usuário
       const [proposalsCount, classesCount, messagesCount] = await Promise.all([
         this.db.select({ count: count() })
-          .from(this.db.proposals)
+          .from(proposals)
           .where(and(
-            eq(this.db.proposals.studentId, userId),
-            gt(this.db.proposals.createdAt, since)
+            eq(proposals.studentId, userId),
+            gt(proposals.createdAt, since)
           )),
         this.db.select({ count: count() })
-          .from(this.db.classes)
+          .from(classes)
           .where(and(
             or(
-              eq(this.db.classes.studentId, userId),
-              eq(this.db.classes.personalId, userId)
+              eq(classes.studentId, userId),
+              eq(classes.personalId, userId)
             ),
-            gt(this.db.classes.createdAt, since)
+            gt(classes.createdAt, since)
           )),
         this.db.select({ count: count() })
-          .from(this.db.messages)
+          .from(messages)
           .where(and(
-            eq(this.db.messages.senderId, userId),
-            gt(this.db.messages.createdAt, since)
+            eq(messages.senderId, userId),
+            gt(messages.createdAt, since)
           )),
       ]);
 

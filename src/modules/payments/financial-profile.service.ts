@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { Inject } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { financialProfiles, withdrawalRequests, userWallets, users } from '../../database/schema';
-import { DB } from '../../database/database.module';
+// Removido import incorreto - usando DATABASE_CONNECTION via @Inject
 import {
   UpdateFinancialProfileDto,
   FinancialProfileResponseDto,
@@ -17,7 +17,7 @@ import {
 
 @Injectable()
 export class FinancialProfileService {
-  constructor(@Inject('DATABASE_CONNECTION') private db: DB) {}
+  constructor(@Inject('DATABASE_CONNECTION') private db: any) {}
 
   // Buscar perfil financeiro do usuário
   async getFinancialProfile(userId: string): Promise<FinancialProfileResponseDto> {

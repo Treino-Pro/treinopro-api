@@ -32,7 +32,8 @@ import {
   PaymentStatsDto,
   PaymentFiltersDto,
   DisputeFiltersDto,
-  MercadoPagoWebhookDto
+  MercadoPagoWebhookDto,
+  PaymentStatus
 } from './dto/payments.dto';
 
 @Controller('payments')
@@ -173,27 +174,27 @@ export class PaymentsController {
   // Endpoints específicos para diferentes tipos de pagamento
   @Get('pending')
   async getPendingPayments(@Request() req: any): Promise<PaymentResponseDto[]> {
-    return this.paymentsService.getPayments({ status: 'pending' }, req.user.sub);
+    return this.paymentsService.getPayments({ status: PaymentStatus.PENDING }, req.user.sub);
   }
 
   @Get('authorized')
   async getAuthorizedPayments(@Request() req: any): Promise<PaymentResponseDto[]> {
-    return this.paymentsService.getPayments({ status: 'authorized' }, req.user.sub);
+    return this.paymentsService.getPayments({ status: PaymentStatus.AUTHORIZED }, req.user.sub);
   }
 
   @Get('captured')
   async getCapturedPayments(@Request() req: any): Promise<PaymentResponseDto[]> {
-    return this.paymentsService.getPayments({ status: 'captured' }, req.user.sub);
+    return this.paymentsService.getPayments({ status: PaymentStatus.CAPTURED }, req.user.sub);
   }
 
   @Get('refunded')
   async getRefundedPayments(@Request() req: any): Promise<PaymentResponseDto[]> {
-    return this.paymentsService.getPayments({ status: 'refunded' }, req.user.sub);
+    return this.paymentsService.getPayments({ status: PaymentStatus.REFUNDED }, req.user.sub);
   }
 
   @Get('disputed')
   async getDisputedPayments(@Request() req: any): Promise<PaymentResponseDto[]> {
-    return this.paymentsService.getPayments({ status: 'disputed' }, req.user.sub);
+    return this.paymentsService.getPayments({ status: PaymentStatus.DISPUTED }, req.user.sub);
   }
 
   // Endpoints para classes específicas
@@ -367,9 +368,9 @@ export class PaymentsController {
       authorizedAt: payment.authorizedAt,
       capturedAt: payment.capturedAt,
       refundedAt: payment.refundedAt,
-      canCapture: payment.status === 'authorized',
-      canRefund: ['authorized', 'captured'].includes(payment.status),
-      canCancel: payment.status === 'pending',
+      canCapture: payment.status === PaymentStatus.AUTHORIZED,
+      canRefund: [PaymentStatus.AUTHORIZED, PaymentStatus.CAPTURED].includes(payment.status),
+      canCancel: payment.status === PaymentStatus.PENDING,
     };
   }
 

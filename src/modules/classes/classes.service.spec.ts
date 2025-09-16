@@ -173,7 +173,7 @@ describe('ClassesService', () => {
       };
 
       const now = new Date();
-      const classTime = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutos no futuro
+      const classTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutos no futuro (dentro da janela de 10 min)
       const mockClass = {
         id: 'class-1',
         personalId: 'personal-1',

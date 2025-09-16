@@ -6,11 +6,13 @@ import { PaymentJobsProcessor } from './processors/payment-jobs.processor';
 import { NotificationJobsProcessor } from './processors/notification-jobs.processor';
 import { DatabaseModule } from '../../database/database.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     DatabaseModule,
     PaymentsModule,
+    NotificationsModule,
     BullModule.registerQueue(
       {
         name: 'proposal-jobs',
