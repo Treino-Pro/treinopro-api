@@ -7,6 +7,8 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { DatabaseModule } from '../../database/database.module';
 import { CrefModule } from '../cref/cref.module';
+import { EmailVerificationService } from './services/email-verification.service';
+import { EmailService } from '../notifications/services/email.service';
 
 @Module({
   imports: [
@@ -36,7 +38,7 @@ import { CrefModule } from '../cref/cref.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, JwtStrategy, EmailVerificationService, EmailService],
+  exports: [AuthService, JwtModule, EmailVerificationService],
 })
 export class AuthModule {}

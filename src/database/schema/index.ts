@@ -10,6 +10,7 @@ export * from './locations';
 export * from './ratings';
 export * from './payments';
 export * from './gamification';
+export * from './email-verifications';
 
 // Export all enums
 export * from './users';

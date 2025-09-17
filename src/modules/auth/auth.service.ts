@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
 import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
+import { EmailVerificationService } from './services/email-verification.service';
 
 @Injectable()
 export class AuthService {
@@ -15,6 +16,7 @@ export class AuthService {
     private configService: ConfigService,
     @Inject('DATABASE_CONNECTION') private db: any,
     private crefService: CrefService,
+    private emailVerificationService: EmailVerificationService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -255,6 +257,8 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    // Nota: Verificação de email é apenas no cadastro, não no login
+
     // Gerar tokens
     console.log('🔑 [AUTH] Gerando tokens JWT...');
     const tokens = await this.generateTokens(user.id, user.email, user.userType);
@@ -378,5 +382,37 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+  async sendVerificationCode(email: string): Promise<{ message: string; expiresAt: Date }> {
+    console.log('📧 [AUTH] Enviando código de verificação para:', email);
+
+    // Validar formato do email
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email)) {
+      throw new BadRequestException('Formato de email inválido');
+    }
+
+    // Verificar se o email já está em uso
+    const existingUser = await this.db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('Este email já está em uso. Use outro email ou faça login.');
+    }
+
+    // Enviar código de verificação (usar email como firstName temporariamente)
+    return this.emailVerificationService.sendVerificationCode(email, email.split('@')[0]);
+  }
+
+  async verifyCode(email: string, code: string): Promise<{ message: string; verified: boolean }> {
+    console.log('🔍 [AUTH] Verificando código para:', email, 'Código:', code);
+    return this.emailVerificationService.verifyCode(email, code);
+  }
+
+
+  async isEmailVerified(email: string): Promise<boolean> {
+    return this.emailVerificationService.isEmailVerified(email);
   }
 }

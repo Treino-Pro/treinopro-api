@@ -12,15 +12,18 @@ export class EmailService {
 
   private setupTransporter(): void {
     // Configurar transporter baseado nas variáveis de ambiente
-    if (process.env.NODE_ENV === 'production') {
-      // Produção - usar provedor real (ex: SendGrid, AWS SES, etc.)
+    if (process.env.NODE_ENV === 'production' || process.env.EMAIL_HOST) {
+      // Produção ou quando EMAIL_HOST está configurado - usar servidor SMTP próprio
       this.transporter = nodemailer.createTransport({
-        service: process.env.EMAIL_SERVICE || 'gmail',
+        host: process.env.EMAIL_HOST,
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: process.env.EMAIL_PORT === '465', // true para 465, false para outras portas
         auth: {
           user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASSWORD,
+          pass: process.env.EMAIL_PASS,
         },
       });
+      this.logger.log('📧 Servidor SMTP próprio configurado');
     } else {
       // Desenvolvimento - usar Ethereal Email para testes
       this.setupEtherealTransporter();
@@ -64,7 +67,7 @@ export class EmailService {
       const emailContent = this.getEmailTemplate(template, data);
       
       const mailOptions = {
-        from: `"TreinoPro" <${process.env.EMAIL_FROM || 'noreply@treinopro.com'}>`,
+        from: `"TreinoPro" <${process.env.EMAIL_USER}>`,
         to: to,
         subject: emailContent.subject,
         html: emailContent.html,
@@ -140,6 +143,54 @@ export class EmailService {
           text: this.getRefundProcessedText(data),
         };
 
+      case 'verification-code':
+        return {
+          subject: '🔐 Seu código de verificação - TreinoPro',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+              <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 30px;">
+                  <h1 style="color: #2c3e50; margin-bottom: 10px;">TreinoPro</h1>
+                  <h2 style="color: #34495e; font-weight: normal;">Código de Verificação</h2>
+                </div>
+                
+                <p style="color: #555; font-size: 16px; line-height: 1.5;">
+                  Olá, <strong>${data.firstName}</strong>!
+                </p>
+                
+                <p style="color: #555; font-size: 16px; line-height: 1.5;">
+                  Use o código abaixo para verificar seu email e concluir seu cadastro:
+                </p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                  <div style="background-color: #f8f9fa; border: 2px dashed #dee2e6; padding: 20px; border-radius: 8px; display: inline-block;">
+                    <span style="font-size: 32px; font-weight: bold; color: #2c3e50; letter-spacing: 5px; font-family: monospace;">
+                      ${data.code}
+                    </span>
+                  </div>
+                </div>
+                
+                <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                  <p style="color: #856404; margin: 0; font-size: 14px;">
+                    ⏰ <strong>Este código expira em:</strong> ${data.expiresAt}
+                  </p>
+                </div>
+                
+                <p style="color: #777; font-size: 14px; line-height: 1.5; margin-top: 30px;">
+                  Se você não solicitou este código, pode ignorar este email com segurança.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                
+                <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
+                  © 2024 TreinoPro. Todos os direitos reservados.
+                </p>
+              </div>
+            </div>
+          `,
+          text: `TreinoPro - Código de Verificação\n\nOlá, ${data.firstName}!\n\nUse o código abaixo para verificar seu email:\n\n${data.code}\n\nEste código expira em: ${data.expiresAt}\n\nSe você não solicitou este código, pode ignorar este email.\n\n© 2024 TreinoPro`
+        };
+
       case 'profile-reminder':
         return {
           subject: '👤 Complete seu Perfil',
@@ -152,6 +203,13 @@ export class EmailService {
           subject: '📊 Seu Resumo Semanal',
           html: this.getWeeklySummaryHTML(data),
           text: this.getWeeklySummaryText(data),
+        };
+
+      case 'email-verification':
+        return {
+          subject: 'Confirme seu cadastro no TreinoPro',
+          html: this.getEmailVerificationHTML(data),
+          text: this.getEmailVerificationText(data),
         };
 
       default:
@@ -394,5 +452,49 @@ export class EmailService {
 
   private getWeeklySummaryText(data: any): string {
     return `Resumo Semanal\n\nOlá ${data.firstName},\n\nResumo da semana (${data.weekPeriod.start} - ${data.weekPeriod.end}):\n\nPropostas criadas: ${data.proposalsCreated}\nAulas realizadas: ${data.classesParticipated}\nMensagens enviadas: ${data.messagesSent}\n\nContinue assim!\n\nAtenciosamente,\nEquipe TreinoPro`;
+  }
+
+  private getEmailVerificationHTML(data: any): string {
+    return `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
+          <h1 style="color: #2c3e50; margin: 0; font-size: 24px;">TreinoPro</h1>
+          <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">Confirmação de Cadastro</p>
+        </div>
+        
+        <div style="padding: 30px 20px; text-align: center;">
+          <h2 style="color: #2c3e50; margin-bottom: 20px; font-size: 20px;">Confirme seu cadastro</h2>
+          <p style="color: #34495e; margin-bottom: 25px; font-size: 16px; line-height: 1.5;">Olá ${data.firstName},</p>
+          <p style="color: #34495e; margin-bottom: 30px; font-size: 16px; line-height: 1.5;">Para finalizar seu cadastro, use o código abaixo:</p>
+          
+          <div style="background: #ecf0f1; border: 2px solid #bdc3c7; padding: 25px; border-radius: 8px; margin: 30px 0; display: inline-block;">
+            <span style="font-size: 28px; font-weight: bold; color: #2c3e50; letter-spacing: 4px; font-family: monospace;">
+              ${data.code}
+            </span>
+          </div>
+          
+          <p style="color: #7f8c8d; font-size: 14px; margin-top: 20px;">
+            Este código é válido por 10 minutos
+          </p>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
+          <p style="color: #2c3e50; margin: 0; font-size: 14px; line-height: 1.4;">
+            <strong>Dica de segurança:</strong> Nunca compartilhe este código com outras pessoas. Nossa equipe nunca solicitará este código por telefone ou email.
+          </p>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+          <p style="color: #7f8c8d; font-size: 14px; margin: 0;">
+            Equipe TreinoPro<br>
+            <span style="font-size: 12px;">Este é um email automático, não responda.</span>
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private getEmailVerificationText(data: any): string {
+    return `TreinoPro - Verificação de Email\n\nOlá ${data.firstName},\n\nUse o código abaixo para verificar seu email:\n\nCódigo: ${data.code}\n\nEste código expira em 10 minutos.\n\nSe você não solicitou este código, ignore este email.\n\nAtenciosamente,\nEquipe TreinoPro`;
   }
 }

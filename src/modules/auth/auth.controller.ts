@@ -79,4 +79,25 @@ export class AuthController {
   async refreshToken(@Body() body: { refreshToken: string }) {
     return this.authService.refreshToken(body.refreshToken);
   }
+
+  @Post('send-verification-code')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enviar código de verificação por email (apenas para cadastro)' })
+  @ApiResponse({ status: 200, description: 'Código enviado com sucesso' })
+  @ApiResponse({ status: 400, description: 'Email inválido ou usuário não encontrado' })
+  async sendVerificationCode(@Body() body: { email: string }) {
+    return this.authService.sendVerificationCode(body.email);
+  }
+
+  @Post('verify-code')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar código de verificação (apenas para cadastro)' })
+  @ApiResponse({ status: 200, description: 'Código verificado com sucesso' })
+  @ApiResponse({ status: 400, description: 'Código inválido ou expirado' })
+  async verifyCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyCode(body.email, body.code);
+  }
+
 }
