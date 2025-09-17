@@ -1,5 +1,6 @@
 import { IsString, IsNumber, IsEnum, IsOptional, IsUUID, IsNotEmpty, IsEmail, IsObject, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // Enums
 export enum PaymentStatus {
@@ -43,22 +44,43 @@ export class CreatePaymentDto {
 }
 
 export class CreatePaymentPreferenceDto {
+  @ApiProperty({
+    description: 'ID da aula para pagamento',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsUUID()
   @IsNotEmpty()
   classId: string;
 
+  @ApiProperty({
+    description: 'Valor total do pagamento em reais',
+    example: 80.00,
+    minimum: 0.01
+  })
   @IsNumber()
   @Min(0.01)
   totalAmount: number;
 
+  @ApiPropertyOptional({
+    description: 'Descrição do pagamento',
+    example: 'Pagamento da aula de musculação'
+  })
   @IsString()
   @IsOptional()
   description?: string;
 
+  @ApiPropertyOptional({
+    description: 'URL de sucesso do pagamento',
+    example: 'https://app.treinopro.com/payment/success'
+  })
   @IsString()
   @IsOptional()
   successUrl?: string;
 
+  @ApiPropertyOptional({
+    description: 'URL de falha do pagamento',
+    example: 'https://app.treinopro.com/payment/failure'
+  })
   @IsString()
   @IsOptional()
   failureUrl?: string;
@@ -95,37 +117,71 @@ export class UpdatePaymentDto {
 
 // DTOs de disputa
 export class CreateDisputeDto {
+  @ApiProperty({
+    description: 'ID do pagamento em disputa',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsUUID()
   @IsNotEmpty()
   paymentId: string;
 
+  @ApiProperty({
+    description: 'Motivo da disputa',
+    example: 'no_show',
+    enum: ['no_show', 'cancellation', 'service_not_provided', 'other']
+  })
   @IsString()
   @IsNotEmpty()
   reason: string; // 'no_show', 'cancellation', etc.
 
+  @ApiPropertyOptional({
+    description: 'Descrição detalhada da disputa',
+    example: 'O personal trainer não compareceu na aula agendada'
+  })
   @IsString()
   @IsOptional()
   description?: string;
 }
 
 export class SubmitEvidenceDto {
+  @ApiProperty({
+    description: 'Descrição das evidências',
+    example: 'Foto do local de treino vazio no horário agendado'
+  })
   @IsString()
   @IsNotEmpty()
   evidence: string; // Descrição das evidências
 
+  @ApiPropertyOptional({
+    description: 'URLs dos anexos (fotos, documentos)',
+    example: 'https://example.com/evidence1.jpg,https://example.com/evidence2.jpg'
+  })
   @IsString()
   @IsOptional()
   attachments?: string; // URLs dos anexos
 }
 
 export class ResolveDisputeDto {
+  @ApiProperty({
+    description: 'Resolução da disputa',
+    enum: DisputeStatus,
+    example: DisputeStatus.RESOLVED_PRO_STUDENT
+  })
   @IsEnum(DisputeStatus)
   resolution: DisputeStatus;
 
+  @ApiPropertyOptional({
+    description: 'Notas do administrador sobre a resolução',
+    example: 'Disputa resolvida a favor do aluno após análise das evidências'
+  })
   @IsString()
   @IsOptional()
   adminNotes?: string;
 
+  @ApiPropertyOptional({
+    description: 'Motivo da resolução',
+    example: 'Evidências insuficientes do personal trainer'
+  })
   @IsString()
   @IsOptional()
   reason?: string;
@@ -133,36 +189,69 @@ export class ResolveDisputeDto {
 
 // DTOs de carteira
 export class UpdateWalletDto {
+  @ApiPropertyOptional({
+    description: 'Saldo disponível para saque',
+    example: 150.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   availableBalance?: number;
 
+  @ApiPropertyOptional({
+    description: 'Saldo pendente de confirmação',
+    example: 50.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   pendingBalance?: number;
 
+  @ApiPropertyOptional({
+    description: 'Total ganho pelo usuário',
+    example: 500.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   totalEarned?: number;
 
+  @ApiPropertyOptional({
+    description: 'Total sacado pelo usuário',
+    example: 350.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   totalWithdrawn?: number;
 
+  @ApiPropertyOptional({
+    description: 'Dados da conta bancária',
+    example: { bank: '001', agency: '1234', account: '56789-0' }
+  })
   @IsObject()
   @IsOptional()
   bankAccount?: any;
 }
 
 export class WithdrawRequestDto {
+  @ApiProperty({
+    description: 'Valor do saque',
+    example: 100.00,
+    minimum: 0.01
+  })
   @IsNumber()
   @Min(0.01)
   amount: number;
 
+  @ApiPropertyOptional({
+    description: 'Descrição do saque',
+    example: 'Saque mensal'
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -170,20 +259,92 @@ export class WithdrawRequestDto {
 
 // DTOs de resposta
 export class PaymentResponseDto {
+  @ApiProperty({
+    description: 'ID do pagamento',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   id: string;
+
+  @ApiProperty({
+    description: 'ID da aula',
+    example: '123e4567-e89b-12d3-a456-426614174001'
+  })
   classId: string;
+
+  @ApiProperty({
+    description: 'ID do aluno',
+    example: '123e4567-e89b-12d3-a456-426614174002'
+  })
   studentId: string;
+
+  @ApiProperty({
+    description: 'ID do personal trainer',
+    example: '123e4567-e89b-12d3-a456-426614174003'
+  })
   personalId: string;
+
+  @ApiPropertyOptional({
+    description: 'ID do pagamento no Mercado Pago',
+    example: '1234567890'
+  })
   mpPaymentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID da preferência no Mercado Pago',
+    example: '1234567890'
+  })
   mpPreferenceId?: string;
+
+  @ApiProperty({
+    description: 'Valor total do pagamento',
+    example: 80.00
+  })
   totalAmount: number;
+
+  @ApiProperty({
+    description: 'Taxa da plataforma (10%)',
+    example: 8.00
+  })
   platformFee: number;
+
+  @ApiProperty({
+    description: 'Valor do personal trainer (90%)',
+    example: 72.00
+  })
   personalAmount: number;
+
+  @ApiProperty({
+    description: 'Status do pagamento',
+    enum: PaymentStatus,
+    example: PaymentStatus.AUTHORIZED
+  })
   status: PaymentStatus;
+
+  @ApiProperty({
+    description: 'Tipo do pagamento',
+    enum: PaymentType,
+    example: PaymentType.CLASS_PAYMENT
+  })
   type: PaymentType;
+
+  @ApiPropertyOptional({
+    description: 'Dados do split de pagamento',
+    example: { marketplace: '1234567890', marketplace_fee: '8.00', application_fee: '0.00', amount: '72.00' }
+  })
   splitData?: any;
   
   // Informações da aula
+  @ApiPropertyOptional({
+    description: 'Informações da aula',
+    type: 'object',
+    properties: {
+      id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174001' },
+      date: { type: 'string', format: 'date-time', example: '2024-01-15T14:00:00.000Z' },
+      time: { type: 'string', example: '14:00' },
+      location: { type: 'string', example: 'Academia Smart Fit' },
+      duration: { type: 'number', example: 60 }
+    }
+  })
   class?: {
     id: string;
     date: Date;
@@ -193,22 +354,64 @@ export class PaymentResponseDto {
   };
   
   // Informações dos usuários
+  @ApiPropertyOptional({
+    description: 'Informações do aluno',
+    type: 'object',
+    properties: {
+      id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174002' },
+      name: { type: 'string', example: 'João Silva' },
+      email: { type: 'string', example: 'joao@email.com' }
+    }
+  })
   student?: {
     id: string;
     name: string;
     email: string;
   };
   
+  @ApiPropertyOptional({
+    description: 'Informações do personal trainer',
+    type: 'object',
+    properties: {
+      id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174003' },
+      name: { type: 'string', example: 'Maria Santos' },
+      email: { type: 'string', example: 'maria@email.com' }
+    }
+  })
   personal?: {
     id: string;
     name: string;
     email: string;
   };
   
+  @ApiProperty({
+    description: 'Data de criação',
+    example: '2024-01-15T10:00:00.000Z'
+  })
   createdAt: Date;
+
+  @ApiProperty({
+    description: 'Data de atualização',
+    example: '2024-01-15T14:00:00.000Z'
+  })
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description: 'Data de autorização',
+    example: '2024-01-15T14:00:00.000Z'
+  })
   authorizedAt?: Date;
+
+  @ApiPropertyOptional({
+    description: 'Data de captura',
+    example: '2024-01-15T15:00:00.000Z'
+  })
   capturedAt?: Date;
+
+  @ApiPropertyOptional({
+    description: 'Data de reembolso',
+    example: '2024-01-16T10:00:00.000Z'
+  })
   refundedAt?: Date;
 }
 
@@ -333,36 +536,72 @@ export class WalletStatsDto {
 
 // DTOs para filtros
 export class PaymentFiltersDto {
+  @ApiPropertyOptional({
+    description: 'Status do pagamento para filtrar',
+    enum: PaymentStatus,
+    example: PaymentStatus.AUTHORIZED
+  })
   @IsEnum(PaymentStatus)
   @IsOptional()
   status?: PaymentStatus;
 
+  @ApiPropertyOptional({
+    description: 'Tipo do pagamento para filtrar',
+    enum: PaymentType,
+    example: PaymentType.CLASS_PAYMENT
+  })
   @IsEnum(PaymentType)
   @IsOptional()
   type?: PaymentType;
 
+  @ApiPropertyOptional({
+    description: 'ID da aula para filtrar',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsUUID()
   @IsOptional()
   classId?: string;
 
+  @ApiPropertyOptional({
+    description: 'ID do usuário para filtrar',
+    example: '123e4567-e89b-12d3-a456-426614174001'
+  })
   @IsUUID()
   @IsOptional()
   userId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Valor mínimo para filtrar',
+    example: 50.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   minAmount?: number;
 
+  @ApiPropertyOptional({
+    description: 'Valor máximo para filtrar',
+    example: 200.00,
+    minimum: 0
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
   maxAmount?: number;
 
+  @ApiPropertyOptional({
+    description: 'Data inicial para filtrar',
+    example: '2024-01-01T00:00:00.000Z'
+  })
   @Type(() => Date)
   @IsOptional()
   startDate?: Date;
 
+  @ApiPropertyOptional({
+    description: 'Data final para filtrar',
+    example: '2024-12-31T23:59:59.999Z'
+  })
   @Type(() => Date)
   @IsOptional()
   endDate?: Date;

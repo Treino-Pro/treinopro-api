@@ -1,41 +1,88 @@
 import { IsString, IsNumber, IsOptional, IsBoolean, IsEnum, IsArray, IsObject, Min, Max, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MissionType, AchievementCategory, MissionStatus, XPSource } from '../../../database/schema';
 
 // ===== DTOs DE PERFIL DE USUÁRIO =====
 
 export class UserProfileResponseDto {
+  @ApiProperty({
+    description: 'ID do perfil de gamificação',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsString()
   id: string;
 
+  @ApiProperty({
+    description: 'ID do usuário',
+    example: '123e4567-e89b-12d3-a456-426614174001'
+  })
   @IsString()
   userId: string;
 
+  @ApiProperty({
+    description: 'Nível atual do usuário',
+    example: 5
+  })
   @IsNumber()
   level: number;
 
+  @ApiProperty({
+    description: 'XP total acumulado',
+    example: 2500
+  })
   @IsNumber()
   totalXP: number;
 
+  @ApiProperty({
+    description: 'XP do nível atual',
+    example: 500
+  })
   @IsNumber()
   currentLevelXP: number;
 
+  @ApiProperty({
+    description: 'XP necessário para o próximo nível',
+    example: 500
+  })
   @IsNumber()
   xpToNextLevel: number;
 
+  @ApiProperty({
+    description: 'IDs das conquistas desbloqueadas',
+    type: [String],
+    example: ['achievement-1', 'achievement-2']
+  })
   @IsArray()
   achievements: string[];
 
+  @ApiProperty({
+    description: 'IDs das missões ativas',
+    type: [String],
+    example: ['mission-1', 'mission-2']
+  })
   @IsArray()
   missions: string[];
 
+  @ApiPropertyOptional({
+    description: 'Data do último reset de missões',
+    example: '2024-01-01T00:00:00.000Z'
+  })
   @IsOptional()
   @IsDateString()
   lastMissionReset?: Date;
 
+  @ApiProperty({
+    description: 'Data de criação',
+    example: '2024-01-01T00:00:00.000Z'
+  })
   @IsDateString()
   createdAt: Date;
 
+  @ApiProperty({
+    description: 'Data de atualização',
+    example: '2024-01-15T10:00:00.000Z'
+  })
   @IsDateString()
   updatedAt: Date;
 }
@@ -63,30 +110,70 @@ export class LevelUpResponseDto {
 // ===== DTOs DE MISSÕES =====
 
 export class CreateMissionDto {
+  @ApiProperty({
+    description: 'Título da missão',
+    example: 'Primeira Aula'
+  })
   @IsString()
   title: string;
 
+  @ApiProperty({
+    description: 'Descrição da missão',
+    example: 'Complete sua primeira aula de treino'
+  })
   @IsString()
   description: string;
 
+  @ApiProperty({
+    description: 'XP de recompensa',
+    example: 100,
+    minimum: 1
+  })
   @IsNumber()
   @Min(1)
   xpReward: number;
 
+  @ApiProperty({
+    description: 'Tipo da missão',
+    enum: MissionType,
+    example: MissionType.DAILY
+  })
   @IsEnum(MissionType)
   type: MissionType;
 
+  @ApiProperty({
+    description: 'Ação necessária para completar',
+    example: 'attend_class'
+  })
   @IsString()
   action: string;
 
+  @ApiPropertyOptional({
+    description: 'Data de início da missão',
+    example: '2024-01-01T00:00:00.000Z'
+  })
   @IsOptional()
   @IsDateString()
   startDate?: Date;
 
+  @ApiPropertyOptional({
+    description: 'Data de fim da missão',
+    example: '2024-12-31T23:59:59.999Z'
+  })
   @IsOptional()
   @IsDateString()
   endDate?: Date;
 
+  @ApiProperty({
+    description: 'Requisitos da missão',
+    type: 'object',
+    properties: {
+      action: { type: 'string', example: 'attend_class' },
+      count: { type: 'number', example: 1 },
+      timeframe: { type: 'string', example: 'weekly' },
+      conditions: { type: 'object', example: { user_type: 'student' } }
+    }
+  })
   @IsObject()
   requirements: {
     action: string;
@@ -95,6 +182,10 @@ export class CreateMissionDto {
     conditions?: Record<string, any>;
   };
 
+  @ApiPropertyOptional({
+    description: 'ID do usuário que criou a missão',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsOptional()
   @IsString()
   createdBy?: string;
@@ -418,20 +509,42 @@ export class AchievementQueryDto {
 // ===== DTOs DE XP =====
 
 export class AddXPDto {
+  @ApiProperty({
+    description: 'ID do usuário',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
   @IsString()
   userId: string;
 
+  @ApiProperty({
+    description: 'Quantidade de XP a adicionar',
+    example: 50,
+    minimum: 1
+  })
   @IsNumber()
   @Min(1)
   xpAmount: number;
 
+  @ApiProperty({
+    description: 'Fonte do XP',
+    enum: XPSource,
+    example: XPSource.CLASS_COMPLETION
+  })
   @IsEnum(XPSource)
   source: XPSource;
 
+  @ApiPropertyOptional({
+    description: 'ID da fonte do XP (ex: class_id, achievement_id)',
+    example: '123e4567-e89b-12d3-a456-426614174001'
+  })
   @IsOptional()
   @IsString()
   sourceId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Descrição do ganho de XP',
+    example: 'Completou uma aula de musculação'
+  })
   @IsOptional()
   @IsString()
   description?: string;

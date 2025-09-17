@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClassesService } from './classes.service';
 import { 
@@ -16,12 +17,28 @@ import {
   ClassDisputeDto
 } from './dto/classes.dto';
 
+@ApiTags('Classes')
 @Controller('classes')
 @UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class ClassesController {
   constructor(private readonly classesService: ClassesService) {}
 
   @Post()
+  @ApiOperation({ summary: 'Criar nova aula' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Aula criada com sucesso',
+    type: ClassResponseDto 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
   async createClass(
     @Body() createClassDto: CreateClassDto,
     @Request() req: any,
@@ -30,6 +47,24 @@ export class ClassesController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'Listar aulas com filtros' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de aulas retornada com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        classes: { type: 'array', items: { $ref: '#/components/schemas/ClassResponseDto' } },
+        total: { type: 'number' },
+        page: { type: 'number' },
+        limit: { type: 'number' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
   async getClasses(
     @Query() getClassesDto: GetClassesDto,
     @Request() req: any,
@@ -38,11 +73,36 @@ export class ClassesController {
   }
 
   @Get('stats')
+  @ApiOperation({ summary: 'Obter estatísticas das aulas' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Estatísticas retornadas com sucesso',
+    type: ClassStatsDto 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
   async getClassStats(@Request() req: any): Promise<ClassStatsDto> {
     return this.classesService.getClassStats(req.user.sub);
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Obter aula por ID' })
+  @ApiParam({ name: 'id', description: 'ID da aula' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Aula encontrada com sucesso',
+    type: ClassResponseDto 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Aula não encontrada' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
   async getClassById(
     @Param('id') id: string,
     @Request() req: any,
