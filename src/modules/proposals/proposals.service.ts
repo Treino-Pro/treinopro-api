@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { proposals, users, classes } from '../../database/schema';
-import { eq, and, desc, gte, lte, ilike, count, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, ilike, count, sql, or } from 'drizzle-orm';
 import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -285,6 +285,62 @@ export class ProposalsService {
     // Verificar se a proposta está pendente
     if (proposal.status !== ProposalStatus.PENDING) {
       throw new BadRequestException('Apenas propostas pendentes podem ser aceitas');
+    }
+
+    // ===== VALIDAR CONFLITO DE HORÁRIO COM AULAS EXISTENTES DO PERSONAL =====
+    try {
+      // Montar intervalo do dia da proposta
+      const proposedTrainingDate = new Date(proposal.trainingDate);
+      const startOfDay = new Date(proposedTrainingDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(proposedTrainingDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Buscar aulas do personal no mesmo dia com status relevantes
+      const existingClasses = await this.db
+        .select()
+        .from(classes)
+        .where(
+          and(
+            eq(classes.personalId, personalId),
+            gte(classes.date, startOfDay),
+            lte(classes.date, endOfDay),
+            or(
+              eq(classes.status, 'scheduled'),
+              eq(classes.status, 'pending_confirmation'),
+              eq(classes.status, 'active')
+            )
+          )
+        );
+
+      // Calcular janela de tempo da proposta aceita
+      const [propHour, propMin] = String(proposal.trainingTime || '00:00').split(':').map((v: string) => parseInt(v, 10));
+      const proposedStart = new Date(proposedTrainingDate);
+      proposedStart.setHours(propHour || 0, propMin || 0, 0, 0);
+      const proposedEnd = new Date(proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000);
+
+      // Verificar sobreposição com aulas existentes
+      const hasConflict = existingClasses.some((cls: any) => {
+        const classDate = new Date(cls.date);
+        const [cHour, cMin] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
+        const classStart = new Date(classDate);
+        classStart.setHours(cHour || 0, cMin || 0, 0, 0);
+        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+
+        // overlap se não (proposedEnd <= classStart || proposedStart >= classEnd)
+        return !(proposedEnd <= classStart || proposedStart >= classEnd);
+      });
+
+      if (hasConflict) {
+        throw new BadRequestException('Conflito de horário: você já possui uma aula agendada nesse período.');
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      // Em caso de erro inesperado na verificação, não bloquear o fluxo com mensagem genérica
+      console.error('❌ [PROPOSALS] Erro ao validar conflito de horário:', error);
+      throw new BadRequestException('Não foi possível validar conflitos de horário no momento. Tente novamente.');
     }
 
     // Aceitar a proposta (mudar status para matched)

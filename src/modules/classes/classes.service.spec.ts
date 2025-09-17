@@ -83,6 +83,10 @@ describe('ClassesService', () => {
 
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
       mockDb.query.classes.findFirst.mockResolvedValue(null);
+      // Sem conflito de horário no dia (select classes retorna lista vazia)
+      mockDb.select.mockImplementation(() => ({
+        from: () => ({ where: () => Promise.resolve([]) })
+      }));
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
           returning: jest.fn().mockResolvedValue([mockClass]),
@@ -171,6 +175,45 @@ describe('ClassesService', () => {
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
 
       // Act & Assert
+      await expect(service.createClass(createClassDto, userId))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('deve lançar erro de conflito quando já houver aula do personal no mesmo período', async () => {
+      const createClassDto: CreateClassDto = {
+        proposalId: 'proposal-1',
+        studentId: 'student-1',
+        personalId: 'personal-1',
+        location: 'Academia Central',
+        date: '2024-01-15',
+        time: '14:00', // 14:00-15:00
+        duration: 60,
+      };
+
+      const userId = 'student-1';
+      const mockProposal = {
+        id: 'proposal-1',
+        studentId: 'student-1',
+        personalId: 'personal-1',
+        status: 'accepted',
+      } as any;
+
+      const existingClass = {
+        id: 'class-9',
+        personalId: 'personal-1',
+        studentId: 'student-x',
+        date: new Date('2024-01-15T00:00:00Z'),
+        time: '14:30', // 14:30-15:30 (conflita)
+        duration: 60,
+        status: 'scheduled',
+      };
+
+      mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
+      mockDb.query.classes.findFirst.mockResolvedValue(null);
+      mockDb.select.mockImplementation(() => ({
+        from: () => ({ where: () => Promise.resolve([existingClass]) })
+      }));
+
       await expect(service.createClass(createClassDto, userId))
         .rejects.toThrow(BadRequestException);
     });
@@ -315,6 +358,82 @@ describe('ClassesService', () => {
       // Act & Assert
       await expect(service.completeClass(classId, completeClassDto, userId))
         .rejects.toThrow(BadRequestException);
+    });
+  });
+  describe('updateClass', () => {
+    it('deve lançar erro de conflito ao atualizar para horário que sobrepõe outra aula', async () => {
+      const classId = 'class-1';
+      const userId = 'personal-1';
+
+      const currentClass = {
+        id: classId,
+        personalId: userId,
+        studentId: 'student-1',
+        date: new Date('2024-01-15T00:00:00Z'),
+        time: '12:00',
+        duration: 60,
+        status: ClassStatus.SCHEDULED,
+      } as any;
+
+      const updateDto = { time: '14:00', duration: 60 };
+
+      const otherClass = {
+        id: 'class-2',
+        personalId: userId,
+        date: new Date('2024-01-15T00:00:00Z'),
+        time: '14:30', // 14:30-15:30 (conflita com 14:00-15:00)
+        duration: 60,
+        status: ClassStatus.SCHEDULED,
+      } as any;
+
+      mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
+      mockDb.select.mockImplementation(() => ({
+        from: () => ({ where: () => Promise.resolve([otherClass]) })
+      }));
+
+      await expect(service.updateClass(classId, updateDto as any, userId))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('deve atualizar aula quando não houver conflito', async () => {
+      const classId = 'class-1';
+      const userId = 'personal-1';
+
+      const currentClass = {
+        id: classId,
+        personalId: userId,
+        studentId: 'student-1',
+        date: new Date('2024-01-15T00:00:00Z'),
+        time: '12:00',
+        duration: 60,
+        status: ClassStatus.SCHEDULED,
+      } as any;
+
+      const updateDto = { time: '16:00', duration: 60 };
+
+      const nonOverlapping = {
+        id: 'class-2',
+        personalId: userId,
+        date: new Date('2024-01-15T00:00:00Z'),
+        time: '14:00', // 14:00-15:00 não conflita com 16:00-17:00
+        duration: 60,
+        status: ClassStatus.SCHEDULED,
+      } as any;
+
+      const updated = { ...currentClass, ...updateDto } as any;
+
+      mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
+      mockDb.select.mockImplementation(() => ({
+        from: () => ({ where: () => Promise.resolve([nonOverlapping]) })
+      }));
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({ returning: jest.fn().mockResolvedValue([updated]) })
+        })
+      });
+
+      const result = await service.updateClass(classId, updateDto as any, userId);
+      expect(result.time).toBe('16:00');
     });
   });
 

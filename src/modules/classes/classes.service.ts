@@ -54,6 +54,45 @@ export class ClassesService {
       throw new BadRequestException('Já existe uma aula para esta proposta');
     }
 
+    // ===== VALIDAR CONFLITO DE HORÁRIO PARA O PERSONAL =====
+    {
+      const classDate = new Date(createClassDto.date);
+      const startOfDay = new Date(classDate); startOfDay.setHours(0,0,0,0);
+      const endOfDay = new Date(classDate); endOfDay.setHours(23,59,59,999);
+
+      const existingClasses = await this.db
+        .select()
+        .from(classes)
+        .where(
+          and(
+            eq(classes.personalId, proposal.personalId),
+            gte(classes.date, startOfDay),
+            lte(classes.date, endOfDay),
+            or(
+              eq(classes.status, ClassStatus.SCHEDULED),
+              eq(classes.status, ClassStatus.PENDING_CONFIRMATION),
+              eq(classes.status, ClassStatus.ACTIVE)
+            )
+          )
+        );
+
+      const [h, m] = String(createClassDto.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
+      const proposedStart = new Date(classDate); proposedStart.setHours(h||0, m||0, 0, 0);
+      const proposedEnd = new Date(proposedStart.getTime() + (createClassDto.duration || 60) * 60 * 1000);
+
+      const hasConflict = existingClasses.some((cls: any) => {
+        const d = new Date(cls.date);
+        const [ch, cm] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
+        const classStart = new Date(d); classStart.setHours(ch||0, cm||0, 0, 0);
+        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+        return !(proposedEnd <= classStart || proposedStart >= classEnd);
+      });
+
+      if (hasConflict) {
+        throw new BadRequestException('Conflito de horário: o personal já possui aula nesse período.');
+      }
+    }
+
     // Criar a aula
     const [newClass] = await this.db.insert(classes).values({
       ...createClassDto,
@@ -198,6 +237,49 @@ export class ClassesService {
     // Apenas o personal pode editar a aula
     if (classData.personalId !== userId) {
       throw new ForbiddenException('Apenas o personal trainer pode editar a aula');
+    }
+
+    // ===== VALIDAR CONFLITO DE HORÁRIO (SE ALTERAR DATA/HORA/DURAÇÃO) =====
+    if (updateClassDto.date || updateClassDto.time || updateClassDto.duration) {
+      const newDate = updateClassDto.date ? new Date(updateClassDto.date) : new Date(classData.date);
+      const newTime = updateClassDto.time ?? classData.time;
+      const newDuration = updateClassDto.duration ?? classData.duration;
+
+      const startOfDay = new Date(newDate); startOfDay.setHours(0,0,0,0);
+      const endOfDay = new Date(newDate); endOfDay.setHours(23,59,59,999);
+
+      const existingClasses = await this.db
+        .select()
+        .from(classes)
+        .where(
+          and(
+            eq(classes.personalId, classData.personalId),
+            gte(classes.date, startOfDay),
+            lte(classes.date, endOfDay),
+            or(
+              eq(classes.status, ClassStatus.SCHEDULED),
+              eq(classes.status, ClassStatus.PENDING_CONFIRMATION),
+              eq(classes.status, ClassStatus.ACTIVE)
+            )
+          )
+        );
+
+      const [h, m] = String(newTime || '00:00').split(':').map((v: string) => parseInt(v, 10));
+      const proposedStart = new Date(newDate); proposedStart.setHours(h||0, m||0, 0, 0);
+      const proposedEnd = new Date(proposedStart.getTime() + (newDuration || 60) * 60 * 1000);
+
+      const hasConflict = existingClasses.some((cls: any) => {
+        if (cls.id === id) return false; // ignorar a própria aula
+        const d = new Date(cls.date);
+        const [ch, cm] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
+        const classStart = new Date(d); classStart.setHours(ch||0, cm||0, 0, 0);
+        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+        return !(proposedEnd <= classStart || proposedStart >= classEnd);
+      });
+
+      if (hasConflict) {
+        throw new BadRequestException('Conflito de horário: o personal já possui aula nesse período.');
+      }
     }
 
     const [updatedClass] = await this.db
