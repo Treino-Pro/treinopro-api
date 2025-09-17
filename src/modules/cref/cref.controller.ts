@@ -4,6 +4,7 @@ import { CrefService } from './cref.service';
 import { CrefCacheService } from './cref-cache.service';
 import { CrefQueueService } from './cref-queue.service';
 import { ValidateCrefDto, CrefValidationResponseDto } from './dto/cref.dto';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('CREF Validation')
 @Controller('cref')
@@ -15,6 +16,7 @@ export class CrefController {
   ) {}
 
   @Post('validate')
+  @Public()
   @ApiOperation({ 
     summary: 'Validar CREF',
     description: 'Valida um número de CREF no formato UF-NÚMERO (ex: SP-106227)'

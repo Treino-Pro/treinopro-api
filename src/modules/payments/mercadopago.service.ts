@@ -33,8 +33,11 @@ export class MercadoPagoService {
 
   constructor() {
     // Configurar cliente do Mercado Pago
+    const accessToken = process.env.MP_ACCESS_TOKEN || '';
+    const isTestMode = accessToken.startsWith('TEST-');
+    
     this.client = new MercadoPagoConfig({
-      accessToken: process.env.MP_ACCESS_TOKEN || '',
+      accessToken,
       options: {
         timeout: 5000,
         idempotencyKey: 'treinopro-' + Date.now(),
@@ -45,7 +48,7 @@ export class MercadoPagoService {
     this.payment = new Payment(this.client);
     this.paymentRefund = new PaymentRefund(this.client);
 
-    this.logger.log('MercadoPago Service inicializado');
+    this.logger.log(`MercadoPago Service inicializado - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`);
   }
 
   // Criar preferência de pagamento com split
@@ -125,9 +128,14 @@ export class MercadoPagoService {
 
       this.logger.log(`Preferência criada com sucesso: ${response.id}`);
 
+      const isTestMode = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+      const initPoint = isTestMode 
+        ? (response.sandbox_init_point || response.init_point || '')
+        : (response.init_point || '');
+
       return {
         id: response.id,
-        initPoint: response.init_point || '',
+        initPoint,
         sandboxInitPoint: response.sandbox_init_point || '',
       };
     } catch (error) {

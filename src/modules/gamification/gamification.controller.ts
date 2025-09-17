@@ -122,14 +122,20 @@ export class GamificationController {
           }
         },
         missionStats: {
-          totalMissions: { type: 'number', example: 25 },
-          completedMissions: { type: 'number', example: 150 },
-          averageCompletionRate: { type: 'number', example: 0.75 }
+          type: 'object',
+          properties: {
+            totalMissions: { type: 'number', example: 25 },
+            completedMissions: { type: 'number', example: 150 },
+            averageCompletionRate: { type: 'number', example: 0.75 }
+          }
         },
         achievementStats: {
-          totalAchievements: { type: 'number', example: 15 },
-          unlockedAchievements: { type: 'number', example: 300 },
-          averageUnlockRate: { type: 'number', example: 0.6 }
+          type: 'object',
+          properties: {
+            totalAchievements: { type: 'number', example: 15 },
+            unlockedAchievements: { type: 'number', example: 300 },
+            averageUnlockRate: { type: 'number', example: 0.6 }
+          }
         }
       },
       example: {

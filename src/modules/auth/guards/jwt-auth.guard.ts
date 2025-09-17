@@ -1,38 +1,28 @@
 import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
 
 @Injectable()
 export class JwtAuthGuard {
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
+    private reflector: Reflector,
   ) {}
 
   canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest();
     
-    // Lista de rotas que não precisam de autenticação
-    const publicRoutes = [
-      '/auth/login',
-      '/auth/register',
-      '/auth/forgot-password',
-      '/auth/reset-password',
-      '/auth/refresh',
-      '/health',
-      '/api/docs',
-      '/api/docs-json',
-    ];
+    // Verificar se a rota está marcada como pública usando o decorator @Public()
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-    // Verificar se a rota é pública
-    const isPublicRoute = publicRoutes.some(route => 
-      request.url.startsWith(route) || 
-      request.url === route ||
-      request.url.includes('/api/docs')
-    );
-
-    if (isPublicRoute) {
-      console.log('🔓 [JWT GUARD] Rota pública - permitindo acesso:', request.url);
+    if (isPublic) {
+      console.log('🔓 [JWT GUARD] Rota pública (@Public) - permitindo acesso:', request.url);
       return true;
     }
 

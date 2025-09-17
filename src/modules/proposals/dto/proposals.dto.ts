@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength, IsIn, IsBoolean } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export enum ProposalStatus {
   PENDING = 'pending',
@@ -321,6 +322,7 @@ export class ProposalQueryDto {
     default: 1,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   page?: number = 1;
 
@@ -331,6 +333,7 @@ export class ProposalQueryDto {
     default: 10,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number = 10;
 
@@ -369,4 +372,32 @@ export class ProposalQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+}
+
+export class PaymentStatusWebhookDto {
+  @ApiProperty({
+    description: 'ID da proposta',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @IsString()
+  @IsUUID()
+  proposalId: string;
+
+  @ApiProperty({
+    description: 'Status do pagamento',
+    example: 'approved',
+    enum: ['pending', 'approved', 'rejected', 'cancelled', 'captured'],
+  })
+  @IsString()
+  @IsIn(['pending', 'approved', 'rejected', 'cancelled', 'captured'])
+  paymentStatus: string;
+
+  @ApiProperty({
+    description: 'ID do pagamento no MercadoPago',
+    example: '1234567890',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  mpPaymentId?: string;
 }

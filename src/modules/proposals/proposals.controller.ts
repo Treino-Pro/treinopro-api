@@ -28,7 +28,8 @@ import {
   UpdateProposalDto, 
   ProposalQueryDto, 
   ProposalResponseDto, 
-  ProposalListResponseDto 
+  ProposalListResponseDto,
+  PaymentStatusWebhookDto
 } from './dto/proposals.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -266,8 +267,22 @@ export class ProposalsController {
     summary: 'Webhook para atualização de status de pagamento',
     description: 'Endpoint interno para receber atualizações de status de pagamento'
   })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Status do pagamento atualizado com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Status do pagamento atualizado com sucesso' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
   async updatePaymentStatus(
-    @Body() webhookData: { proposalId: string; paymentStatus: string; mpPaymentId?: string },
+    @Body() webhookData: PaymentStatusWebhookDto,
   ): Promise<{ message: string }> {
     await this.proposalsService.updatePaymentStatus(
       webhookData.proposalId,

@@ -352,6 +352,11 @@ export class ProposalsService {
   async updatePaymentStatus(proposalId: string, paymentStatus: string, mpPaymentId?: string): Promise<void> {
     console.log(`💳 [PROPOSALS] Atualizando status do pagamento: ${proposalId} → ${paymentStatus}`);
     
+    // Validar parâmetros obrigatórios
+    if (!proposalId || !paymentStatus) {
+      throw new Error('proposalId e paymentStatus são obrigatórios');
+    }
+    
     try {
       await this.db
         .update(proposals)
