@@ -14,7 +14,6 @@ export const users = pgTable('users', {
   userType: userTypeEnum('user_type').notNull(),
   firstName: varchar('first_name', { length: 100 }).notNull(),
   lastName: varchar('last_name', { length: 100 }).notNull(),
-  phone: varchar('phone', { length: 20 }),
   birthDate: timestamp('birth_date').notNull(),
   
   // Documentos de identificação (obrigatórios)

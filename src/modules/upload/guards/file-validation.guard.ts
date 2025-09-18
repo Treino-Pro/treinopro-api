@@ -31,6 +31,12 @@ export class FileValidationGuard implements CanActivate {
     const file = request.file;
     const category = request.body?.category || 'temp';
 
+    console.log('FileValidationGuard - Debug:');
+    console.log('- request.file:', !!file);
+    console.log('- request.body:', request.body);
+    console.log('- request.headers:', request.headers);
+    console.log('- category:', category);
+
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado');
     }

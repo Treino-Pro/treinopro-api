@@ -7,7 +7,7 @@ import { FileValidationOptions } from '../interfaces/file.interface';
 @Injectable()
 export class FileStorageUtil {
   private readonly logger = new Logger(FileStorageUtil.name);
-  private readonly storageBasePath = process.env.STORAGE_PATH || '/var/storage/treinopro';
+  private readonly storageBasePath = process.env.STORAGE_PATH || './storage';
   private readonly baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
 
   constructor() {

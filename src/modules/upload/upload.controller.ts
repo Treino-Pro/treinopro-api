@@ -11,6 +11,7 @@ import {
   Request,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -18,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UploadService } from './upload.service';
 import { FileValidationGuard } from './guards/file-validation.guard';
 import { UploadFileDto, FileResponseDto, FileCategory } from './dto/upload.dto';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Upload')
 @Controller('upload')
@@ -63,10 +65,10 @@ export class UploadController {
   }
 
   @Post('document')
+  @Public()
   @UseInterceptors(FileInterceptor('file'))
-  @UseGuards(FileValidationGuard)
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Upload de documento (RG, CNH, CREF)' })
+  @ApiOperation({ summary: 'Upload de documento (RG, CNH, CREF) - Público para cadastro' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Arquivo de documento',
@@ -91,18 +93,30 @@ export class UploadController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido ou muito grande' })
   async uploadDocument(
     @UploadedFile() file: Express.Multer.File,
-    @Body() uploadDto: UploadFileDto,
-    @Request() req: any
+    @Body() uploadDto: UploadFileDto
   ): Promise<FileResponseDto> {
-    const userId = req.user?.id;
-    return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.DOCUMENT }, userId);
+    console.log('uploadDocument - Debug:');
+    console.log('- file:', !!file);
+    console.log('- file.originalname:', file?.originalname);
+    console.log('- file.size:', file?.size);
+    console.log('- uploadDto:', uploadDto);
+    
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
+    
+    // Para uploads públicos (cadastro), não há userId
+    const result = await this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.DOCUMENT }, null);
+    console.log('uploadDocument - Resposta:', JSON.stringify(result, null, 2));
+    return result;
   }
 
   @Post('temp')
+  @Public()
   @UseInterceptors(FileInterceptor('file'))
   @UseGuards(FileValidationGuard)
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Upload temporário de arquivo' })
+  @ApiOperation({ summary: 'Upload temporário de arquivo - Público para cadastro' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Arquivo temporário',
@@ -122,11 +136,10 @@ export class UploadController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido ou muito grande' })
   async uploadTempFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body() uploadDto: UploadFileDto,
-    @Request() req: any
+    @Body() uploadDto: UploadFileDto
   ): Promise<FileResponseDto> {
-    const userId = req.user?.id;
-    return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.TEMP }, userId);
+    // Para uploads públicos (cadastro), não há userId
+    return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.TEMP }, null);
   }
 
   @Get(':id')
@@ -156,6 +169,33 @@ export class UploadController {
   async deleteFile(@Param('id') id: string, @Request() req: any): Promise<void> {
     const userId = req.user?.id;
     return this.uploadService.deleteFile(id, userId);
+  }
+
+  @Post('test')
+  @Public()
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Teste de upload - Debug' })
+  async testUpload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any
+  ): Promise<any> {
+    console.log('TEST UPLOAD - Dados recebidos:');
+    console.log('- file:', !!file);
+    console.log('- file.originalname:', file?.originalname);
+    console.log('- file.size:', file?.size);
+    console.log('- file.mimetype:', file?.mimetype);
+    console.log('- body:', body);
+    
+    return {
+      success: true,
+      file: file ? {
+        originalname: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype
+      } : null,
+      body: body
+    };
   }
 
   @Post('cleanup/temp')

@@ -31,11 +31,6 @@ export class RegisterDto {
   @IsNotEmpty()
   lastName: string;
 
-  @ApiProperty({ example: '11999999999', required: false })
-  @IsString()
-  @IsOptional()
-  phone?: string;
-
   @ApiProperty({ example: '1990-01-01' })
   @IsDateString()
   @IsNotEmpty()

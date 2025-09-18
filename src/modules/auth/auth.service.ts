@@ -29,7 +29,6 @@ export class AuthService {
         password, 
         firstName, 
         lastName, 
-        phone, 
         birthDate, 
         userType, 
         documentType,
@@ -157,7 +156,6 @@ export class AuthService {
         email,
         firstName,
         lastName,
-        phone,
         birthDate: birthDate ? new Date(birthDate) : null,
         userType,
         cref,
@@ -169,7 +167,6 @@ export class AuthService {
         passwordHash,
         firstName,
         lastName,
-        phone,
         birthDate: new Date(birthDate),
         userType,
         documentType,
@@ -227,6 +224,7 @@ export class AuthService {
       throw error;
     }
   }
+
 
   async login(loginDto: LoginDto) {
     console.log('🔑 [AUTH] Iniciando processo de login...');
