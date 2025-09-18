@@ -17,6 +17,7 @@ import { GamificationModule } from './modules/gamification/gamification.module';
 import { SharedCacheModule } from './shared/cache.module';
 import { HealthController } from './common/health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
@@ -51,6 +52,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     NotificationsModule,
     GamificationModule,
     AdminModule,
+    UploadModule,
   ],
   controllers: [HealthController],
   providers: [

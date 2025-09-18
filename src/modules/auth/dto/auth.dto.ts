@@ -55,10 +55,13 @@ export class RegisterDto {
   @IsNotEmpty()
   documentNumber: string;
 
-  @ApiProperty({ example: 'https://example.com/document.jpg' })
+  @ApiProperty({ 
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    description: 'ID do arquivo de documento (obtido via upload)'
+  })
   @IsString()
   @IsNotEmpty()
-  documentImageUrl: string;
+  documentImageId: string;
 
   // Campos específicos para Personal Trainers
   @ApiProperty({ 
@@ -70,10 +73,14 @@ export class RegisterDto {
   @IsOptional()
   cref?: string;
 
-  @ApiProperty({ example: 'https://example.com/cref.jpg', required: false })
+  @ApiProperty({ 
+    example: 'b2c3d4e5-f6g7-8901-bcde-f23456789012',
+    description: 'ID do arquivo CREF (obtido via upload)',
+    required: false 
+  })
   @IsString()
   @IsOptional()
-  crefImageUrl?: string;
+  crefImageId?: string;
 
   @ApiProperty({ example: ['Musculação', 'Funcional'], required: false })
   @IsArray()

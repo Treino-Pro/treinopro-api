@@ -72,7 +72,7 @@ export class ChatService {
         sender: {
           id: users.id,
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
-          profilePicture: users.profileImageUrl,
+          profilePicture: users.profileImageId,
         },
       })
       .from(messages)
@@ -127,7 +127,7 @@ export class ChatService {
         sender: {
           id: users.id,
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
-          profilePicture: users.profileImageUrl,
+          profilePicture: users.profileImageId,
         },
       })
       .from(messages)
@@ -305,7 +305,7 @@ export class ChatService {
         student: {
           id: users.id,
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
-          profilePicture: users.profileImageUrl,
+          profilePicture: users.profileImageId,
         },
       })
       .from(classes)
@@ -329,7 +329,7 @@ export class ChatService {
         .select({
           id: users.id,
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
-          profilePicture: users.profileImageUrl,
+          profilePicture: users.profileImageId,
         })
         .from(users)
         .where(eq(users.id, otherParticipantId))

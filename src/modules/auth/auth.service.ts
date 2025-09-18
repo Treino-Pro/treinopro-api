@@ -34,9 +34,9 @@ export class AuthService {
         userType, 
         documentType,
         documentNumber,
-        documentImageUrl,
+        documentImageId,
         cref, 
-        crefImageUrl,
+        crefImageId,
         specialties,
         isMinor,
         guardianName,
@@ -127,7 +127,7 @@ export class AuthService {
         if (!cref) {
           throw new BadRequestException('CREF é obrigatório para Personal Trainers');
         }
-        if (!crefImageUrl) {
+        if (!crefImageId) {
           throw new BadRequestException('Imagem da carteirinha do CREF é obrigatória para Personal Trainers');
         }
         
@@ -174,11 +174,11 @@ export class AuthService {
         userType,
         documentType,
         documentNumber,
-        documentImageUrl,
+        documentImageId,
         cref,
         crefUf: userType === 'personal' && crefParsed ? crefParsed.uf : null,
         crefNumber: userType === 'personal' && crefParsed ? crefParsed.numero : null,
-        crefImageUrl,
+        crefImageId,
         crefValidated: userType === 'personal' && crefValidation ? true : false,
         crefValidatedAt: userType === 'personal' && crefValidation ? new Date() : null,
         crefValidatedName: userType === 'personal' && crefValidation ? crefValidation.nome : null,

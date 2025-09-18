@@ -20,13 +20,13 @@ export const users = pgTable('users', {
   // Documentos de identificação (obrigatórios)
   documentType: documentTypeEnum('document_type').notNull(),
   documentNumber: varchar('document_number', { length: 20 }).notNull(),
-  documentImageUrl: text('document_image_url').notNull(),
+  documentImageId: uuid('document_image_id').references(() => files.id),
   
   // Campos específicos para Personal Trainers
   cref: varchar('cref', { length: 20 }), // Formato completo: SP-106227
   crefUf: varchar('cref_uf', { length: 2 }), // UF separada: SP
   crefNumber: varchar('cref_number', { length: 10 }), // Número separado: 106227
-  crefImageUrl: text('cref_image_url'),
+  crefImageId: uuid('cref_image_id').references(() => files.id),
   crefValidated: boolean('cref_validated').default(false),
   crefValidatedAt: timestamp('cref_validated_at'),
   crefValidatedName: varchar('cref_validated_name', { length: 200 }), // Nome do CONFEF
@@ -46,7 +46,7 @@ export const users = pgTable('users', {
   termsAcceptedDate: timestamp('terms_accepted_date'),
   
   // Outros campos
-  profileImageUrl: text('profile_image_url'),
+  profileImageId: uuid('profile_image_id').references(() => files.id),
   isVerified: boolean('is_verified').default(false),
   status: userStatusEnum('status').default('active'),
   
@@ -56,7 +56,7 @@ export const users = pgTable('users', {
 });
 
 // Relations
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   proposals: many(proposals),
   classesAsStudent: many(classes, { relationName: 'student' }),
   classesAsPersonal: many(classes, { relationName: 'personal' }),
@@ -64,6 +64,10 @@ export const usersRelations = relations(users, ({ many }) => ({
   evaluationsGiven: many(evaluations, { relationName: 'evaluator' }),
   evaluationsReceived: many(evaluations, { relationName: 'evaluated' }),
   financialRecords: many(financialRecords),
+  // File relations
+  profileImage: one(files, { fields: [users.profileImageId], references: [files.id] }),
+  documentImage: one(files, { fields: [users.documentImageId], references: [files.id] }),
+  crefImage: one(files, { fields: [users.crefImageId], references: [files.id] }),
 }));
 
 // Import other tables for relations
@@ -72,3 +76,4 @@ import { classes } from './classes';
 import { healthQuestionnaires } from './health';
 import { evaluations } from './evaluations';
 import { financialRecords } from './financial';
+import { files } from './files';

@@ -11,6 +11,7 @@ export * from './ratings';
 export * from './payments';
 export * from './gamification';
 export * from './email-verifications';
+export * from './files';
 
 // Export all enums
 export * from './users';
