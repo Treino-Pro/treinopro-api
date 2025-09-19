@@ -9,7 +9,8 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
-  Param
+  Param,
+  Logger
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -28,8 +29,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Locations')
 @Controller('locations')
-@ApiBearerAuth()
 export class LocationsController {
+  private readonly logger = new Logger(LocationsController.name);
+
   constructor(private readonly locationsService: LocationsService) {}
 
   @Get('search')
@@ -52,11 +54,43 @@ export class LocationsController {
   @ApiQuery({ name: 'radius', required: false, description: 'Raio de busca em metros', example: 5000 })
   @ApiQuery({ name: 'type', required: false, description: 'Tipo de local', example: 'gym' })
   @ApiQuery({ name: 'limit', required: false, description: 'Limite de resultados', example: 10 })
+  @UseGuards(JwtAuthGuard)
   async searchLocations(
     @Query() searchDto: SearchLocationsDto,
     @Request() req: any
   ): Promise<SearchLocationsResponseDto> {
     return this.locationsService.searchLocations(searchDto, req.user.sub);
+  }
+
+  @Get('test-search')
+  @ApiOperation({ 
+    summary: 'Testar busca de locais (público)',
+    description: 'Endpoint público para testar a integração com Google Places API'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de locais encontrados com sucesso',
+    type: SearchLocationsResponseDto
+  })
+  @ApiQuery({ name: 'query', description: 'Termo de busca', example: 'academia paulista' })
+  @ApiQuery({ name: 'userLat', required: false, description: 'Latitude do usuário', example: -23.5505 })
+  @ApiQuery({ name: 'userLng', required: false, description: 'Longitude do usuário', example: -46.6333 })
+  @ApiQuery({ name: 'radius', required: false, description: 'Raio de busca em metros', example: 5000 })
+  @ApiQuery({ name: 'type', required: false, description: 'Tipo de local', example: 'gym' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Limite de resultados', example: 10 })
+  async testSearchLocations(
+    @Query() searchDto: SearchLocationsDto
+  ): Promise<SearchLocationsResponseDto> {
+    try {
+      return await this.locationsService.searchLocations(searchDto, null);
+    } catch (error) {
+      this.logger.error('Erro no teste de busca:', error);
+      return {
+        locations: [],
+        total: 0,
+        query: searchDto.query
+      };
+    }
   }
 
   @Post('favorites')

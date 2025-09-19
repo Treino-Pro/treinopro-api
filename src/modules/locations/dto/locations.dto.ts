@@ -150,6 +150,7 @@ export class SearchLocationsDto {
     default: 10000,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   radius?: number = 10000;
 
@@ -170,6 +171,7 @@ export class SearchLocationsDto {
     default: 10,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number = 10;
 }
