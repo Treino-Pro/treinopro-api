@@ -7,7 +7,10 @@ import {
   autoPaymentSettings, 
   users,
   classes,
-  payments
+  payments,
+  studentPaymentMethodsRelations,
+  savedCardsRelations,
+  autoPaymentSettingsRelations
 } from '../../database/schema';
 // DB type will be inferred from injection
 import { MercadoPagoService } from './mercadopago.service';
@@ -42,7 +45,7 @@ export class StudentPaymentMethodsService {
       where: eq(users.id, userId),
     });
 
-    if (!user || user.role !== 'student') {
+    if (!user || user.userType !== 'student') {
       throw new ForbiddenException('Apenas alunos podem gerenciar métodos de pagamento');
     }
 
@@ -95,7 +98,7 @@ export class StudentPaymentMethodsService {
       where: eq(users.id, userId),
     });
 
-    if (!user || user.role !== 'student') {
+    if (!user || user.userType !== 'student') {
       throw new ForbiddenException('Apenas alunos podem gerenciar métodos de pagamento');
     }
 
@@ -165,7 +168,7 @@ export class StudentPaymentMethodsService {
       where: eq(users.id, userId),
     });
 
-    if (!user || user.role !== 'student') {
+    if (!user || user.userType !== 'student') {
       throw new ForbiddenException('Apenas alunos podem salvar cartões');
     }
 
@@ -262,12 +265,13 @@ export class StudentPaymentMethodsService {
     
     if (/^4/.test(number)) return CardBrand.VISA;
     if (/^5[1-5]/.test(number)) return CardBrand.MASTERCARD;
+    if (/^2[2-7]/.test(number)) return CardBrand.MASTERCARD; // Mastercard 2-series
     if (/^3[47]/.test(number)) return CardBrand.AMERICAN_EXPRESS;
     if (/^6(?:011|5)/.test(number)) return CardBrand.ELO;
     if (/^60/.test(number)) return CardBrand.HIPERCARD;
     if (/^3[0689]/.test(number)) return CardBrand.DINERS;
     
-    return CardBrand.VISA; // Padrão
+    return CardBrand.VISA; // Padrão para cartões não reconhecidos
   }
 
   // Validar cartão
@@ -581,7 +585,7 @@ export class StudentPaymentMethodsService {
   // Formatar resposta
   private formatPaymentMethodsResponse(data: any): StudentPaymentMethodsResponseDto {
     const activeSavedCards = (data.savedCards || [])
-      .filter((card: any) => card.isActive)
+      .filter((card: any) => Boolean(card.isActive))
       .map((card: any) => ({
         id: card.id,
         nickname: card.nickname,
@@ -591,8 +595,8 @@ export class StudentPaymentMethodsService {
         expirationMonth: card.expirationMonth,
         expirationYear: card.expirationYear,
         cardHolderName: card.cardHolderName,
-        isDefault: card.isDefault,
-        isActive: card.isActive,
+        isDefault: Boolean(card.isDefault),
+        isActive: Boolean(card.isActive),
         createdAt: card.createdAt,
       }));
 
@@ -608,16 +612,16 @@ export class StudentPaymentMethodsService {
       id: data.id,
       userId: data.userId,
       preferredMethod: data.preferredMethod,
-      enableAutoPayment: data.enableAutoPayment,
+      enableAutoPayment: Boolean(data.enableAutoPayment),
       defaultCardId: data.defaultCardId,
       savedCards: activeSavedCards,
       mercadoPagoAccount: data.mpEmail ? {
         email: this.maskEmail(data.mpEmail),
-        isVerified: data.mpIsVerified,
-        allowSaveCard: data.mpAllowSaveCard,
+        isVerified: Boolean(data.mpIsVerified),
+        allowSaveCard: Boolean(data.mpAllowSaveCard),
       } : undefined,
-      canMakePayments: data.canMakePayments,
-      hasValidPaymentMethod: data.hasValidPaymentMethod,
+      canMakePayments: Boolean(data.canMakePayments),
+      hasValidPaymentMethod: Boolean(data.hasValidPaymentMethod),
       missingSetup,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,

@@ -431,6 +431,10 @@ export const savedCardsRelations = relations(savedCards, ({ one }) => ({
     fields: [savedCards.userId],
     references: [users.id],
   }),
+  studentPaymentMethods: one(studentPaymentMethods, {
+    fields: [savedCards.userId],
+    references: [studentPaymentMethods.userId],
+  }),
 }));
 
 export const autoPaymentSettingsRelations = relations(autoPaymentSettings, ({ one }) => ({
@@ -441,6 +445,10 @@ export const autoPaymentSettingsRelations = relations(autoPaymentSettings, ({ on
   defaultCard: one(savedCards, {
     fields: [autoPaymentSettings.defaultCardId],
     references: [savedCards.id],
+  }),
+  studentPaymentMethods: one(studentPaymentMethods, {
+    fields: [autoPaymentSettings.userId],
+    references: [studentPaymentMethods.userId],
   }),
 }));
 

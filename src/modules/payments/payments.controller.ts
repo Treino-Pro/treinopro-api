@@ -36,6 +36,7 @@ import {
   MercadoPagoWebhookDto,
   PaymentStatus
 } from './dto/payments.dto';
+import { SaveCardDto } from './dto/student-payment-methods.dto';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -1740,7 +1741,7 @@ export class PaymentsController {
     description: 'Token JWT inválido' 
   })
   async saveCard(
-    @Body() saveCardDto: any, // TODO: Importar DTO correto
+    @Body() saveCardDto: SaveCardDto,
     @Request() req: any,
   ) {
     return this.studentPaymentMethodsService.saveCard(req.user.sub, saveCardDto);
