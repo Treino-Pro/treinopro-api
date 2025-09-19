@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Inject, Logger } from '@nestjs/common';
-import { eq, and, desc, gte, lte, count, sql, or } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sql, or, isNull } from 'drizzle-orm';
 import { 
   userProfiles, 
   missions, 
@@ -18,6 +18,7 @@ import {
   UserMission,
   XPHistory
 } from '../../database/schema';
+import { users } from '../../database/schema/users';
 import {
   CreateMissionDto,
   UpdateMissionDto,
@@ -50,6 +51,8 @@ export class GamificationService {
   // ===== SISTEMA DE XP E NÍVEIS =====
 
   async getUserProfile(userId: string): Promise<UserProfileResponseDto> {
+    console.log('🎮 [GAMIFICATION] Buscando perfil para usuário:', userId);
+    
     const [profile] = await this.db
       .select()
       .from(userProfiles)
@@ -57,10 +60,12 @@ export class GamificationService {
       .limit(1);
 
     if (!profile) {
+      console.log('⚠️ [GAMIFICATION] Perfil não encontrado, criando perfil inicial...');
       // Criar perfil inicial se não existir
       return this.createInitialProfile(userId);
     }
 
+    console.log('✅ [GAMIFICATION] Perfil encontrado:', profile.id);
     const xpToNextLevel = this.calculateXPToNextLevel(profile.level, profile.currentLevelXP);
 
     return {
@@ -70,6 +75,8 @@ export class GamificationService {
   }
 
   private async createInitialProfile(userId: string): Promise<UserProfileResponseDto> {
+    console.log('🎮 [GAMIFICATION] Criando perfil inicial para usuário:', userId);
+    
     const [newProfile] = await this.db
       .insert(userProfiles)
       .values({
@@ -79,8 +86,14 @@ export class GamificationService {
         currentLevelXP: 0,
         achievements: [],
         missions: [],
+        lastMissionReset: null, // Explicitamente null para campos opcionais
       })
       .returning();
+
+    console.log('✅ [GAMIFICATION] Perfil inicial criado com sucesso:', newProfile.id);
+
+    // Atribuir primeira missão automaticamente
+    await this.assignNextMission(userId);
 
     return {
       ...newProfile,
@@ -88,8 +101,8 @@ export class GamificationService {
     };
   }
 
-  async addXP(addXPDto: AddXPDto): Promise<LevelUpResponseDto | null> {
-    const { userId, xpAmount, source, sourceId, description } = addXPDto;
+  async addXP(userId: string, addXPDto: AddXPDto): Promise<LevelUpResponseDto | null> {
+    const { xpAmount, source, sourceId, description } = addXPDto;
 
     // Buscar ou criar perfil
     let profile = await this.getUserProfile(userId);
@@ -169,10 +182,18 @@ export class GamificationService {
 
   // ===== SISTEMA DE MISSÕES =====
 
-  async createMission(createMissionDto: CreateMissionDto): Promise<MissionResponseDto> {
+  async createMission(createMissionDto: CreateMissionDto, createdBy?: string): Promise<MissionResponseDto> {
+    // Converter strings de data para objetos Date
+    const missionData = {
+      ...createMissionDto,
+      startDate: createMissionDto.startDate ? new Date(createMissionDto.startDate) : null,
+      endDate: createMissionDto.endDate ? new Date(createMissionDto.endDate) : null,
+      createdBy: createdBy || null, // Usar o userId do token ou null
+    };
+
     const [mission] = await this.db
       .insert(missions)
-      .values(createMissionDto)
+      .values(missionData)
       .returning();
 
     return mission;
@@ -186,11 +207,14 @@ export class GamificationService {
     if (type) conditions.push(eq(missions.type, type));
     if (isActive !== undefined) conditions.push(eq(missions.isActive, isActive));
 
+    // Se não há condições, buscar todas as missões
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
     const [missionsList, totalResult] = await Promise.all([
       this.db
         .select()
         .from(missions)
-        .where(and(...conditions))
+        .where(whereClause)
         .orderBy(desc(missions.createdAt))
         .limit(limit)
         .offset(offset),
@@ -198,7 +222,7 @@ export class GamificationService {
       this.db
         .select({ count: count() })
         .from(missions)
-        .where(and(...conditions))
+        .where(whereClause)
     ]);
 
     const total = totalResult[0]?.count || 0;
@@ -300,7 +324,7 @@ export class GamificationService {
 
     return userMissionsList.map(um => ({
       ...um.user_missions,
-      totalRequired: um.missions.requirements.count,
+      totalRequired: um.missions?.requirements?.count || 0,
       mission: um.missions,
     }));
   }
@@ -338,8 +362,7 @@ export class GamificationService {
           .where(eq(userMissions.id, userMission.user_missions.id));
 
         // Dar XP ao usuário
-        await this.addXP({
-          userId,
+        await this.addXP(userId, {
           xpAmount: userMission.missions.xpReward,
           source: XPSource.MISSION,
           sourceId: userMission.missions.id,
@@ -356,6 +379,9 @@ export class GamificationService {
           totalRequired,
           mission: userMission.missions,
         });
+
+        // Atribuir próxima missão automaticamente
+        await this.assignNextMission(userId);
       } else {
         // Atualizar progresso
         await this.db
@@ -522,8 +548,7 @@ export class GamificationService {
           .returning();
 
         // Dar XP ao usuário
-        await this.addXP({
-          userId,
+        await this.addXP(userId, {
           xpAmount: achievement.xpReward,
           source: XPSource.ACHIEVEMENT,
           sourceId: achievement.id,
@@ -601,8 +626,8 @@ export class GamificationService {
 
     const conditions = [eq(xpHistory.userId, userId)];
     if (source) conditions.push(eq(xpHistory.source, source));
-    if (startDate) conditions.push(gte(xpHistory.createdAt, startDate));
-    if (endDate) conditions.push(lte(xpHistory.createdAt, endDate));
+    if (startDate) conditions.push(gte(xpHistory.createdAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(xpHistory.createdAt, new Date(endDate)));
 
     const [historyList, totalResult] = await Promise.all([
       this.db
@@ -683,12 +708,175 @@ export class GamificationService {
     };
   }
 
+  // ===== SISTEMA DE ATRIBUIÇÃO AUTOMÁTICA =====
+
+  async assignNextMission(userId: string): Promise<UserMissionResponseDto | null> {
+    try {
+      // Buscar missões disponíveis para atribuição automática
+      const availableMissions = await this.getAvailableMissionsForUser(userId);
+      
+      if (availableMissions.length === 0) {
+        this.logger.log(`📋 [GAMIFICATION] Nenhuma missão disponível para atribuição automática (${userId})`);
+        return null;
+      }
+
+      // Pegar a missão com maior prioridade (menor número = maior prioridade)
+      const nextMission = availableMissions[0];
+      
+      // Atribuir missão ao usuário
+      const assignedMission = await this.assignMissionToUser(userId, nextMission.id);
+      
+      this.logger.log(`🎯 [GAMIFICATION] Próxima missão atribuída automaticamente: ${nextMission.title} (${userId})`);
+      
+      return assignedMission;
+    } catch (error) {
+      this.logger.error(`❌ [GAMIFICATION] Erro ao atribuir próxima missão (${userId}):`, error);
+      return null;
+    }
+  }
+
+  async getAvailableMissionsForUser(userId: string): Promise<MissionResponseDto[]> {
+    console.log('🔍 [GAMIFICATION] Buscando missões disponíveis para usuário:', userId);
+    
+    // Buscar missões que o usuário já completou
+    const completedMissions = await this.db
+      .select({ missionId: userMissions.missionId })
+      .from(userMissions)
+      .where(and(
+        eq(userMissions.userId, userId),
+        eq(userMissions.status, MissionStatus.COMPLETED)
+      ));
+
+    const completedMissionIds = completedMissions.map(m => m.missionId);
+    console.log('✅ [GAMIFICATION] Missões completadas:', completedMissionIds);
+
+    // Buscar missões ativas que podem ser atribuídas automaticamente
+    // Primeiro, buscar todas as missões ativas com autoAssign
+    const allActiveMissions = await this.db
+      .select()
+      .from(missions)
+      .where(and(
+        eq(missions.isActive, true),
+        eq(missions.autoAssign, true)
+      ))
+      .orderBy(missions.priority, missions.createdAt);
+
+    console.log('🔍 [GAMIFICATION] Todas as missões ativas com autoAssign:', allActiveMissions.length);
+
+    // Buscar missões já atribuídas ao usuário
+    const userAssignedMissions = await this.db
+      .select({ missionId: userMissions.missionId })
+      .from(userMissions)
+      .where(and(
+        eq(userMissions.userId, userId),
+        eq(userMissions.status, MissionStatus.ACTIVE)
+      ));
+
+    const assignedMissionIds = userAssignedMissions.map(m => m.missionId);
+    console.log('🔍 [GAMIFICATION] Missões já atribuídas ao usuário:', assignedMissionIds);
+
+    // Filtrar missões que não estão atribuídas
+    const availableMissions = allActiveMissions.filter(mission => 
+      !assignedMissionIds.includes(mission.id)
+    );
+
+    console.log('📋 [GAMIFICATION] Missões disponíveis encontradas:', availableMissions.length);
+    console.log('📋 [GAMIFICATION] Detalhes das missões:', availableMissions.map(m => ({
+      id: m.id,
+      title: m.title,
+      autoAssign: m.autoAssign,
+      isActive: m.isActive,
+      prerequisites: m.prerequisites
+    })));
+
+    // Filtrar missões que atendem aos pré-requisitos
+    const eligibleMissions = availableMissions.filter(mission => {
+      if (!mission.prerequisites || mission.prerequisites.length === 0) {
+        console.log('✅ [GAMIFICATION] Missão sem pré-requisitos:', mission.title);
+        return true; // Sem pré-requisitos
+      }
+      
+      // Verificar se todos os pré-requisitos foram completados
+      const hasAllPrerequisites = mission.prerequisites.every(prereqId => 
+        completedMissionIds.includes(prereqId)
+      );
+      
+      console.log(`🔍 [GAMIFICATION] Missão ${mission.title} - pré-requisitos: ${mission.prerequisites}, completados: ${completedMissionIds}, elegível: ${hasAllPrerequisites}`);
+      
+      return hasAllPrerequisites;
+    });
+
+    console.log('🎯 [GAMIFICATION] Missões elegíveis finais:', eligibleMissions.length);
+    return eligibleMissions;
+  }
+
+  // ===== MIGRAÇÃO DE USUÁRIOS EXISTENTES =====
+
+  async migrateExistingUsers(): Promise<{ 
+    message: string; 
+    usersProcessed: number; 
+    missionsAssigned: number; 
+    errors: string[] 
+  }> {
+    this.logger.log('🔄 [GAMIFICATION] Iniciando migração de usuários existentes...');
+    
+    let usersProcessed = 0;
+    let missionsAssigned = 0;
+    const errors: string[] = [];
+
+    try {
+      // Buscar todos os usuários que não têm perfil de gamificação
+      const usersWithoutProfile = await this.db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .leftJoin(userProfiles, eq(users.id, userProfiles.userId))
+        .where(isNull(userProfiles.userId));
+
+      this.logger.log(`📊 [GAMIFICATION] Encontrados ${usersWithoutProfile.length} usuários sem perfil de gamificação`);
+
+      for (const user of usersWithoutProfile) {
+        try {
+          // Criar perfil inicial (que já atribui primeira missão)
+          await this.createInitialProfile(user.id);
+          missionsAssigned++;
+          this.logger.log(`✅ [GAMIFICATION] Perfil criado para usuário: ${user.email}`);
+        } catch (error) {
+          const errorMsg = `Erro ao criar perfil para ${user.email}: ${error.message}`;
+          errors.push(errorMsg);
+          this.logger.error(`❌ [GAMIFICATION] ${errorMsg}`);
+        }
+        
+        usersProcessed++;
+      }
+
+      const message = `Migração concluída! ${usersProcessed} usuários processados, ${missionsAssigned} missões atribuídas`;
+      this.logger.log(`🎉 [GAMIFICATION] ${message}`);
+
+      return {
+        message,
+        usersProcessed,
+        missionsAssigned,
+        errors
+      };
+
+    } catch (error) {
+      const errorMsg = `Erro geral na migração: ${error.message}`;
+      this.logger.error(`❌ [GAMIFICATION] ${errorMsg}`);
+      
+      return {
+        message: 'Migração falhou',
+        usersProcessed,
+        missionsAssigned,
+        errors: [...errors, errorMsg]
+      };
+    }
+  }
+
   // ===== MÉTODOS DE INTEGRAÇÃO =====
 
   async processClassCompletion(userId: string, classId: string): Promise<void> {
     // Dar XP por completar aula
-    await this.addXP({
-      userId,
+    await this.addXP(userId, {
       xpAmount: 50, // XP fixo por aula completada
       source: XPSource.CLASS_COMPLETION,
       sourceId: classId,

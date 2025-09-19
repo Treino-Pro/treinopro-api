@@ -14,6 +14,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { GamificationService } from './gamification.service';
 import {
   CreateMissionDto,
@@ -94,7 +96,7 @@ export class GamificationController {
     description: 'Token JWT inválido' 
   })
   async getUserProfile(@Request() req): Promise<UserProfileResponseDto> {
-    return this.gamificationService.getUserProfile(req.user.id);
+    return this.gamificationService.getUserProfile(req.user.sub);
   }
 
   @Get('stats')
@@ -165,7 +167,7 @@ export class GamificationController {
     description: 'Token JWT inválido' 
   })
   async getGamificationStats(@Request() req): Promise<GamificationStatsResponseDto> {
-    return this.gamificationService.getGamificationStats(req.user.id);
+    return this.gamificationService.getGamificationStats(req.user.sub);
   }
 
   // ===== XP =====
@@ -202,8 +204,10 @@ export class GamificationController {
     status: 401, 
     description: 'Token JWT inválido' 
   })
-  async addXP(@Body() addXPDto: AddXPDto) {
-    return this.gamificationService.addXP(addXPDto);
+  async addXP(@Request() req, @Body() addXPDto: AddXPDto) {
+    // Extrair userId do token JWT
+    const userId = req.user.sub;
+    return this.gamificationService.addXP(userId, addXPDto);
   }
 
   @Get('xp/history')
@@ -249,13 +253,18 @@ export class GamificationController {
     description: 'Token JWT inválido' 
   })
   async getXPHistory(@Request() req, @Query() query: XPHistoryQueryDto) {
-    return this.gamificationService.getXPHistory(req.user.id, query);
+    return this.gamificationService.getXPHistory(req.user.sub, query);
   }
 
   // ===== MISSÕES =====
 
   @Post('missions')
-  @ApiOperation({ summary: 'Criar nova missão' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ 
+    summary: 'Criar nova missão (APENAS ADMIN)',
+    description: 'Apenas administradores podem criar missões. As missões criadas aparecerão para todos os usuários elegíveis.'
+  })
   @ApiResponse({ 
     status: 201, 
     description: 'Missão criada com sucesso',
@@ -297,8 +306,13 @@ export class GamificationController {
     status: 401, 
     description: 'Token JWT inválido' 
   })
-  async createMission(@Body() createMissionDto: CreateMissionDto): Promise<MissionResponseDto> {
-    return this.gamificationService.createMission(createMissionDto);
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - Apenas administradores podem criar missões' 
+  })
+  async createMission(@Request() req, @Body() createMissionDto: CreateMissionDto): Promise<MissionResponseDto> {
+    const userId = req.user.sub;
+    return this.gamificationService.createMission(createMissionDto, userId);
   }
 
   @Get('missions')
@@ -380,6 +394,20 @@ export class GamificationController {
   }
 
   @Put('missions/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiOperation({ 
+    summary: 'Atualizar missão (APENAS ADMIN)',
+    description: 'Apenas administradores podem atualizar missões existentes.'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Missão atualizada com sucesso' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - Apenas administradores podem atualizar missões' 
+  })
   async updateMission(
     @Param('id') id: string,
     @Body() updateMissionDto: UpdateMissionDto
@@ -388,7 +416,21 @@ export class GamificationController {
   }
 
   @Delete('missions/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ 
+    summary: 'Excluir missão (APENAS ADMIN)',
+    description: 'Apenas administradores podem excluir missões.'
+  })
+  @ApiResponse({ 
+    status: 204, 
+    description: 'Missão excluída com sucesso' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - Apenas administradores podem excluir missões' 
+  })
   async deleteMission(@Param('id') id: string): Promise<void> {
     return this.gamificationService.deleteMission(id);
   }
@@ -398,7 +440,7 @@ export class GamificationController {
     @Request() req,
     @Param('id') missionId: string
   ): Promise<UserMissionResponseDto> {
-    return this.gamificationService.assignMissionToUser(req.user.id, missionId);
+return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   }
 
   @Get('missions/user/my-missions')
@@ -406,7 +448,7 @@ export class GamificationController {
     @Request() req,
     @Query('status') status?: string
   ): Promise<UserMissionResponseDto[]> {
-    return this.gamificationService.getUserMissions(req.user.id, status as any);
+    return this.gamificationService.getUserMissions(req.user.sub, status as any);
   }
 
   @Post('missions/progress')
@@ -415,7 +457,7 @@ export class GamificationController {
     @Body() progressDto: MissionProgressDto
   ): Promise<UserMissionResponseDto[]> {
     // Garantir que o userId seja o do usuário autenticado
-    progressDto.userId = req.user.id;
+    progressDto.userId = req.user.sub;
     return this.gamificationService.updateMissionProgress(progressDto);
   }
 
@@ -452,7 +494,7 @@ export class GamificationController {
 
   @Get('achievements/user/my-achievements')
   async getUserAchievements(@Request() req): Promise<UserAchievementResponseDto[]> {
-    return this.gamificationService.getUserAchievements(req.user.id);
+    return this.gamificationService.getUserAchievements(req.user.sub);
   }
 
   @Post('achievements/progress')
@@ -461,7 +503,7 @@ export class GamificationController {
     @Body() progressDto: AchievementProgressDto
   ): Promise<UserAchievementResponseDto[]> {
     // Garantir que o userId seja o do usuário autenticado
-    progressDto.userId = req.user.id;
+    progressDto.userId = req.user.sub;
     return this.gamificationService.updateAchievementProgress(progressDto);
   }
 
@@ -501,7 +543,7 @@ export class GamificationController {
     @Request() req,
     @Body() body: { classId: string }
   ): Promise<{ message: string }> {
-    await this.gamificationService.processClassCompletion(req.user.id, body.classId);
+    await this.gamificationService.processClassCompletion(req.user.sub, body.classId);
     return { message: 'XP e progresso atualizados com sucesso' };
   }
 
@@ -532,8 +574,85 @@ export class GamificationController {
     description: 'Token JWT inválido' 
   })
   async processDailyLogin(@Request() req): Promise<{ message: string }> {
-    await this.gamificationService.processDailyLogin(req.user.id);
+    await this.gamificationService.processDailyLogin(req.user.sub);
     return { message: 'Progresso de login diário atualizado' };
+  }
+
+  @Post('missions/auto-assign')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atribuir próxima missão automaticamente' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Próxima missão atribuída com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Próxima missão atribuída com sucesso' },
+        mission: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            xpReward: { type: 'number' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Nenhuma missão disponível para atribuição' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
+  async autoAssignNextMission(@Request() req): Promise<{ message: string; mission?: any }> {
+    const assignedMission = await this.gamificationService.assignNextMission(req.user.sub);
+    
+    if (!assignedMission) {
+      return { message: 'Nenhuma missão disponível para atribuição' };
+    }
+    
+    return { 
+      message: 'Próxima missão atribuída com sucesso',
+      mission: {
+        id: assignedMission.mission.id,
+        title: assignedMission.mission.title,
+        description: assignedMission.mission.description,
+        xpReward: assignedMission.mission.xpReward
+      }
+    };
+  }
+
+  @Post('migration/assign-missions-to-existing-users')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atribuir missões para usuários existentes sem perfil de gamificação' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Migração concluída com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        usersProcessed: { type: 'number' },
+        missionsAssigned: { type: 'number' },
+        errors: { type: 'array', items: { type: 'string' } }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido' 
+  })
+  async migrateExistingUsers(): Promise<{ 
+    message: string; 
+    usersProcessed: number; 
+    missionsAssigned: number; 
+    errors: string[] 
+  }> {
+    return this.gamificationService.migrateExistingUsers();
   }
 }
 

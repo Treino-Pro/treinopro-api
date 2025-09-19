@@ -1,7 +1,7 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, CreateAdminDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -99,6 +99,55 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Código inválido ou expirado' })
   async verifyCode(@Body() body: { email: string; code: string }) {
     return this.authService.verifyCode(body.email, body.code);
+  }
+
+  @Post('create-admin')
+  @Public()
+  @ApiOperation({ 
+    summary: 'Criar usuário admin (MÉTODO INTERNO)',
+    description: 'Endpoint para criação de usuários admin. Deve ser usado apenas em setup inicial ou por outros admins.'
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Usuário admin criado com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Usuário admin criado com sucesso' },
+        user: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'uuid' },
+            email: { type: 'string', example: 'admin@treinopro.com' },
+            firstName: { type: 'string', example: 'João' },
+            lastName: { type: 'string', example: 'Silva' },
+            userType: { type: 'string', example: 'admin' },
+            isVerified: { type: 'boolean', example: true }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 409, 
+    description: 'Email já está em uso' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
+  async createAdmin(@Body() createAdminDto: CreateAdminDto) {
+    console.log('👑 [CONTROLLER] Requisição de criação de admin recebida');
+    console.log('👑 [CONTROLLER] Email:', createAdminDto.email);
+    
+    try {
+      const result = await this.authService.createAdmin(createAdminDto);
+      console.log('✅ [CONTROLLER] Admin criado com sucesso');
+      return result;
+    } catch (error) {
+      console.error('❌ [CONTROLLER] Erro na criação de admin:', error);
+      throw error;
+    }
   }
 
 }

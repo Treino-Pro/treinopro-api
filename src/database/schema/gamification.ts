@@ -26,6 +26,9 @@ export const missions = pgTable('missions', {
   type: varchar('type', { length: 50 }).notNull(), // 'daily', 'weekly', 'monthly', 'special'
   action: varchar('action', { length: 100 }).notNull(), // Ação que a missão monitora
   isActive: boolean('is_active').default(true).notNull(),
+  priority: integer('priority').default(0).notNull(), // Prioridade para atribuição automática (0 = mais alta)
+  autoAssign: boolean('auto_assign').default(true).notNull(), // Se deve ser atribuída automaticamente
+  prerequisites: json('prerequisites').$type<string[]>().default([]), // IDs das missões que devem ser completadas antes
   startDate: timestamp('start_date'),
   endDate: timestamp('end_date'),
   requirements: json('requirements').$type<{

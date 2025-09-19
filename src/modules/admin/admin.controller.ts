@@ -1,9 +1,18 @@
 import { Controller, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AdminService } from './admin.service';
+import {
+  DashboardSummaryResponseDto,
+  UserListResponseDto,
+  UpdateUserDto,
+  FinancialSummaryResponseDto,
+  MissionListResponseDto,
+  UpdateMissionDto,
+  AnalyticsResponseDto
+} from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -14,47 +23,185 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get('dashboard')
-  @ApiOperation({ summary: 'Get admin dashboard summary' })
-  async getDashboard() {
+  @ApiOperation({ 
+    summary: 'Obter resumo do painel administrativo',
+    description: 'Retorna estatísticas gerais da plataforma, usuários recentes e atividades'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Resumo do dashboard retornado com sucesso',
+    type: DashboardSummaryResponseDto
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async getDashboard(): Promise<DashboardSummaryResponseDto> {
     return this.adminService.getDashboardSummary();
   }
 
   @Get('users')
-  @ApiOperation({ summary: 'List users (basic info)' })
-  async listUsers() {
+  @ApiOperation({ 
+    summary: 'Listar usuários da plataforma',
+    description: 'Retorna lista de todos os usuários com informações básicas'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de usuários retornada com sucesso',
+    type: [UserListResponseDto]
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async listUsers(): Promise<UserListResponseDto[]> {
     return this.adminService.listUsers();
   }
 
   @Put('users/:id')
-  @ApiOperation({ summary: 'Update user basic info/status' })
-  async updateUser(@Param('id') id: string, @Body() body: any) {
+  @ApiOperation({ 
+    summary: 'Atualizar informações do usuário',
+    description: 'Permite atualizar status, verificação e notas administrativas de um usuário'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID do usuário a ser atualizado',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Usuário atualizado com sucesso',
+    type: UserListResponseDto
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Usuário não encontrado' 
+  })
+  async updateUser(@Param('id') id: string, @Body() body: UpdateUserDto): Promise<UserListResponseDto> {
     return this.adminService.updateUser(id, body);
   }
 
   // ===== FINANCIAL =====
   @Get('financial')
-  @ApiOperation({ summary: 'Get financial summary' })
-  async getFinancialSummary() {
+  @ApiOperation({ 
+    summary: 'Obter resumo financeiro',
+    description: 'Retorna estatísticas financeiras da plataforma, receitas e transações recentes'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Resumo financeiro retornado com sucesso',
+    type: FinancialSummaryResponseDto
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async getFinancialSummary(): Promise<FinancialSummaryResponseDto> {
     return this.adminService.getFinancialSummary();
   }
 
   // ===== MISSIONS (Gamification) =====
   @Get('missions')
-  @ApiOperation({ summary: 'List missions (gamification)' })
-  async listMissions() {
+  @ApiOperation({ 
+    summary: 'Listar missões de gamificação',
+    description: 'Retorna lista de todas as missões disponíveis na plataforma'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de missões retornada com sucesso',
+    type: [MissionListResponseDto]
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async listMissions(): Promise<MissionListResponseDto[]> {
     return this.adminService.listMissions();
   }
 
   @Put('missions/:id')
-  @ApiOperation({ summary: 'Update mission (gamification)' })
-  async updateMission(@Param('id') id: string, @Body() body: any) {
+  @ApiOperation({ 
+    summary: 'Atualizar missão de gamificação',
+    description: 'Permite atualizar informações de uma missão específica'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID da missão a ser atualizada',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Missão atualizada com sucesso',
+    type: MissionListResponseDto
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Missão não encontrada' 
+  })
+  async updateMission(@Param('id') id: string, @Body() body: UpdateMissionDto): Promise<MissionListResponseDto> {
     return this.adminService.updateMission(id, body);
   }
 
   // ===== ANALYTICS =====
   @Get('analytics')
-  @ApiOperation({ summary: 'Get platform analytics (aggregated metrics)' })
-  async getAnalytics() {
+  @ApiOperation({ 
+    summary: 'Obter análises da plataforma',
+    description: 'Retorna métricas agregadas de usuários, propostas, aulas e pagamentos'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Análises retornadas com sucesso',
+    type: AnalyticsResponseDto
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async getAnalytics(): Promise<AnalyticsResponseDto> {
     return this.adminService.getAnalytics();
   }
 }

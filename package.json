@@ -27,7 +27,10 @@
     "db:generate": "drizzle-kit generate:pg",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:push": "drizzle-kit push:pg"
+    "db:push": "drizzle-kit push:pg",
+    "migrate:admin": "node scripts/migrate-admin-user-type-drizzle.js",
+    "migrate:admin:simple": "node scripts/migrate-admin-simple.js",
+    "migrate:admin:api": "curl -X POST http://localhost:3000/admin-migration/add-admin-user-type"
   },
   "dependencies": {
     "@bull-board/api": "^6.12.7",

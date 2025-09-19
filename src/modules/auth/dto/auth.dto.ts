@@ -4,6 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export enum UserType {
   STUDENT = 'student',
   PERSONAL = 'personal',
+  ADMIN = 'admin',
 }
 
 export enum DocumentType {
@@ -111,6 +112,33 @@ export class RegisterDto {
   @ApiProperty({ example: true })
   @IsBoolean()
   privacyPolicyAccepted: boolean;
+}
+
+// DTO específico para criação de admin (campos mínimos)
+export class CreateAdminDto {
+  @ApiProperty({ example: 'admin@treinopro.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ example: '123456', minLength: 6 })
+  @IsString()
+  @MinLength(6)
+  password: string;
+
+  @ApiProperty({ example: 'João' })
+  @IsString()
+  @IsNotEmpty()
+  firstName: string;
+
+  @ApiProperty({ example: 'Silva' })
+  @IsString()
+  @IsNotEmpty()
+  lastName: string;
+
+  @ApiProperty({ example: '1990-01-01' })
+  @IsDateString()
+  @IsNotEmpty()
+  birthDate: string;
 }
 
 export class LoginDto {

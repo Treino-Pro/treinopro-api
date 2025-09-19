@@ -5,9 +5,10 @@ import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
-import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, CreateAdminDto } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
 import { EmailVerificationService } from './services/email-verification.service';
+import { GamificationService } from '../gamification/gamification.service';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +18,7 @@ export class AuthService {
     @Inject('DATABASE_CONNECTION') private db: any,
     private crefService: CrefService,
     private emailVerificationService: EmailVerificationService,
+    private gamificationService: GamificationService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -196,6 +198,16 @@ export class AuthService {
         email: newUser.email,
         userType: newUser.userType,
       });
+
+      // Criar perfil de gamificação automaticamente
+      try {
+        console.log('🎮 [AUTH] Criando perfil de gamificação...');
+        await this.gamificationService.getUserProfile(newUser.id);
+        console.log('✅ [AUTH] Perfil de gamificação criado com sucesso');
+      } catch (error) {
+        console.error('⚠️ [AUTH] Erro ao criar perfil de gamificação (não crítico):', error.message);
+        // Não falha o registro se houver erro na gamificação
+      }
 
       // Gerar tokens
       console.log('🎫 [AUTH] Gerando tokens JWT...');
@@ -412,5 +424,63 @@ export class AuthService {
 
   async isEmailVerified(email: string): Promise<boolean> {
     return this.emailVerificationService.isEmailVerified(email);
+  }
+
+  // ===== MÉTODOS PARA ADMIN =====
+
+  /**
+   * Criar usuário admin (método interno/sistema)
+   */
+  async createAdmin(createAdminDto: CreateAdminDto) {
+    console.log('👑 [AUTH] Criando usuário admin...');
+    console.log('👑 [AUTH] Email:', createAdminDto.email);
+
+    // Verificar se email já existe
+    const existingUser = await this.db.query.users.findFirst({
+      where: eq(users.email, createAdminDto.email),
+    });
+
+    if (existingUser) {
+      console.log('❌ [AUTH] Email já existe:', createAdminDto.email);
+      throw new ConflictException('Email já está em uso');
+    }
+
+    // Hash da senha
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(createAdminDto.password, saltRounds);
+
+    // Preparar dados para inserção (campos mínimos para admin)
+    const adminData = {
+      email: createAdminDto.email,
+      passwordHash,
+      firstName: createAdminDto.firstName,
+      lastName: createAdminDto.lastName,
+      birthDate: new Date(createAdminDto.birthDate),
+      userType: 'admin' as const,
+      // Campos obrigatórios com valores padrão para admin
+      documentType: 'RG' as const,
+      documentNumber: 'ADMIN-' + Date.now(), // Número único para admin
+      termsAccepted: true,
+      privacyPolicyAccepted: true,
+      termsAcceptedDate: new Date(),
+      isVerified: true, // Admin é verificado automaticamente
+    };
+
+    // Inserir admin
+    const [newAdmin] = await this.db.insert(users).values(adminData).returning();
+
+    console.log('✅ [AUTH] Admin criado com sucesso:', newAdmin.id);
+
+    return {
+      message: 'Usuário admin criado com sucesso',
+      user: {
+        id: newAdmin.id,
+        email: newAdmin.email,
+        firstName: newAdmin.firstName,
+        lastName: newAdmin.lastName,
+        userType: newAdmin.userType,
+        isVerified: newAdmin.isVerified,
+      }
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -9,12 +9,14 @@ import { DatabaseModule } from '../../database/database.module';
 import { CrefModule } from '../cref/cref.module';
 import { EmailVerificationService } from './services/email-verification.service';
 import { EmailService } from '../notifications/services/email.service';
+import { GamificationModule } from '../gamification/gamification.module';
 
 @Module({
   imports: [
     ConfigModule,
     DatabaseModule,
     CrefModule, // Importar o módulo CREF
+    forwardRef(() => GamificationModule), // Importar o módulo de gamificação
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -2,7 +2,7 @@ import { pgTable, uuid, varchar, text, timestamp, boolean, pgEnum, json } from '
 import { relations } from 'drizzle-orm';
 
 // Enums
-export const userTypeEnum = pgEnum('user_type', ['student', 'personal']);
+export const userTypeEnum = pgEnum('user_type', ['student', 'personal', 'admin']);
 export const userStatusEnum = pgEnum('user_status', ['active', 'inactive', 'suspended']);
 export const documentTypeEnum = pgEnum('document_type', ['RG', 'CNH']);
 

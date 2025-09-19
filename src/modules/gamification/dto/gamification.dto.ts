@@ -70,21 +70,21 @@ export class UserProfileResponseDto {
   })
   @IsOptional()
   @IsDateString()
-  lastMissionReset?: Date;
+  lastMissionReset?: string;
 
   @ApiProperty({
     description: 'Data de criação',
     example: '2024-01-01T00:00:00.000Z'
   })
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 
   @ApiProperty({
     description: 'Data de atualização',
     example: '2024-01-15T10:00:00.000Z'
   })
   @IsDateString()
-  updatedAt: Date;
+  updatedAt: string;
 }
 
 export class LevelUpResponseDto {
@@ -154,7 +154,7 @@ export class CreateMissionDto {
   })
   @IsOptional()
   @IsDateString()
-  startDate?: Date;
+  startDate?: string;
 
   @ApiPropertyOptional({
     description: 'Data de fim da missão',
@@ -162,7 +162,7 @@ export class CreateMissionDto {
   })
   @IsOptional()
   @IsDateString()
-  endDate?: Date;
+  endDate?: string;
 
   @ApiProperty({
     description: 'Requisitos da missão',
@@ -181,6 +181,35 @@ export class CreateMissionDto {
     timeframe?: string;
     conditions?: Record<string, any>;
   };
+
+  @ApiPropertyOptional({
+    description: 'Prioridade para atribuição automática (0 = mais alta)',
+    example: 0,
+    default: 0
+  })
+  @IsOptional()
+  @IsNumber()
+  priority?: number;
+
+  @ApiPropertyOptional({
+    description: 'Se deve ser atribuída automaticamente',
+    example: true,
+    default: true
+  })
+  @IsOptional()
+  @IsBoolean()
+  autoAssign?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'IDs das missões que devem ser completadas antes',
+    example: ['123e4567-e89b-12d3-a456-426614174000'],
+    type: 'array',
+    items: { type: 'string' }
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  prerequisites?: string[];
 
   @ApiPropertyOptional({
     description: 'ID do usuário que criou a missão',
@@ -219,11 +248,11 @@ export class UpdateMissionDto {
 
   @IsOptional()
   @IsDateString()
-  startDate?: Date;
+  startDate?: string;
 
   @IsOptional()
   @IsDateString()
-  endDate?: Date;
+  endDate?: string;
 
   @IsOptional()
   @IsObject()
@@ -233,6 +262,19 @@ export class UpdateMissionDto {
     timeframe?: string;
     conditions?: Record<string, any>;
   };
+
+  @IsOptional()
+  @IsNumber()
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoAssign?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  prerequisites?: string[];
 }
 
 export class MissionResponseDto {
@@ -259,11 +301,11 @@ export class MissionResponseDto {
 
   @IsOptional()
   @IsDateString()
-  startDate?: Date;
+  startDate?: string;
 
   @IsOptional()
   @IsDateString()
-  endDate?: Date;
+  endDate?: string;
 
   @IsObject()
   requirements: {
@@ -273,15 +315,25 @@ export class MissionResponseDto {
     conditions?: Record<string, any>;
   };
 
+  @IsNumber()
+  priority: number;
+
+  @IsBoolean()
+  autoAssign: boolean;
+
+  @IsArray()
+  @IsString({ each: true })
+  prerequisites: string[];
+
   @IsOptional()
   @IsString()
   createdBy?: string;
 
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 
   @IsDateString()
-  updatedAt: Date;
+  updatedAt: string;
 }
 
 export class UserMissionResponseDto {
@@ -305,13 +357,13 @@ export class UserMissionResponseDto {
 
   @IsOptional()
   @IsDateString()
-  completedAt?: Date;
+  completedAt?: string;
 
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 
   @IsDateString()
-  updatedAt: Date;
+  updatedAt: string;
 
   // Dados da missão
   mission: MissionResponseDto;
@@ -453,10 +505,10 @@ export class AchievementResponseDto {
   createdBy?: string;
 
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 
   @IsDateString()
-  updatedAt: Date;
+  updatedAt: string;
 }
 
 export class UserAchievementResponseDto {
@@ -470,13 +522,13 @@ export class UserAchievementResponseDto {
   achievementId: string;
 
   @IsDateString()
-  earnedAt: Date;
+  earnedAt: string;
 
   @IsBoolean()
   isActive: boolean;
 
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 
   // Dados da conquista
   achievement: AchievementResponseDto;
@@ -509,13 +561,6 @@ export class AchievementQueryDto {
 // ===== DTOs DE XP =====
 
 export class AddXPDto {
-  @ApiProperty({
-    description: 'ID do usuário',
-    example: '123e4567-e89b-12d3-a456-426614174000'
-  })
-  @IsString()
-  userId: string;
-
   @ApiProperty({
     description: 'Quantidade de XP a adicionar',
     example: 50,
@@ -572,7 +617,7 @@ export class XPHistoryResponseDto {
   description?: string;
 
   @IsDateString()
-  createdAt: Date;
+  createdAt: string;
 }
 
 export class XPHistoryQueryDto {
@@ -582,11 +627,11 @@ export class XPHistoryQueryDto {
 
   @IsOptional()
   @IsDateString()
-  startDate?: Date;
+  startDate?: string;
 
   @IsOptional()
   @IsDateString()
-  endDate?: Date;
+  endDate?: string;
 
   @IsOptional()
   @IsNumber()
