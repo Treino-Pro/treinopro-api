@@ -95,7 +95,7 @@ describe('AuthService', () => {
       userType: UserType.PERSONAL,
       documentType: DocumentType.CNH,
       documentNumber: '12345678901',
-      documentImageId: 'b2c3d4e5-f6g7-8901-bcde-f23456789012',
+      documentImageId: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
       cref: 'SP-106227',
       crefImageUrl: 'https://example.com/cref-maria.jpg',
       specialties: ['Musculação', 'Funcional'],

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Requ
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClassesService } from './classes.service';
+import { ClassesCleanupService } from './classes-cleanup.service';
 import { 
   CreateClassDto, 
   UpdateClassDto, 
@@ -22,7 +23,10 @@ import {
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ClassesController {
-  constructor(private readonly classesService: ClassesService) {}
+  constructor(
+    private readonly classesService: ClassesService,
+    private readonly classesCleanupService: ClassesCleanupService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Criar nova aula' })
@@ -192,5 +196,53 @@ export class ClassesController {
   @Get('disputes')
   async getClassDisputes(@Request() req: any): Promise<ClassDisputeDto[]> {
     return this.classesService.getClassDisputes(req.user.sub);
+  }
+
+  @Post(':id/cleanup')
+  @ApiOperation({ summary: 'Limpar aula expirada manualmente' })
+  @ApiParam({ name: 'id', description: 'ID da aula' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Aula limpa com sucesso' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Aula não encontrada' 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Aula ainda não expirou' 
+  })
+  async cleanupExpiredClass(
+    @Param('id') id: string,
+    @Request() req: any,
+  ): Promise<{ message: string; classId: string }> {
+    await this.classesCleanupService.cleanupSpecificClass(id);
+    return {
+      message: 'Aula expirada limpa com sucesso',
+      classId: id
+    };
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Deletar aula (temporário para limpeza)' })
+  @ApiParam({ name: 'id', description: 'ID da aula' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Aula deletada com sucesso' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Aula não encontrada' 
+  })
+  async deleteClass(
+    @Param('id') id: string,
+    @Request() req: any,
+  ): Promise<{ message: string; classId: string }> {
+    await this.classesService.deleteClass(id, req.user.sub);
+    return {
+      message: 'Aula deletada com sucesso',
+      classId: id
+    };
   }
 }

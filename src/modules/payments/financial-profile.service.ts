@@ -51,6 +51,24 @@ export class FinancialProfileService {
     return this.formatProfileResponse(newProfile);
   }
 
+  // Criar carteira padrão
+  private async createDefaultWallet(userId: string): Promise<any> {
+    const [newWallet] = await this.db
+      .insert(userWallets)
+      .values({
+        userId,
+        availableBalance: '0.00',
+        pendingBalance: '0.00',
+        totalEarned: '0.00',
+        totalWithdrawn: '0.00',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return newWallet;
+  }
+
   // Atualizar perfil financeiro
   async updateFinancialProfile(
     userId: string,
@@ -314,12 +332,13 @@ export class FinancialProfileService {
   // Obter estatísticas financeiras
   async getPersonalFinancialStats(userId: string): Promise<PersonalFinancialStatsDto> {
     // Buscar carteira
-    const wallet = await this.db.query.userWallets.findFirst({
+    let wallet = await this.db.query.userWallets.findFirst({
       where: eq(userWallets.userId, userId),
     });
 
     if (!wallet) {
-      throw new NotFoundException('Carteira não encontrada');
+      // Criar carteira padrão se não existir
+      wallet = await this.createDefaultWallet(userId);
     }
 
     // Buscar perfil

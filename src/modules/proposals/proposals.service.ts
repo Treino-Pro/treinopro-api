@@ -151,11 +151,32 @@ export class ProposalsService {
       conditions.push(lte(proposals.trainingDate, new Date(dateTo)));
     }
 
-    // Buscar propostas com paginação
+    // Buscar propostas com join na tabela de usuários
     const [proposalsList, totalResult] = await Promise.all([
       this.db
-        .select()
+        .select({
+          // Campos da proposta
+          id: proposals.id,
+          studentId: proposals.studentId,
+          locationName: proposals.locationName,
+          locationAddress: proposals.locationAddress,
+          trainingDate: proposals.trainingDate,
+          trainingTime: proposals.trainingTime,
+          durationMinutes: proposals.durationMinutes,
+          modalityName: proposals.modalityName,
+          price: proposals.price,
+          additionalNotes: proposals.additionalNotes,
+          status: proposals.status,
+          paymentStatus: proposals.paymentStatus,
+          createdAt: proposals.createdAt,
+          updatedAt: proposals.updatedAt,
+          // Campos do estudante
+          studentFirstName: users.firstName,
+          studentLastName: users.lastName,
+          studentEmail: users.email,
+        })
         .from(proposals)
+        .leftJoin(users, eq(proposals.studentId, users.id))
         .where(and(...conditions))
         .orderBy(desc(proposals.createdAt))
         .limit(limit)
@@ -313,23 +334,48 @@ export class ProposalsService {
           )
         );
 
+      console.log(`🔍 [ACCEPT PROPOSAL] Verificando conflito de horário:`);
+      console.log(`  - Proposta: ${proposal.trainingDate} às ${proposal.trainingTime} (${proposal.durationMinutes}min)`);
+      console.log(`  - Aulas existentes encontradas: ${existingClasses.length}`);
+
       // Calcular janela de tempo da proposta aceita
       const [propHour, propMin] = String(proposal.trainingTime || '00:00').split(':').map((v: string) => parseInt(v, 10));
-      const proposedStart = new Date(proposedTrainingDate);
-      proposedStart.setHours(propHour || 0, propMin || 0, 0, 0);
+      
+      // Criar data local usando apenas a data (sem timezone)
+      const proposedDate = new Date(proposedTrainingDate);
+      const proposedStart = new Date(proposedDate.getFullYear(), proposedDate.getMonth(), proposedDate.getDate(), propHour || 0, propMin || 0, 0, 0);
       const proposedEnd = new Date(proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000);
+
+      console.log(`  - Proposta: ${proposedStart.toISOString()} até ${proposedEnd.toISOString()}`);
 
       // Verificar sobreposição com aulas existentes
       const hasConflict = existingClasses.some((cls: any) => {
         const classDate = new Date(cls.date);
         const [cHour, cMin] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
-        const classStart = new Date(classDate);
-        classStart.setHours(cHour || 0, cMin || 0, 0, 0);
+        
+        // Criar data local usando apenas a data (sem timezone)
+        const classStart = new Date(classDate.getFullYear(), classDate.getMonth(), classDate.getDate(), cHour || 0, cMin || 0, 0, 0);
         const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
 
+        console.log(`  - Aula existente: ${classStart.toISOString()} até ${classEnd.toISOString()}`);
+
+        // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
+        const now = new Date();
+        const isClassExpired = classEnd < now;
+        
+        if (isClassExpired) {
+          console.log(`  - Aula expirada (deveria ter terminado às ${classEnd.toISOString()}), ignorando conflito`);
+          return false; // Não há conflito com aulas expiradas
+        }
+
         // overlap se não (proposedEnd <= classStart || proposedStart >= classEnd)
-        return !(proposedEnd <= classStart || proposedStart >= classEnd);
+        const overlaps = !(proposedEnd <= classStart || proposedStart >= classEnd);
+        console.log(`  - Sobreposição: ${overlaps}`);
+        
+        return overlaps;
       });
+
+      console.log(`  - Tem conflito: ${hasConflict}`);
 
       if (hasConflict) {
         throw new BadRequestException('Conflito de horário: você já possui uma aula agendada nesse período.');
@@ -355,6 +401,18 @@ export class ProposalsService {
 
     // ===== CRIAR AULA AUTOMATICAMENTE =====
     console.log('🏋️ [PROPOSALS] Criando aula automaticamente para proposta aceita...');
+    
+    // Verificar se já existe uma aula para esta proposta
+    const existingClass = await this.db
+      .select()
+      .from(classes)
+      .where(eq(classes.proposalId, id))
+      .limit(1);
+
+    if (existingClass.length > 0) {
+      console.log('⚠️ [PROPOSALS] Aula já existe para esta proposta, pulando criação');
+      return this.mapToResponseDto(acceptedProposal);
+    }
     
     try {
       const [newClass] = await this.db
@@ -791,6 +849,15 @@ export class ProposalsService {
     return {
       id: proposal.id,
       studentId: proposal.studentId,
+      student: {
+        id: proposal.studentId,
+        name: proposal.studentFirstName && proposal.studentLastName 
+          ? `${proposal.studentFirstName} ${proposal.studentLastName}`.trim()
+          : 'Nome não disponível',
+        email: proposal.studentEmail || '',
+        firstName: proposal.studentFirstName || '',
+        lastName: proposal.studentLastName || '',
+      },
       locationName: proposal.locationName,
       locationAddress: proposal.locationAddress,
       trainingDate: proposal.trainingDate,

@@ -60,6 +60,18 @@ export class UploadController {
     @Body() uploadDto: UploadFileDto,
     @Request() req: any
   ): Promise<FileResponseDto> {
+    console.log('📸 [UPLOAD] Upload de imagem de perfil:');
+    console.log('- file:', !!file);
+    console.log('- file.originalname:', file?.originalname);
+    console.log('- file.size:', file?.size);
+    console.log('- file.mimetype:', file?.mimetype);
+    console.log('- uploadDto:', uploadDto);
+    console.log('- userId:', req.user?.id);
+    
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
+    
     const userId = req.user?.id;
     return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.PROFILE }, userId);
   }

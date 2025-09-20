@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, IsDateString, IsArray, ValidateIf, IsNotEmpty } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, IsDateString, IsArray, ValidateIf, IsNotEmpty, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum UserType {
@@ -55,7 +55,7 @@ export class RegisterDto {
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
     description: 'ID do arquivo de documento (obtido via upload)'
   })
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
   documentImageId: string;
 
@@ -70,11 +70,11 @@ export class RegisterDto {
   cref?: string;
 
   @ApiProperty({ 
-    example: 'b2c3d4e5-f6g7-8901-bcde-f23456789012',
+    example: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
     description: 'ID do arquivo CREF (obtido via upload)',
     required: false 
   })
-  @IsString()
+  @IsUUID()
   @IsOptional()
   crefImageId?: string;
 

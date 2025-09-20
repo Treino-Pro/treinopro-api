@@ -712,4 +712,29 @@ export class ClassesService {
       proposal: classData.proposal,
     };
   }
+
+  async deleteClass(classId: string, userId: string): Promise<void> {
+    // Verificar se a aula existe e se o usuário tem permissão
+    const classData = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+      with: {
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!classData) {
+      throw new NotFoundException('Aula não encontrada');
+    }
+
+    // Verificar se o usuário é o personal ou o aluno da aula
+    if (classData.personalId !== userId && classData.studentId !== userId) {
+      throw new ForbiddenException('Você não tem permissão para deletar esta aula');
+    }
+
+    // Deletar a aula
+    await this.db
+      .delete(classes)
+      .where(eq(classes.id, classId));
+  }
 }

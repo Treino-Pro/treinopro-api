@@ -8,6 +8,7 @@ export const classStatusEnum = pgEnum('class_status', [
   'active', 
   'completed', 
   'cancelled',
+  'no_show',
   'no_show_dispute',
   'custody'
 ]);

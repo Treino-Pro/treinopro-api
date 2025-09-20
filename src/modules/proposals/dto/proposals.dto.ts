@@ -192,6 +192,24 @@ export class ProposalResponseDto {
   studentId: string;
 
   @ApiProperty({
+    description: 'Dados do estudante',
+    example: {
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      name: 'João Silva',
+      email: 'joao@email.com',
+      firstName: 'João',
+      lastName: 'Silva'
+    },
+  })
+  student: {
+    id: string;
+    name: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+  };
+
+  @ApiProperty({
     description: 'Nome do local de treino',
     example: 'Academia Smart Fit - Shopping Iguatemi',
   })
