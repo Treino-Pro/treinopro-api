@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Inject, Logger } from '@nestjs/common';
 import { eq, and, desc, gte, lte, count, sql, or, isNull } from 'drizzle-orm';
+import { ChatGateway } from '../chat/chat.gateway';
 import { 
   userProfiles, 
   missions, 
@@ -46,6 +47,7 @@ export class GamificationService {
 
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   // ===== SISTEMA DE XP E NÍVEIS =====
@@ -135,6 +137,31 @@ export class GamificationService {
       description,
     });
 
+    // ===== EMITIR EVENTOS WEBSOCKET =====
+    try {
+      // Buscar perfil atualizado
+      const updatedProfile = await this.getUserProfile(userId);
+      
+      // Evento de XP ganho
+      this.chatGateway.server.emit('profile_update', {
+        action: 'xp_gained',
+        profile: {
+          id: updatedProfile.id,
+          userId: updatedProfile.userId,
+          level: updatedProfile.level,
+          totalXP: updatedProfile.totalXP,
+          currentLevelXP: updatedProfile.currentLevelXP,
+          xpToNextLevel: updatedProfile.xpToNextLevel,
+          xpGained: xpAmount,
+          source: source,
+        },
+        userId: userId,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      console.error('❌ [GAMIFICATION] Erro ao emitir evento WebSocket:', error);
+    }
+
     // Verificar se subiu de nível
     if (newLevel > previousLevel) {
       const levelUpResponse: LevelUpResponseDto = {
@@ -149,6 +176,25 @@ export class GamificationService {
       // Verificar conquistas desbloqueadas
       const unlockedAchievements = await this.checkAndUnlockAchievements(userId, newLevel);
       levelUpResponse.unlockedAchievements = unlockedAchievements.map(a => a.name);
+
+      // ===== EVENTO WEBSOCKET PARA LEVEL UP =====
+      try {
+        this.chatGateway.server.emit('profile_update', {
+          action: 'level_up',
+          profile: {
+            userId,
+            newLevel,
+            previousLevel,
+            xpGained: xpAmount,
+            unlockedAchievements: levelUpResponse.unlockedAchievements,
+            message: levelUpResponse.message,
+          },
+          userId: userId,
+          timestamp: new Date(),
+        });
+      } catch (error) {
+        console.error('❌ [GAMIFICATION] Erro ao emitir evento level up:', error);
+      }
 
       this.logger.log(`🎉 [GAMIFICATION] Usuário ${userId} subiu para o nível ${newLevel}`);
       return levelUpResponse;
@@ -371,14 +417,38 @@ export class GamificationService {
 
         this.logger.log(`🎯 [GAMIFICATION] Missão completada: ${userMission.missions.title} (${userId})`);
 
-        updatedMissions.push({
+        const completedMissionData = {
           ...userMission.user_missions,
           status: MissionStatus.COMPLETED,
           progress: totalRequired,
           completedAt: new Date(),
           totalRequired,
           mission: userMission.missions,
-        });
+        };
+
+        updatedMissions.push(completedMissionData);
+
+        // ===== EVENTO WEBSOCKET PARA MISSÃO COMPLETADA =====
+        try {
+          this.chatGateway.server.emit('profile_update', {
+            action: 'mission_completed',
+            profile: {
+              mission: {
+                id: userMission.missions.id,
+                title: userMission.missions.title,
+                description: userMission.missions.description,
+                xpReward: userMission.missions.xpReward,
+                progress: totalRequired,
+                totalRequired: totalRequired,
+                completedAt: new Date(),
+              }
+            },
+            userId: userId,
+            timestamp: new Date(),
+          });
+        } catch (error) {
+          console.error('❌ [GAMIFICATION] Erro ao emitir evento de missão completada:', error);
+        }
 
         // Atribuir próxima missão automaticamente
         await this.assignNextMission(userId);

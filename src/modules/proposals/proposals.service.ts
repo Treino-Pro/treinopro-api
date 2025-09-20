@@ -5,6 +5,7 @@ import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalRespons
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
 import { JobsService } from '../jobs/jobs.service';
+import { ChatGateway } from '../chat/chat.gateway';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
 @Injectable()
@@ -14,6 +15,7 @@ export class ProposalsService {
     private readonly studentPaymentService: StudentPaymentMethodsService,
     private readonly paymentsService: PaymentsService,
     private readonly jobsService: JobsService,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async createProposal(createProposalDto: CreateProposalDto, studentId: string): Promise<ProposalResponseDto> {
@@ -288,6 +290,34 @@ export class ProposalsService {
       .where(eq(proposals.id, id))
       .returning();
 
+    // ===== EMITIR EVENTOS WEBSOCKET =====
+    try {
+      // Buscar informações do usuário para enviar no evento
+      const [user] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      // Evento de proposta cancelada
+      this.chatGateway.server.emit('proposal_update', {
+        action: 'proposal_cancelled',
+        proposal: this.mapToResponseDto(cancelledProposal),
+        user: {
+          id: user?.id,
+          name: user?.name,
+          userType: user?.userType,
+        },
+        userId: userId,
+        timestamp: new Date(),
+      });
+      console.log('📡 [PROPOSALS] Evento proposal_update (cancelled) enviado:', cancelledProposal.id);
+
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket para cancelamento:', error);
+      // Não falhar a operação por causa de problemas de WebSocket
+    }
+
     return this.mapToResponseDto(cancelledProposal);
   }
 
@@ -456,6 +486,63 @@ export class ProposalsService {
         .where(eq(proposals.id, id));
       
       throw new BadRequestException(`Erro ao criar aula: ${error.message}`);
+    }
+
+    // ===== EMITIR EVENTOS WEBSOCKET =====
+    try {
+      // Buscar informações do aluno para enviar no evento
+      const [student] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, proposal.studentId))
+        .limit(1);
+
+      // Buscar informações do personal para enviar no evento
+      const [personal] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, personalId))
+        .limit(1);
+
+      // Evento para o aluno (proposta foi aceita)
+      if (student) {
+        this.chatGateway.server.emit('proposal_update', {
+          action: 'proposal_accepted',
+          proposal: this.mapToResponseDto(acceptedProposal),
+          personal: {
+            id: personal?.id,
+            name: personal?.name,
+            profileImageUrl: personal?.profileImageUrl,
+          },
+          userId: student.id,
+          timestamp: new Date(),
+        });
+        console.log('📡 [PROPOSALS] Evento proposal_update (accepted) enviado para aluno:', student.id);
+      }
+
+      // Evento de match confirmado para ambos
+      const matchData = {
+        action: 'match_confirmed',
+        proposal: this.mapToResponseDto(acceptedProposal),
+        student: {
+          id: student?.id,
+          name: student?.name,
+          profileImageUrl: student?.profileImageUrl,
+        },
+        personal: {
+          id: personal?.id,
+          name: personal?.name,
+          profileImageUrl: personal?.profileImageUrl,
+        },
+        timestamp: new Date(),
+      };
+
+      this.chatGateway.server.emit('match_confirmed', matchData);
+      console.log('📡 [PROPOSALS] Evento match_confirmed enviado para todos os usuários conectados');
+
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket:', error);
+      // Não falhar a operação por causa de problemas de WebSocket
     }
 
     return this.mapToResponseDto(acceptedProposal);

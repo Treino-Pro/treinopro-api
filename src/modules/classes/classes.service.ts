@@ -3,6 +3,7 @@ import { Inject } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or } from 'drizzle-orm';
 import { classes, users, proposals } from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { 
   CreateClassDto, 
   UpdateClassDto, 
@@ -25,6 +26,7 @@ export class ClassesService {
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly gamificationService: GamificationService,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async createClass(createClassDto: CreateClassDto, userId: string): Promise<ClassResponseDto> {
@@ -341,6 +343,37 @@ export class ClassesService {
     } catch (error) {
       console.error('❌ [GAMIFICATION] Erro ao processar XP da aula:', error);
       // Não falhar a operação se a gamificação falhar
+    }
+
+    // ===== EMITIR EVENTOS WEBSOCKET =====
+    try {
+      const classResponse = this.formatClassResponse(updatedClass);
+
+      // Evento para ambos os usuários (aluno e personal)
+      this.chatGateway.server.emit('class_update', {
+        action: 'class_completed',
+        class: classResponse,
+        personalId: userId,
+        studentId: classData.studentId,
+        timestamp: new Date(),
+      });
+
+      // Evento específico de dados financeiros para o personal (pagamento liberado)
+      this.chatGateway.server.emit('financial_update', {
+        action: 'payment_released',
+        class: classResponse,
+        financial: {
+          classId: id,
+          amount: classResponse.proposal?.value || 0,
+        },
+        userId: userId,
+        timestamp: new Date(),
+      });
+
+      console.log('📡 [CLASSES] Eventos WebSocket enviados para aula completada:', id);
+    } catch (error) {
+      console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
+      // Não falhar a operação por causa de problemas de WebSocket
     }
 
     return this.formatClassResponse(updatedClass);
