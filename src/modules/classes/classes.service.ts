@@ -108,6 +108,17 @@ export class ClassesService {
     const { status, studentId, personalId, dateFrom, dateTo, page = 1, limit = 10 } = getClassesDto;
     const offset = (page - 1) * limit;
 
+    console.log('🔍 [CLASSES] getClasses chamado com:', {
+      status,
+      studentId,
+      personalId,
+      dateFrom,
+      dateTo,
+      page,
+      limit,
+      userId
+    });
+
     // Construir condições de filtro
     const conditions = [];
 
@@ -121,6 +132,35 @@ export class ClassesService {
 
     if (status) {
       conditions.push(eq(classes.status, status));
+    }
+
+    // Para aulas agendadas, filtrar apenas aulas futuras
+    if (status === ClassStatus.SCHEDULED) {
+      const now = new Date();
+      console.log('🔍 [CLASSES] Filtrando aulas futuras. Data atual:', now);
+      
+      // Primeiro, vamos ver todas as aulas do usuário sem filtro de data
+      const allUserClasses = await this.db.query.classes.findMany({
+        where: and(
+          or(
+            eq(classes.studentId, userId),
+            eq(classes.personalId, userId)
+          ),
+          eq(classes.status, ClassStatus.SCHEDULED)
+        ),
+        columns: {
+          id: true,
+          date: true,
+          time: true,
+          status: true,
+          studentId: true,
+          personalId: true,
+        }
+      });
+      
+      console.log('🔍 [CLASSES] Todas as aulas do usuário (sem filtro de data):', allUserClasses);
+      
+      conditions.push(gte(classes.date, now));
     }
 
     if (studentId) {
@@ -140,6 +180,8 @@ export class ClassesService {
     }
 
     // Buscar aulas com relacionamentos
+    console.log('🔍 [CLASSES] Condições de filtro:', conditions);
+    
     const classesList = await this.db.query.classes.findMany({
       where: and(...conditions),
       with: {
@@ -167,16 +209,21 @@ export class ClassesService {
           },
         },
       },
-      orderBy: [desc(classes.date)],
+      orderBy: [classes.date], // Ordenar por data crescente para pegar a próxima aula
       limit,
       offset,
     });
+
+    console.log('🔍 [CLASSES] Aulas encontradas:', classesList.length);
+    console.log('🔍 [CLASSES] Aulas:', classesList);
 
     // Contar total
     const [{ total }] = await this.db
       .select({ total: count() })
       .from(classes)
       .where(and(...conditions));
+
+    console.log('🔍 [CLASSES] Total de aulas:', total);
 
     return {
       classes: classesList.map(cls => this.formatClassResponse(cls)),

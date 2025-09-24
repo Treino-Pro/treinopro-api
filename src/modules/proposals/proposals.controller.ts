@@ -23,6 +23,8 @@ import {
   ApiQuery
 } from '@nestjs/swagger';
 import { ProposalsService } from './proposals.service';
+import { ProposalCleanupService } from './proposal-cleanup.service';
+import { ProposalBackgroundService } from './proposal-background.service';
 import { 
   CreateProposalDto, 
   UpdateProposalDto, 
@@ -37,7 +39,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @Controller('proposals')
 @ApiBearerAuth()
 export class ProposalsController {
-  constructor(private readonly proposalsService: ProposalsService) {}
+  constructor(
+    private readonly proposalsService: ProposalsService,
+    private readonly proposalCleanupService: ProposalCleanupService,
+    private readonly proposalBackgroundService: ProposalBackgroundService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -347,5 +353,73 @@ export class ProposalsController {
     }
     
     return this.proposalsService.refundUnacceptedProposal(id, req.user.sub);
+  }
+
+  @Post('cleanup/expired')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Limpeza manual de propostas expiradas',
+    description: 'Executa limpeza manual de propostas que passaram do horário de início sem match'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Limpeza executada com sucesso'
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Apenas administradores podem executar limpeza'
+  })
+  async cleanupExpiredProposals(@Request() req: any): Promise<{ message: string }> {
+    // Verificar se o usuário é um administrador (ou personal trainer para testes)
+    if (req.user.userType !== 'personal' && req.user.userType !== 'admin') {
+      throw new ForbiddenException('Apenas administradores podem executar limpeza');
+    }
+    
+    await this.proposalCleanupService.manualCleanup();
+    return { message: 'Limpeza de propostas expiradas executada com sucesso' };
+  }
+
+  @Get('background/status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Status do serviço de background',
+    description: 'Retorna o status do serviço de verificação contínua de propostas expiradas'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Status do serviço de background'
+  })
+  async getBackgroundStatus(): Promise<{ isRunning: boolean; interval: number; message: string }> {
+    const status = this.proposalBackgroundService.getStatus();
+    return {
+      ...status,
+      message: status.isRunning 
+        ? 'Serviço de background ativo e verificando propostas expiradas' 
+        : 'Serviço de background inativo'
+    };
+  }
+
+  @Post('background/force-cleanup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Forçar limpeza de propostas expiradas',
+    description: 'Força uma limpeza imediata de propostas expiradas via serviço de background'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Limpeza forçada executada com sucesso'
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Apenas administradores podem forçar limpeza'
+  })
+  async forceBackgroundCleanup(@Request() req: any): Promise<{ message: string }> {
+    // Verificar se o usuário é um administrador (ou personal trainer para testes)
+    if (req.user.userType !== 'personal' && req.user.userType !== 'admin') {
+      throw new ForbiddenException('Apenas administradores podem forçar limpeza');
+    }
+    
+    await this.proposalBackgroundService.forceCleanup();
+    return { message: 'Limpeza forçada de propostas expiradas executada com sucesso' };
   }
 }

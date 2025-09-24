@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1757635984871,
-      "tag": "0000_square_thing",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1757655140386,
-      "tag": "0001_glossy_prowler",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1757660933199,
-      "tag": "0002_far_lucky_pierre",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1757714429068,
-      "tag": "0003_numerous_dexter_bennett",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1758109919626,
-      "tag": "0004_cloudy_black_knight",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1758174904913,
-      "tag": "0005_vengeful_paibok",
+      "when": 1758391583657,
+      "tag": "0000_friendly_jackal",
       "breakpoints": true
     }
   ]

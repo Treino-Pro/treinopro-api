@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { proposals, users, classes } from '../../database/schema';
-import { eq, and, desc, gte, lte, ilike, count, sql, or } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, ilike, count, sql, or, lt } from 'drizzle-orm';
 import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -92,8 +92,36 @@ export class ProposalsService {
         await this.schedulePaymentReminders(proposal.id);
       }
 
-      // Retornar proposta com dados do pagamento
-      const proposalResponse = this.mapToResponseDto(proposal);
+      // Buscar dados do usuário para incluir na resposta
+      const [student] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, studentId))
+        .limit(1);
+
+      // Retornar proposta com dados do pagamento e do usuário
+      const proposalResponse = this.mapToResponseDto(proposal, student);
+      
+      // ===== NOTIFICAR TODOS OS PERSONAIS ONLINE =====
+      try {
+
+        // Emitir evento para todos os personais online
+        this.chatGateway.server.emit('new_proposal', {
+          action: 'proposal_created',
+          proposal: proposalResponse,
+          student: {
+            id: student?.id,
+            name: student?.name,
+            profileImageUrl: student?.profileImageUrl,
+          },
+          timestamp: new Date(),
+        });
+        
+        console.log('📡 [PROPOSALS] Evento new_proposal enviado para todos os personais online');
+      } catch (error) {
+        console.error('❌ [PROPOSALS] Erro ao emitir evento new_proposal:', error);
+        // Não falhar a operação por causa de problemas de WebSocket
+      }
       
       return {
         ...proposalResponse,
@@ -154,6 +182,8 @@ export class ProposalsService {
     }
 
     // Buscar propostas com join na tabela de usuários
+    console.log('🔍 [PROPOSALS] Buscando propostas com condições:', conditions);
+    
     const [proposalsList, totalResult] = await Promise.all([
       this.db
         .select({
@@ -192,6 +222,12 @@ export class ProposalsService {
 
     const total = totalResult[0]?.count || 0;
 
+    console.log('🔍 [PROPOSALS] Resultado da query:', {
+      total: total,
+      proposalsCount: proposalsList.length,
+      firstProposal: proposalsList[0] || null
+    });
+
     return {
       proposals: proposalsList.map(proposal => this.mapToResponseDto(proposal)),
       total,
@@ -216,7 +252,14 @@ export class ProposalsService {
       throw new ForbiddenException('Você só pode visualizar suas próprias propostas');
     }
 
-    return this.mapToResponseDto(proposal);
+    // Buscar dados do usuário para incluir na resposta
+    const [student] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, proposal.studentId))
+      .limit(1);
+
+    return this.mapToResponseDto(proposal, student);
   }
 
   async updateProposal(id: string, updateProposalDto: UpdateProposalDto, userId: string, userType: string): Promise<ProposalResponseDto> {
@@ -251,7 +294,14 @@ export class ProposalsService {
       .where(eq(proposals.id, id))
       .returning();
 
-    return this.mapToResponseDto(updatedProposal);
+    // Buscar dados do usuário para incluir na resposta
+    const [student] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, updatedProposal.studentId))
+      .limit(1);
+
+    return this.mapToResponseDto(updatedProposal, student);
   }
 
   async cancelProposal(id: string, userId: string, userType: string): Promise<ProposalResponseDto> {
@@ -318,7 +368,14 @@ export class ProposalsService {
       // Não falhar a operação por causa de problemas de WebSocket
     }
 
-    return this.mapToResponseDto(cancelledProposal);
+    // Buscar dados do usuário para incluir na resposta
+    const [student] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, cancelledProposal.studentId))
+      .limit(1);
+
+    return this.mapToResponseDto(cancelledProposal, student);
   }
 
   async acceptProposal(id: string, personalId: string): Promise<ProposalResponseDto> {
@@ -367,24 +424,20 @@ export class ProposalsService {
       console.log(`🔍 [ACCEPT PROPOSAL] Verificando conflito de horário:`);
       console.log(`  - Proposta: ${proposal.trainingDate} às ${proposal.trainingTime} (${proposal.durationMinutes}min)`);
       console.log(`  - Aulas existentes encontradas: ${existingClasses.length}`);
+      console.log(`  - Aulas existentes:`, existingClasses.map(c => ({ id: c.id, date: c.date, time: c.time, status: c.status })));
 
       // Calcular janela de tempo da proposta aceita
-      const [propHour, propMin] = String(proposal.trainingTime || '00:00').split(':').map((v: string) => parseInt(v, 10));
-      
-      // Criar data local usando apenas a data (sem timezone)
-      const proposedDate = new Date(proposedTrainingDate);
-      const proposedStart = new Date(proposedDate.getFullYear(), proposedDate.getMonth(), proposedDate.getDate(), propHour || 0, propMin || 0, 0, 0);
+      // A proposta.trainingDate já contém a data e hora corretas
+      const proposedStart = new Date(proposedTrainingDate);
       const proposedEnd = new Date(proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000);
 
       console.log(`  - Proposta: ${proposedStart.toISOString()} até ${proposedEnd.toISOString()}`);
 
       // Verificar sobreposição com aulas existentes
       const hasConflict = existingClasses.some((cls: any) => {
-        const classDate = new Date(cls.date);
-        const [cHour, cMin] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
-        
-        // Criar data local usando apenas a data (sem timezone)
-        const classStart = new Date(classDate.getFullYear(), classDate.getMonth(), classDate.getDate(), cHour || 0, cMin || 0, 0, 0);
+        console.log(`🔍 [ACCEPT PROPOSAL] Verificando aula: ${cls.id}`);
+        // A aula.cls.date já contém a data e hora corretas
+        const classStart = new Date(cls.date);
         const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
 
         console.log(`  - Aula existente: ${classStart.toISOString()} até ${classEnd.toISOString()}`);
@@ -401,6 +454,10 @@ export class ProposalsService {
         // overlap se não (proposedEnd <= classStart || proposedStart >= classEnd)
         const overlaps = !(proposedEnd <= classStart || proposedStart >= classEnd);
         console.log(`  - Sobreposição: ${overlaps}`);
+        console.log(`  - proposedStart: ${proposedStart.toISOString()}`);
+        console.log(`  - proposedEnd: ${proposedEnd.toISOString()}`);
+        console.log(`  - classStart: ${classStart.toISOString()}`);
+        console.log(`  - classEnd: ${classEnd.toISOString()}`);
         
         return overlaps;
       });
@@ -441,7 +498,13 @@ export class ProposalsService {
 
     if (existingClass.length > 0) {
       console.log('⚠️ [PROPOSALS] Aula já existe para esta proposta, pulando criação');
-      return this.mapToResponseDto(acceptedProposal);
+      // Buscar dados do usuário para incluir na resposta
+      const [student] = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, acceptedProposal.studentId))
+        .limit(1);
+      return this.mapToResponseDto(acceptedProposal, student);
     }
     
     try {
@@ -545,7 +608,14 @@ export class ProposalsService {
       // Não falhar a operação por causa de problemas de WebSocket
     }
 
-    return this.mapToResponseDto(acceptedProposal);
+    // Buscar dados do usuário para incluir na resposta
+    const [student] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, acceptedProposal.studentId))
+      .limit(1);
+
+    return this.mapToResponseDto(acceptedProposal, student);
   }
 
   // ===== MÉTODOS PARA WEBHOOK DE PAGAMENTO =====
@@ -932,18 +1002,37 @@ export class ProposalsService {
     return stats;
   }
 
-  private mapToResponseDto(proposal: any): ProposalResponseDto {
+  private mapToResponseDto(proposal: any, student?: any): ProposalResponseDto {
+    console.log('🔍 [PROPOSALS] Mapeando proposta:', {
+      id: proposal.id,
+      studentId: proposal.studentId,
+      studentData: student ? {
+        firstName: student.firstName,
+        lastName: student.lastName,
+        email: student.email,
+      } : 'Dados do usuário não fornecidos',
+    });
+
+    // Usar dados do usuário se fornecidos, senão usar dados da proposta (para compatibilidade)
+    const studentFirstName = student?.firstName || proposal.studentFirstName;
+    const studentLastName = student?.lastName || proposal.studentLastName;
+    const studentEmail = student?.email || proposal.studentEmail;
+
+    const studentName = studentFirstName && studentLastName 
+      ? `${studentFirstName} ${studentLastName}`.trim()
+      : 'Nome não disponível';
+
+    console.log('🔍 [PROPOSALS] Nome do aluno mapeado:', studentName);
+
     return {
       id: proposal.id,
       studentId: proposal.studentId,
       student: {
         id: proposal.studentId,
-        name: proposal.studentFirstName && proposal.studentLastName 
-          ? `${proposal.studentFirstName} ${proposal.studentLastName}`.trim()
-          : 'Nome não disponível',
-        email: proposal.studentEmail || '',
-        firstName: proposal.studentFirstName || '',
-        lastName: proposal.studentLastName || '',
+        name: studentName,
+        email: studentEmail || '',
+        firstName: studentFirstName || '',
+        lastName: studentLastName || '',
       },
       locationName: proposal.locationName,
       locationAddress: proposal.locationAddress,
@@ -958,5 +1047,70 @@ export class ProposalsService {
       createdAt: proposal.createdAt,
       updatedAt: proposal.updatedAt,
     };
+  }
+
+  /**
+   * Verifica e limpa propostas expiradas em tempo real
+   * Chamado quando propostas são consultadas para garantir dados atualizados
+   */
+  async checkAndCleanExpiredProposals(): Promise<void> {
+    try {
+      const now = new Date();
+      
+      // Buscar candidatas (até amanhã) e combinar data + hora em memória
+      const candidates = await this.db
+        .select()
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.status, ProposalStatus.PENDING),
+            lt(proposals.trainingDate, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))
+          )
+        );
+
+      const expiredProposals = candidates.filter((p: any) => {
+        try {
+          const start = new Date(p.trainingDate);
+          const [hhStr, mmStr] = String(p.trainingTime ?? '00:00').split(':');
+          const hh = Number(hhStr ?? 0);
+          const mm = Number(mmStr ?? 0);
+          start.setHours(hh, mm, 0, 0);
+          return start.getTime() < now.getTime();
+        } catch (_) {
+          return false;
+        }
+      });
+
+      if (expiredProposals.length === 0) {
+        return; // Nenhuma proposta expirada
+      }
+
+      console.log(`🧹 [PROPOSALS] Encontradas ${expiredProposals.length} propostas expiradas em tempo real`);
+
+      // Deletar propostas expiradas
+      for (const proposal of expiredProposals) {
+        await this.db
+          .delete(proposals)
+          .where(eq(proposals.id, proposal.id));
+
+        console.log(`🗑️ [PROPOSALS] Proposta ${proposal.id} deletada (expirada em tempo real)`);
+
+        // Notificar o aluno sobre a expiração via WebSocket
+        this.chatGateway.server.emit('proposal_expired', {
+          action: 'proposal_expired',
+          proposalId: proposal.id,
+          studentId: proposal.studentId,
+          location: proposal.locationName,
+          trainingDate: proposal.trainingDate,
+          trainingTime: proposal.trainingTime,
+          reason: 'Horário de início expirado sem match',
+          timestamp: new Date(),
+        });
+      }
+
+      console.log(`✅ [PROPOSALS] Limpeza em tempo real concluída: ${expiredProposals.length} propostas removidas`);
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro na limpeza em tempo real:', error);
+    }
   }
 }

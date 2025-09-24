@@ -452,6 +452,7 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   }
 
   @Post('missions/progress')
+  @HttpCode(200)
   async updateMissionProgress(
     @Request() req,
     @Body() progressDto: MissionProgressDto

@@ -53,10 +53,7 @@ export class NotificationJobsProcessor {
         .where(
           and(
             eq(users.isVerified, true),
-            or(
-              eq(users.profileImageUrl, null),
-              eq(users.profileImageUrl, '')
-            )
+            eq(users.profileImageId, null)
           )
         );
 
@@ -143,13 +140,29 @@ export class NotificationJobsProcessor {
 
     try {
       // Buscar proposta e usuário
-      const proposal = await this.db.query.proposals.findFirst({
-        where: eq(proposals.id, proposalId),
-        with: { student: true },
-      });
+      const [proposal] = await this.db
+        .select({
+          id: proposals.id,
+          studentId: proposals.studentId,
+          locationName: proposals.locationName,
+          price: proposals.price,
+          paymentStatus: proposals.paymentStatus,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          email: users.email,
+        })
+        .from(proposals)
+        .leftJoin(users, eq(proposals.studentId, users.id))
+        .where(eq(proposals.id, proposalId))
+        .limit(1);
 
       if (!proposal) {
         this.logger.warn(`⚠️ Proposta não encontrada: ${proposalId}`);
+        return;
+      }
+
+      if (!proposal.studentId) {
+        this.logger.warn(`⚠️ Proposta ${proposalId} não possui studentId válido`);
         return;
       }
 
@@ -162,7 +175,7 @@ export class NotificationJobsProcessor {
       const timeLeft = reminderType === 'first' ? '20 minutos' : '5 minutos';
 
       await this.notificationsService.sendEmail(proposal.studentId, template, {
-        firstName: proposal.student.firstName,
+        firstName: proposal.firstName,
         proposalId: proposalId,
         location: proposal.locationName,
         price: proposal.price,

@@ -1,6 +1,7 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger, Inject } from '@nestjs/common';
 import { Job } from 'bull';
+import { isProposalExpired } from '../../proposals/proposals.utils';
 import { eq, and, lt } from 'drizzle-orm';
 import { proposals } from '../../../database/schema';
 import { ProposalExpirationJobData } from '../jobs.service';
@@ -74,25 +75,29 @@ export class ProposalJobsProcessor {
     this.logger.log('🧹 Iniciando limpeza de propostas expiradas');
 
     try {
-      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+      const now = new Date();
 
-      // Buscar propostas pendentes há mais de 30 minutos
-      const expiredProposals = await this.db
+      // Buscar candidatas (até amanhã) e validar expiração combinando data + hora
+      const candidates = await this.db
         .select()
         .from(proposals)
         .where(
           and(
             eq(proposals.status, 'pending'),
-            eq(proposals.paymentStatus, 'pending'),
-            lt(proposals.createdAt, thirtyMinutesAgo)
+            lt(
+              proposals.trainingDate,
+              new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+            )
           )
         );
+
+      const expiredProposals = candidates.filter((p: any) => isProposalExpired(now, p));
 
       this.logger.log(`📋 Encontradas ${expiredProposals.length} propostas expiradas para limpeza`);
 
       for (const proposal of expiredProposals) {
         try {
-          // Cancelar proposta
+          // Marcar proposta como cancelada por expiração do horário
           await this.db
             .update(proposals)
             .set({
