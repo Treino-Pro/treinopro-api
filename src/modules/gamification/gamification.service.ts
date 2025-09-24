@@ -1,4 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Inject, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { randomUUID } from 'crypto';
 import { eq, and, desc, gte, lte, count, sql, or, isNull } from 'drizzle-orm';
 import { ChatGateway } from '../chat/chat.gateway';
 import { 
@@ -48,7 +51,80 @@ export class GamificationService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
+    @InjectQueue('gamification-events') private readonly eventsQueue: Queue,
   ) {}
+
+  // Deduplicação simples de eventos emitidos neste processo (TTL curto)
+  private readonly emittedEvents = new Map<string, number>();
+  private readonly emittedTTLms = 5 * 60 * 1000; // 5 minutos
+
+  private emitProfileUpdate(action: string, payload: Record<string, any>, userId: string): void {
+    try {
+      const eventId = randomUUID();
+      const now = Date.now();
+      // Limpeza de TTL
+      for (const [id, ts] of this.emittedEvents) {
+        if (now - ts > this.emittedTTLms) this.emittedEvents.delete(id);
+      }
+      this.emittedEvents.set(eventId, now);
+
+      const eventPayload = {
+        eventId,
+        action,
+        type: action,
+        ...payload,
+        userId,
+        timestamp: new Date(),
+      };
+
+      // Persistir no Event Store (melhor esforço, ignora se tabela não existe)
+      this.persistEventToStore(eventId, userId, action, eventPayload).catch((err) => {
+        this.logger.warn(`⚠️ [GAMIFICATION] EventStore indisponível: ${err?.message || err}`);
+      });
+
+      // Emitir em tempo real
+      this.chatGateway.server.emit('profile_update', eventPayload);
+
+      // Enfileirar para processamento assíncrono
+      try {
+        this.eventsQueue.add('profile_update', eventPayload, { removeOnComplete: true, removeOnFail: true });
+      } catch (_) {
+        // Se a fila não estiver configurada, não falha o fluxo principal
+      }
+
+      // Persistir métrica diária básica (melhor esforço)
+      this.persistDailyMetric(userId, action, eventPayload).catch((err) => {
+        this.logger.warn(`⚠️ [GAMIFICATION] Metrics indisponível: ${err?.message || err}`);
+      });
+    } catch (error) {
+      this.logger.error('❌ [GAMIFICATION] Erro ao emitir evento WebSocket:', error as any);
+    }
+  }
+
+  private async persistEventToStore(eventId: string, userId: string, type: string, payload: any): Promise<void> {
+    try {
+      await this.db.execute(sql`INSERT INTO gamification_events (id, user_id, type, payload, created_at)
+        VALUES (${eventId}::uuid, ${userId}, ${type}, ${JSON.stringify(payload)}::jsonb, NOW())`);
+    } catch (e) {
+      // Tabela pode não existir ainda; não falhar fluxo principal
+      throw e;
+    }
+  }
+
+  private async persistDailyMetric(userId: string, type: string, payload: any): Promise<void> {
+    try {
+      // Incremento diário simples por usuário e tipo de evento
+      await this.db.execute(sql`
+        INSERT INTO gamification_metrics_daily (user_id, date, type, count)
+        VALUES (${userId}, CURRENT_DATE, ${type}, 1)
+        ON CONFLICT (user_id, date, type)
+        DO UPDATE SET count = gamification_metrics_daily.count + 1
+      `);
+    } catch (e) {
+      // Tabela pode não existir ainda; não falhar fluxo principal
+      throw e;
+    }
+  }
 
   // ===== SISTEMA DE XP E NÍVEIS =====
 
@@ -180,29 +256,20 @@ export class GamificationService {
     });
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
-    try {
-      // Buscar perfil atualizado
-      const updatedProfile = await this.getUserProfile(userId);
-      
-      // Evento de XP ganho
-      this.chatGateway.server.emit('profile_update', {
-        action: 'xp_gained',
-        profile: {
-          id: updatedProfile.id,
-          userId: updatedProfile.userId,
-          level: updatedProfile.level,
-          totalXP: updatedProfile.totalXP,
-          currentLevelXP: updatedProfile.currentLevelXP,
-          xpToNextLevel: updatedProfile.xpToNextLevel,
-          xpGained: xpAmount,
-          source: source,
-        },
-        userId: userId,
-        timestamp: new Date(),
-      });
-    } catch (error) {
-      console.error('❌ [GAMIFICATION] Erro ao emitir evento WebSocket:', error);
-    }
+    // Buscar perfil atualizado e emitir xp_gained
+    const updatedProfile = await this.getUserProfile(userId);
+    this.emitProfileUpdate('xp_gained', {
+      profile: {
+        id: updatedProfile.id,
+        userId: updatedProfile.userId,
+        level: updatedProfile.level,
+        totalXP: updatedProfile.totalXP,
+        currentLevelXP: updatedProfile.currentLevelXP,
+        xpToNextLevel: updatedProfile.xpToNextLevel,
+        xpGained: xpAmount,
+        source: source,
+      },
+    }, userId);
 
     // Verificar se subiu de nível
     if (newLevel > previousLevel) {
@@ -220,23 +287,16 @@ export class GamificationService {
       levelUpResponse.unlockedAchievements = unlockedAchievements.map(a => a.name);
 
       // ===== EVENTO WEBSOCKET PARA LEVEL UP =====
-      try {
-        this.chatGateway.server.emit('profile_update', {
-          action: 'level_up',
-          profile: {
-            userId,
-            newLevel,
-            previousLevel,
-            xpGained: xpAmount,
-            unlockedAchievements: levelUpResponse.unlockedAchievements,
-            message: levelUpResponse.message,
-          },
-          userId: userId,
-          timestamp: new Date(),
-        });
-      } catch (error) {
-        console.error('❌ [GAMIFICATION] Erro ao emitir evento level up:', error);
-      }
+      this.emitProfileUpdate('level_up', {
+        profile: {
+          userId,
+          newLevel,
+          previousLevel,
+          xpGained: xpAmount,
+          unlockedAchievements: levelUpResponse.unlockedAchievements,
+          message: levelUpResponse.message,
+        },
+      }, userId);
 
       this.logger.log(`🎉 [GAMIFICATION] Usuário ${userId} subiu para o nível ${newLevel}`);
       return levelUpResponse;
@@ -323,6 +383,7 @@ export class GamificationService {
     if (requiredUserType) {
       conditions.push(eq(users.userType, requiredUserType));
     }
+    // Usar comparação por string 'active' conforme schema
     conditions.push(eq(users.status, 'active'));
 
     const whereClause = conditions.length > 1 ? and(...conditions) : conditions[0];
@@ -467,6 +528,30 @@ export class GamificationService {
       })
       .returning();
 
+    // Emitir evento WebSocket de missão atribuída
+    try {
+      this.chatGateway.server.emit('profile_update', {
+        eventId: randomUUID(),
+        action: 'mission_assigned',
+        type: 'mission_assigned',
+        profile: {
+          mission: {
+            id: mission.id,
+            title: mission.title,
+            description: mission.description,
+            xpReward: mission.xpReward,
+            progress: 0,
+            totalRequired: mission.requirements.count,
+            assignedAt: new Date(),
+          },
+        },
+        userId: userId,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      this.logger.error('❌ [GAMIFICATION] Erro ao emitir evento mission_assigned:', error as any);
+    }
+
     return {
       ...userMission,
       totalRequired: mission.requirements.count,
@@ -546,26 +631,19 @@ export class GamificationService {
         updatedMissions.push(completedMissionData);
 
         // ===== EVENTO WEBSOCKET PARA MISSÃO COMPLETADA =====
-        try {
-          this.chatGateway.server.emit('profile_update', {
-            action: 'mission_completed',
-            profile: {
-              mission: {
-                id: userMission.missions.id,
-                title: userMission.missions.title,
-                description: userMission.missions.description,
-                xpReward: userMission.missions.xpReward,
-                progress: totalRequired,
-                totalRequired: totalRequired,
-                completedAt: new Date(),
-              }
-            },
-            userId: userId,
-            timestamp: new Date(),
-          });
-        } catch (error) {
-          console.error('❌ [GAMIFICATION] Erro ao emitir evento de missão completada:', error);
-        }
+        this.emitProfileUpdate('mission_completed', {
+          profile: {
+            mission: {
+              id: userMission.missions.id,
+              title: userMission.missions.title,
+              description: userMission.missions.description,
+              xpReward: userMission.missions.xpReward,
+              progress: totalRequired,
+              totalRequired: totalRequired,
+              completedAt: new Date(),
+            }
+          },
+        }, userId);
 
         // Atribuir próxima missão automaticamente
         await this.assignNextMission(userId);
@@ -585,6 +663,20 @@ export class GamificationService {
           totalRequired,
           mission: userMission.missions,
         });
+
+        // ===== EVENTO WEBSOCKET PARA PROGRESSO DE MISSÃO =====
+        this.emitProfileUpdate('mission_progressed', {
+          profile: {
+            mission: {
+              id: userMission.missions.id,
+              title: userMission.missions.title,
+              description: userMission.missions.description,
+              xpReward: userMission.missions.xpReward,
+              progress: newProgress,
+              totalRequired: totalRequired,
+            }
+          },
+        }, userId);
       }
     }
 
