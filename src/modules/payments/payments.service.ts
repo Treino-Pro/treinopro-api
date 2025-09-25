@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { Inject } from '@nestjs/common';
 import { eq, and, or, desc, count, sum, sql } from 'drizzle-orm';
 import { payments, paymentDisputes, paymentTransactions, userWallets, users, classes } from '../../database/schema';
+import { withdrawalRequests, withdrawalHistory } from '../../database/schema/withdrawals';
 import { MercadoPagoService, CreatePreferenceData } from './mercadopago.service';
 import { 
   CreatePaymentDto,
@@ -24,7 +25,11 @@ import {
   PaymentType,
   DisputeStatus,
   MercadoPagoWebhookDto,
-  MercadoPagoSplitDto
+  MercadoPagoSplitDto,
+  TransferRequestDto,
+  ApproveWithdrawalDto,
+  RejectWithdrawalDto,
+  WithdrawalResponseDto
 } from './dto/payments.dto';
 
 @Injectable()
@@ -938,6 +943,328 @@ export class PaymentsService {
       } : undefined,
       createdAt: transaction.createdAt,
       processedAt: transaction.processedAt,
+    };
+  }
+
+  // ===== TRANSFERÊNCIA REAL PARA PERSONAL =====
+
+  // Processar transferência real para personal
+  async processRealTransfer(transferDto: TransferRequestDto, adminId: string): Promise<{
+    success: boolean;
+    transferId?: string;
+    error?: string;
+  }> {
+    try {
+      console.log(`💸 [TRANSFER] Processando transferência real para personal ${transferDto.personalId}`);
+
+      // Validar dados de transferência
+      const validation = await this.mercadoPagoService.validateTransferData({
+        personalId: transferDto.personalId,
+        amount: transferDto.amount,
+        transferMethod: transferDto.transferMethod,
+        personalData: transferDto.personalData,
+      });
+
+      if (!validation.isValid) {
+        throw new BadRequestException(`Dados de transferência inválidos: ${validation.errors.join(', ')}`);
+      }
+
+      // Buscar dados do personal
+      const personal = await this.db.query.users.findFirst({
+        where: eq(users.id, transferDto.personalId),
+      });
+
+      if (!personal) {
+        throw new NotFoundException('Personal trainer não encontrado');
+      }
+
+      // Verificar se personal tem perfil financeiro configurado
+      const financialProfile = await this.db.query.financialProfiles.findFirst({
+        where: eq(users.id, transferDto.personalId),
+      });
+
+      if (!financialProfile || !financialProfile.canReceivePayments) {
+        throw new BadRequestException('Personal trainer não tem perfil financeiro configurado');
+      }
+
+      // Fazer transferência via Mercado Pago
+      const transferResult = await this.mercadoPagoService.transferToPersonal({
+        personalId: transferDto.personalId,
+        amount: transferDto.amount,
+        description: transferDto.description,
+        transferMethod: transferDto.transferMethod,
+        personalData: transferDto.personalData,
+      });
+
+      if (!transferResult.success) {
+        throw new BadRequestException(`Erro na transferência: ${transferResult.error}`);
+      }
+
+      // Atualizar carteira do personal (debitar valor transferido)
+      const personalWallet = await this.getUserWallet(transferDto.personalId);
+      await this.updateWallet(transferDto.personalId, {
+        availableBalance: personalWallet.availableBalance - transferDto.amount,
+        totalWithdrawn: personalWallet.totalWithdrawn + transferDto.amount,
+      });
+
+      // Criar transação de transferência
+      await this.createTransaction({
+        paymentId: null,
+        userId: transferDto.personalId,
+        type: PaymentType.REFUND, // Usando REFUND para transferência
+        amount: -transferDto.amount,
+        description: `Transferência real: ${transferDto.description}`,
+        status: PaymentStatus.CAPTURED,
+        metadata: {
+          transferId: transferResult.transferId,
+          transferMethod: transferDto.transferMethod,
+          adminId,
+        },
+      });
+
+      console.log(`✅ [TRANSFER] Transferência processada com sucesso: ${transferResult.transferId}`);
+
+      return {
+        success: true,
+        transferId: transferResult.transferId,
+      };
+
+    } catch (error) {
+      console.error(`❌ [TRANSFER] Erro ao processar transferência:`, error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  // Aprovar solicitação de saque (admin)
+  async approveWithdrawal(approveDto: ApproveWithdrawalDto, adminId: string): Promise<WithdrawalResponseDto> {
+    try {
+      console.log(`✅ [ADMIN] Aprovando saque ${approveDto.withdrawalId}`);
+
+      // Buscar solicitação de saque
+      const withdrawal = await this.db.query.withdrawalRequests.findFirst({
+        where: eq(withdrawalRequests.id, approveDto.withdrawalId),
+        with: {
+          user: true,
+        },
+      });
+
+      if (!withdrawal) {
+        throw new NotFoundException('Solicitação de saque não encontrada');
+      }
+
+      if (withdrawal.status !== 'pending') {
+        throw new BadRequestException('Solicitação já foi processada');
+      }
+
+      // Buscar perfil financeiro do personal
+      const financialProfile = await this.db.query.financialProfiles.findFirst({
+        where: eq(users.id, withdrawal.userId),
+      });
+
+      if (!financialProfile) {
+        throw new BadRequestException('Perfil financeiro não encontrado');
+      }
+
+      // Preparar dados para transferência
+      const transferMethod = approveDto.transferMethod || withdrawal.method;
+      const personalData = this.preparePersonalDataForTransfer(financialProfile, transferMethod);
+
+      // Processar transferência real
+      const transferResult = await this.processRealTransfer({
+        personalId: withdrawal.userId,
+        amount: parseFloat(withdrawal.amount),
+        description: withdrawal.description || 'Saque aprovado',
+        transferMethod,
+        personalData,
+      }, adminId);
+
+      if (!transferResult.success) {
+        throw new BadRequestException(`Erro na transferência: ${transferResult.error}`);
+      }
+
+      // Atualizar status da solicitação
+      const [updatedWithdrawal] = await this.db
+        .update(withdrawalRequests)
+        .set({
+          status: 'approved',
+          adminNotes: approveDto.adminNotes,
+          mpTransferId: transferResult.transferId,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(withdrawalRequests.id, approveDto.withdrawalId))
+        .returning();
+
+      // Criar histórico
+      await this.createWithdrawalHistory({
+        withdrawalId: withdrawal.id,
+        userId: withdrawal.userId,
+        action: 'approved',
+        description: 'Saque aprovado e transferência processada',
+        adminId,
+        metadata: {
+          transferId: transferResult.transferId,
+          transferMethod,
+        },
+      });
+
+      console.log(`✅ [ADMIN] Saque aprovado e transferência processada: ${transferResult.transferId}`);
+
+      return this.formatWithdrawalResponse(updatedWithdrawal);
+
+    } catch (error) {
+      console.error(`❌ [ADMIN] Erro ao aprovar saque:`, error);
+      throw error;
+    }
+  }
+
+  // Rejeitar solicitação de saque (admin)
+  async rejectWithdrawal(rejectDto: RejectWithdrawalDto, adminId: string): Promise<WithdrawalResponseDto> {
+    try {
+      console.log(`❌ [ADMIN] Rejeitando saque ${rejectDto.withdrawalId}`);
+
+      // Buscar solicitação de saque
+      const withdrawal = await this.db.query.withdrawalRequests.findFirst({
+        where: eq(withdrawalRequests.id, rejectDto.withdrawalId),
+      });
+
+      if (!withdrawal) {
+        throw new NotFoundException('Solicitação de saque não encontrada');
+      }
+
+      if (withdrawal.status !== 'pending') {
+        throw new BadRequestException('Solicitação já foi processada');
+      }
+
+      // Atualizar status da solicitação
+      const [updatedWithdrawal] = await this.db
+        .update(withdrawalRequests)
+        .set({
+          status: 'rejected',
+          rejectionReason: rejectDto.reason,
+          adminNotes: rejectDto.adminNotes,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(withdrawalRequests.id, rejectDto.withdrawalId))
+        .returning();
+
+      // Devolver saldo para a carteira
+      const personalWallet = await this.getUserWallet(withdrawal.userId);
+      await this.updateWallet(withdrawal.userId, {
+        availableBalance: personalWallet.availableBalance + parseFloat(withdrawal.amount),
+        pendingBalance: personalWallet.pendingBalance - parseFloat(withdrawal.amount),
+      });
+
+      // Criar histórico
+      await this.createWithdrawalHistory({
+        withdrawalId: withdrawal.id,
+        userId: withdrawal.userId,
+        action: 'rejected',
+        description: `Saque rejeitado: ${rejectDto.reason}`,
+        adminId,
+        metadata: {
+          reason: rejectDto.reason,
+          adminNotes: rejectDto.adminNotes,
+        },
+      });
+
+      console.log(`❌ [ADMIN] Saque rejeitado: ${rejectDto.reason}`);
+
+      return this.formatWithdrawalResponse(updatedWithdrawal);
+
+    } catch (error) {
+      console.error(`❌ [ADMIN] Erro ao rejeitar saque:`, error);
+      throw error;
+    }
+  }
+
+  // Listar solicitações de saque pendentes (admin)
+  async getPendingWithdrawals(): Promise<WithdrawalResponseDto[]> {
+    const withdrawals = await this.db.query.withdrawalRequests.findMany({
+      where: eq(withdrawalRequests.status, 'pending'),
+      with: {
+        user: true,
+      },
+      orderBy: [desc(withdrawalRequests.createdAt)],
+    });
+
+    return withdrawals.map(withdrawal => this.formatWithdrawalResponse(withdrawal));
+  }
+
+  // Obter histórico de saques de um usuário
+  async getUserWithdrawalHistory(userId: string): Promise<WithdrawalResponseDto[]> {
+    const withdrawals = await this.db.query.withdrawalRequests.findMany({
+      where: eq(withdrawalRequests.userId, userId),
+      with: {
+        user: true,
+      },
+      orderBy: [desc(withdrawalRequests.createdAt)],
+    });
+
+    return withdrawals.map(withdrawal => this.formatWithdrawalResponse(withdrawal));
+  }
+
+  // Métodos auxiliares privados
+  private preparePersonalDataForTransfer(financialProfile: any, transferMethod: string): any {
+    switch (transferMethod) {
+      case 'pix':
+        return {
+          pixKey: financialProfile.pixKey,
+        };
+      case 'bank_transfer':
+        return {
+          bankAccount: financialProfile.bankAccount,
+        };
+      case 'mercadopago_balance':
+        return {
+          mpAccountId: financialProfile.mercadoPagoAccount?.accountId,
+        };
+      default:
+        throw new Error('Método de transferência inválido');
+    }
+  }
+
+  private async createWithdrawalHistory(data: {
+    withdrawalId: string;
+    userId: string;
+    action: string;
+    description: string;
+    adminId?: string;
+    metadata?: any;
+  }): Promise<void> {
+    await this.db
+      .insert(withdrawalHistory)
+      .values({
+        ...data,
+        createdAt: new Date(),
+      });
+  }
+
+  private formatWithdrawalResponse(withdrawal: any): WithdrawalResponseDto {
+    return {
+      id: withdrawal.id,
+      userId: withdrawal.userId,
+      amount: parseFloat(withdrawal.amount),
+      fee: parseFloat(withdrawal.fee),
+      netAmount: parseFloat(withdrawal.netAmount),
+      method: withdrawal.method,
+      status: withdrawal.status,
+      description: withdrawal.description,
+      rejectionReason: withdrawal.rejectionReason,
+      adminNotes: withdrawal.adminNotes,
+      mpTransferId: withdrawal.mpTransferId,
+      createdAt: withdrawal.createdAt,
+      processedAt: withdrawal.processedAt,
+      user: withdrawal.user ? {
+        id: withdrawal.user.id,
+        name: withdrawal.user.name,
+        email: withdrawal.user.email,
+        role: withdrawal.user.role,
+      } : undefined,
     };
   }
 }

@@ -17,12 +17,8 @@ export class AuthController {
   @ApiResponse({ status: 409, description: 'Email já está em uso' })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   async register(@Body() registerDto: RegisterDto) {
-    console.log('📨 [CONTROLLER] Requisição de registro recebida');
-    console.log('📨 [CONTROLLER] Headers:', JSON.stringify(registerDto, null, 2));
-    
     try {
       const result = await this.authService.register(registerDto);
-      console.log('✅ [CONTROLLER] Registro processado com sucesso');
       return result;
     } catch (error) {
       console.error('❌ [CONTROLLER] Erro no controller:', error);
@@ -137,12 +133,8 @@ export class AuthController {
     description: 'Dados inválidos' 
   })
   async createAdmin(@Body() createAdminDto: CreateAdminDto) {
-    console.log('👑 [CONTROLLER] Requisição de criação de admin recebida');
-    console.log('👑 [CONTROLLER] Email:', createAdminDto.email);
-    
     try {
       const result = await this.authService.createAdmin(createAdminDto);
-      console.log('✅ [CONTROLLER] Admin criado com sucesso');
       return result;
     } catch (error) {
       console.error('❌ [CONTROLLER] Erro na criação de admin:', error);

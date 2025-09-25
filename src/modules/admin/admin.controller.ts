@@ -1,9 +1,10 @@
-import { Controller, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Param, Body, UseGuards, Post, Request } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AdminService } from './admin.service';
+import { PaymentsService } from '../payments/payments.service';
 import {
   DashboardSummaryResponseDto,
   UserListResponseDto,
@@ -13,6 +14,11 @@ import {
   UpdateMissionDto,
   AnalyticsResponseDto
 } from './dto/admin.dto';
+import { 
+  ApproveWithdrawalDto, 
+  RejectWithdrawalDto, 
+  WithdrawalResponseDto 
+} from '../payments/dto/payments.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -20,7 +26,10 @@ import {
 @Roles('admin')
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   @Get('dashboard')
   @ApiOperation({ 
@@ -203,6 +212,154 @@ export class AdminController {
   })
   async getAnalytics(): Promise<AnalyticsResponseDto> {
     return this.adminService.getAnalytics();
+  }
+
+  // ===== ENDPOINTS DE TRANSFERÊNCIA REAL =====
+
+  @Get('withdrawals/pending')
+  @ApiOperation({ 
+    summary: 'Listar solicitações de saque pendentes',
+    description: 'Retorna todas as solicitações de saque que aguardam aprovação administrativa'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lista de saques pendentes retornada com sucesso',
+    type: [WithdrawalResponseDto]
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async getPendingWithdrawals(): Promise<WithdrawalResponseDto[]> {
+    return this.paymentsService.getPendingWithdrawals();
+  }
+
+  @Post('withdrawals/:id/approve')
+  @ApiOperation({ 
+    summary: 'Aprovar solicitação de saque',
+    description: 'Aprova uma solicitação de saque e processa a transferência real para o personal trainer'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID da solicitação de saque',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Saque aprovado e transferência processada com sucesso',
+    type: WithdrawalResponseDto
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos ou erro na transferência' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Solicitação de saque não encontrada' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async approveWithdrawal(
+    @Param('id') id: string,
+    @Body() approveDto: ApproveWithdrawalDto,
+    @Request() req: any,
+  ): Promise<WithdrawalResponseDto> {
+    approveDto.withdrawalId = id;
+    return this.paymentsService.approveWithdrawal(approveDto, req.user.sub);
+  }
+
+  @Post('withdrawals/:id/reject')
+  @ApiOperation({ 
+    summary: 'Rejeitar solicitação de saque',
+    description: 'Rejeita uma solicitação de saque e devolve o saldo para a carteira do personal'
+  })
+  @ApiParam({ 
+    name: 'id', 
+    description: 'ID da solicitação de saque',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Saque rejeitado com sucesso',
+    type: WithdrawalResponseDto
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Solicitação de saque não encontrada' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async rejectWithdrawal(
+    @Param('id') id: string,
+    @Body() rejectDto: RejectWithdrawalDto,
+    @Request() req: any,
+  ): Promise<WithdrawalResponseDto> {
+    rejectDto.withdrawalId = id;
+    return this.paymentsService.rejectWithdrawal(rejectDto, req.user.sub);
+  }
+
+  @Get('withdrawals/stats')
+  @ApiOperation({ 
+    summary: 'Obter estatísticas de saques',
+    description: 'Retorna estatísticas detalhadas sobre saques processados'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Estatísticas de saques retornadas com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        totalWithdrawals: { type: 'number', example: 150, description: 'Total de saques processados' },
+        totalAmount: { type: 'number', example: 50000.00, description: 'Valor total transferido' },
+        pendingWithdrawals: { type: 'number', example: 5, description: 'Saques pendentes' },
+        approvedWithdrawals: { type: 'number', example: 140, description: 'Saques aprovados' },
+        rejectedWithdrawals: { type: 'number', example: 5, description: 'Saques rejeitados' },
+        averageWithdrawal: { type: 'number', example: 333.33, description: 'Valor médio por saque' },
+        monthlyWithdrawals: { type: 'number', example: 25, description: 'Saques no mês atual' },
+        monthlyAmount: { type: 'number', example: 8500.00, description: 'Valor transferido no mês' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Token JWT inválido ou expirado' 
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Acesso negado - apenas administradores' 
+  })
+  async getWithdrawalStats(): Promise<any> {
+    // TODO: Implementar estatísticas de saques
+    return {
+      totalWithdrawals: 0,
+      totalAmount: 0,
+      pendingWithdrawals: 0,
+      approvedWithdrawals: 0,
+      rejectedWithdrawals: 0,
+      averageWithdrawal: 0,
+      monthlyWithdrawals: 0,
+      monthlyAmount: 0,
+    };
   }
 }
 

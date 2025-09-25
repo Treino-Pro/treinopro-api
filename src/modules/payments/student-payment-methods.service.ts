@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import { 
   studentPaymentMethods, 
   savedCards, 
@@ -331,11 +332,59 @@ export class StudentPaymentMethodsService {
     return sum % 10 === 0;
   }
 
+  // Processar pagamento de proposta (sem verificar se aula existe)
+  async processProposalPayment(
+    userId: string,
+    processDto: ProcessClassPaymentDto,
+    proposalData: any,
+  ): Promise<PaymentProcessResponseDto> {
+    console.log('💳 [PROPOSAL PAYMENT] ===== INÍCIO DO PROCESSAMENTO DE PAGAMENTO DE PROPOSTA =====');
+    console.log('👤 [PROPOSAL PAYMENT] User ID:', userId);
+    console.log('📋 [PROPOSAL PAYMENT] Dados recebidos:', JSON.stringify(processDto, null, 2));
+    console.log('📋 [PROPOSAL PAYMENT] Dados da proposta:', proposalData);
+    
+    // Verificar se já existe pagamento para esta proposta
+    const existingPayment = await this.db.query.payments.findFirst({
+      where: eq(payments.proposalId, processDto.classId),
+    });
+
+    if (existingPayment) {
+      console.log('❌ [PROPOSAL PAYMENT] Já existe pagamento para esta proposta:', existingPayment.id);
+      throw new BadRequestException('Esta proposta já possui um pagamento');
+    }
+
+    console.log('🔍 [PROPOSAL PAYMENT] Método de pagamento:', processDto.paymentMethod);
+
+    // Processar pagamento baseado no método
+    switch (processDto.paymentMethod) {
+      case StudentPaymentMethod.CREDIT_CARD:
+      case StudentPaymentMethod.DEBIT_CARD:
+        console.log('💳 [PROPOSAL PAYMENT] Processando pagamento com cartão...');
+        return this.processCardPaymentForProposal(userId, processDto, proposalData);
+      
+      case StudentPaymentMethod.MERCADO_PAGO:
+        console.log('🛒 [PROPOSAL PAYMENT] Processando pagamento via Mercado Pago...');
+        return this.processMercadoPagoPayment(userId, processDto, proposalData);
+      
+      case StudentPaymentMethod.PIX:
+        console.log('📱 [PROPOSAL PAYMENT] Processando pagamento via PIX...');
+        return this.processPixPayment(userId, processDto, proposalData);
+      
+      default:
+        console.log('❌ [PROPOSAL PAYMENT] Método de pagamento não suportado:', processDto.paymentMethod);
+        throw new BadRequestException('Método de pagamento não suportado');
+    }
+  }
+
   // Processar pagamento de aula
   async processClassPayment(
     userId: string,
     processDto: ProcessClassPaymentDto,
   ): Promise<PaymentProcessResponseDto> {
+    console.log('💳 [STUDENT PAYMENT] ===== INÍCIO DO PROCESSAMENTO DE PAGAMENTO =====');
+    console.log('👤 [STUDENT PAYMENT] User ID:', userId);
+    console.log('📋 [STUDENT PAYMENT] Dados recebidos:', JSON.stringify(processDto, null, 2));
+    
     // Verificar se a aula existe
     const classData = await this.db.query.classes.findFirst({
       where: eq(classes.id, processDto.classId),
@@ -346,10 +395,18 @@ export class StudentPaymentMethodsService {
     });
 
     if (!classData) {
+      console.log('❌ [STUDENT PAYMENT] Aula não encontrada:', processDto.classId);
       throw new NotFoundException('Aula não encontrada');
     }
 
+    console.log('✅ [STUDENT PAYMENT] Aula encontrada:', {
+      id: classData.id,
+      studentId: classData.studentId,
+      personalId: classData.personalId
+    });
+
     if (classData.studentId !== userId) {
+      console.log('❌ [STUDENT PAYMENT] Usuário não autorizado para esta aula');
       throw new ForbiddenException('Você não pode pagar por esta aula');
     }
 
@@ -359,22 +416,29 @@ export class StudentPaymentMethodsService {
     });
 
     if (existingPayment) {
+      console.log('❌ [STUDENT PAYMENT] Já existe pagamento para esta aula:', existingPayment.id);
       throw new BadRequestException('Esta aula já possui um pagamento');
     }
+
+    console.log('🔍 [STUDENT PAYMENT] Método de pagamento:', processDto.paymentMethod);
 
     // Processar pagamento baseado no método
     switch (processDto.paymentMethod) {
       case StudentPaymentMethod.CREDIT_CARD:
       case StudentPaymentMethod.DEBIT_CARD:
+        console.log('💳 [STUDENT PAYMENT] Processando pagamento com cartão...');
         return this.processCardPayment(userId, processDto, classData);
       
       case StudentPaymentMethod.MERCADO_PAGO:
+        console.log('🛒 [STUDENT PAYMENT] Processando pagamento via Mercado Pago...');
         return this.processMercadoPagoPayment(userId, processDto, classData);
       
       case StudentPaymentMethod.PIX:
+        console.log('📱 [STUDENT PAYMENT] Processando pagamento via PIX...');
         return this.processPixPayment(userId, processDto, classData);
       
       default:
+        console.log('❌ [STUDENT PAYMENT] Método de pagamento não suportado:', processDto.paymentMethod);
         throw new BadRequestException('Método de pagamento não suportado');
     }
   }
@@ -385,10 +449,15 @@ export class StudentPaymentMethodsService {
     processDto: ProcessClassPaymentDto,
     classData: any,
   ): Promise<PaymentProcessResponseDto> {
+    console.log('💳 [CARD PAYMENT] ===== INÍCIO DO PAGAMENTO COM CARTÃO =====');
+    console.log('🆔 [CARD PAYMENT] Card ID:', processDto.cardId);
+    console.log('📋 [CARD PAYMENT] Card Data presente:', !!processDto.cardData);
+    
     let cardToken: string;
     let cardInfo: any;
 
     if (processDto.cardId) {
+      console.log('🔍 [CARD PAYMENT] Buscando cartão salvo...');
       // Usar cartão salvo
       const savedCard = await this.db.query.savedCards.findFirst({
         where: and(
@@ -399,8 +468,16 @@ export class StudentPaymentMethodsService {
       });
 
       if (!savedCard) {
+        console.log('❌ [CARD PAYMENT] Cartão não encontrado:', processDto.cardId);
         throw new NotFoundException('Cartão não encontrado');
       }
+
+      console.log('✅ [CARD PAYMENT] Cartão encontrado:', {
+        id: savedCard.id,
+        lastFourDigits: savedCard.lastFourDigits,
+        cardBrand: savedCard.cardBrand,
+        timesUsed: savedCard.timesUsed
+      });
 
       cardToken = savedCard.mpCardToken;
       cardInfo = {
@@ -419,7 +496,10 @@ export class StudentPaymentMethodsService {
         })
         .where(eq(savedCards.id, savedCard.id));
 
+      console.log('✅ [CARD PAYMENT] Cartão atualizado com novo uso');
+
     } else if (processDto.cardData) {
+      console.log('🆕 [CARD PAYMENT] Processando cartão novo...');
       // Usar cartão novo
       cardToken = await this.tokenizeCard(processDto.cardData);
       cardInfo = {
@@ -428,16 +508,24 @@ export class StudentPaymentMethodsService {
         wasCardSaved: false,
       };
 
+      console.log('✅ [CARD PAYMENT] Cartão tokenizado:', {
+        lastFourDigits: cardInfo.lastFourDigits,
+        cardBrand: cardInfo.cardBrand
+      });
+
       // Salvar cartão se solicitado
       if (processDto.saveCard) {
+        console.log('💾 [CARD PAYMENT] Salvando cartão...');
         const savedCardResult = await this.saveCard(userId, {
           ...processDto.cardData,
           nickname: processDto.cardNickname,
         });
         cardInfo.wasCardSaved = true;
         cardInfo.cardId = savedCardResult.cardId;
+        console.log('✅ [CARD PAYMENT] Cartão salvo com ID:', savedCardResult.cardId);
       }
     } else {
+      console.log('❌ [CARD PAYMENT] Dados do cartão são obrigatórios');
       throw new BadRequestException('Dados do cartão são obrigatórios');
     }
 
@@ -446,6 +534,13 @@ export class StudentPaymentMethodsService {
     const platformFee = amount * 0.10;
     const personalAmount = amount - platformFee;
 
+    console.log('💰 [CARD PAYMENT] Valores calculados:', {
+      amount,
+      platformFee,
+      personalAmount
+    });
+
+    console.log('💾 [CARD PAYMENT] Criando registro de pagamento no banco...');
     const [newPayment] = await this.db
       .insert(payments)
       .values({
@@ -460,25 +555,230 @@ export class StudentPaymentMethodsService {
       })
       .returning();
 
-    // TODO: Processar pagamento real no Mercado Pago
-    const mockMpPayment = {
-      id: 'mp_payment_' + Date.now(),
-      status: 'approved',
-      status_detail: 'accredited',
-    };
+    console.log('✅ [CARD PAYMENT] Pagamento criado no banco:', {
+      id: newPayment.id,
+      classId: newPayment.classId,
+      status: newPayment.status
+    });
 
-    return {
+    // Processar pagamento real no Mercado Pago com autorização (capture=false)
+    console.log('💳 [CARD PAYMENT] Processando pagamento real no Mercado Pago...');
+    
+    const mpPayment = await this.mercadoPagoService.createPayment({
+      token: cardToken,
+      amount: amount,
+      description: `Aula de treino - ${classData.location || 'Local a definir'}`,
+      externalReference: `class_${processDto.classId}`,
+      capture: false, // Autorização sem captura (custódia)
+    });
+
+    console.log('✅ [CARD PAYMENT] Pagamento MP processado:', {
+      id: mpPayment.id,
+      status: mpPayment.status,
+      status_detail: mpPayment.status_detail
+    });
+
+    // Atualizar status do pagamento no banco para 'authorized' (custódia)
+    await this.db
+      .update(payments)
+      .set({
+        status: 'authorized', // Status correto para custódia
+        mpPaymentId: mpPayment.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, newPayment.id));
+
+    console.log('✅ [CARD PAYMENT] Status do pagamento atualizado para authorized (custódia)');
+
+    const result = {
       success: true,
       paymentId: newPayment.id,
-      mpPaymentId: mockMpPayment.id,
-      status: mockMpPayment.status,
-      statusDetail: mockMpPayment.status_detail,
+      mpPaymentId: mpPayment.id,
+      status: mpPayment.status,
+      statusDetail: mpPayment.status_detail,
       transactionAmount: amount,
       installments: parseInt(processDto.installments || '1'),
       cardInfo,
-      message: 'Pagamento processado com sucesso',
+      message: 'Pagamento autorizado com sucesso (em custódia)',
       createdAt: new Date(),
     };
+
+    console.log('📤 [CARD PAYMENT] Resposta final:', result);
+    console.log('🏁 [CARD PAYMENT] ===== FIM DO PAGAMENTO COM CARTÃO =====');
+
+
+    return result;
+  }
+
+  // Processar pagamento com cartão para proposta
+  private async processCardPaymentForProposal(
+    userId: string,
+    processDto: ProcessClassPaymentDto,
+    proposalData: any,
+  ): Promise<PaymentProcessResponseDto> {
+    console.log('💳 [PROPOSAL CARD PAYMENT] ===== INÍCIO DO PAGAMENTO COM CARTÃO PARA PROPOSTA =====');
+    console.log('🆔 [PROPOSAL CARD PAYMENT] Card ID:', processDto.cardId);
+    console.log('📋 [PROPOSAL CARD PAYMENT] Card Data presente:', !!processDto.cardData);
+    
+    let cardToken: string;
+    let cardInfo: any;
+
+    if (processDto.cardId) {
+      console.log('🔍 [PROPOSAL CARD PAYMENT] Buscando cartão salvo...');
+      // Usar cartão salvo
+      const savedCard = await this.db.query.savedCards.findFirst({
+        where: and(
+          eq(savedCards.id, processDto.cardId),
+          eq(savedCards.userId, userId),
+          eq(savedCards.isActive, true)
+        ),
+      });
+
+      if (!savedCard) {
+        console.log('❌ [PROPOSAL CARD PAYMENT] Cartão não encontrado:', processDto.cardId);
+        throw new NotFoundException('Cartão não encontrado');
+      }
+
+      console.log('✅ [PROPOSAL CARD PAYMENT] Cartão encontrado:', {
+        id: savedCard.id,
+        lastFourDigits: savedCard.lastFourDigits,
+        cardBrand: savedCard.cardBrand,
+        timesUsed: savedCard.timesUsed
+      });
+
+      cardToken = savedCard.mpCardToken;
+      cardInfo = {
+        lastFourDigits: savedCard.lastFourDigits,
+        cardBrand: savedCard.cardBrand,
+        wasCardSaved: false,
+        cardId: savedCard.id,
+      };
+
+      // Atualizar uso do cartão
+      await this.db
+        .update(savedCards)
+        .set({
+          timesUsed: savedCard.timesUsed + 1,
+          lastUsedAt: new Date(),
+        })
+        .where(eq(savedCards.id, savedCard.id));
+
+      console.log('✅ [PROPOSAL CARD PAYMENT] Cartão atualizado com novo uso');
+
+    } else if (processDto.cardData) {
+      console.log('🆕 [PROPOSAL CARD PAYMENT] Processando cartão novo...');
+      // Usar cartão novo
+      cardToken = await this.tokenizeCard(processDto.cardData);
+      cardInfo = {
+        lastFourDigits: processDto.cardData.cardNumber.slice(-4),
+        cardBrand: this.detectCardBrand(processDto.cardData.cardNumber),
+        wasCardSaved: false,
+      };
+
+      console.log('✅ [PROPOSAL CARD PAYMENT] Cartão tokenizado:', {
+        lastFourDigits: cardInfo.lastFourDigits,
+        cardBrand: cardInfo.cardBrand
+      });
+
+      // Salvar cartão se solicitado
+      if (processDto.saveCard) {
+        console.log('💾 [PROPOSAL CARD PAYMENT] Salvando cartão...');
+        const savedCardResult = await this.saveCard(userId, {
+          ...processDto.cardData,
+          nickname: processDto.cardNickname,
+        });
+        cardInfo.wasCardSaved = true;
+        cardInfo.cardId = savedCardResult.cardId;
+        console.log('✅ [PROPOSAL CARD PAYMENT] Cartão salvo com ID:', savedCardResult.cardId);
+      }
+    } else {
+      console.log('❌ [PROPOSAL CARD PAYMENT] Dados do cartão são obrigatórios');
+      throw new BadRequestException('Dados do cartão são obrigatórios');
+    }
+
+    // Usar dados da proposta para criar pagamento
+    const amount = proposalData.price || 100; // Usar preço da proposta
+    const platformFee = amount * 0.10;
+    const personalAmount = amount - platformFee;
+
+    console.log('💰 [PROPOSAL CARD PAYMENT] Valores calculados:', {
+      amount,
+      platformFee,
+      personalAmount
+    });
+
+    // Gerar UUID válido para personal temporário
+    const tempPersonalId = randomUUID();
+    console.log('👤 [PROPOSAL CARD PAYMENT] Personal ID temporário:', tempPersonalId);
+
+    console.log('💾 [PROPOSAL CARD PAYMENT] Criando registro de pagamento no banco...');
+    const [newPayment] = await this.db
+      .insert(payments)
+      .values({
+        classId: null, // NULL para propostas
+        proposalId: processDto.classId, // ID da proposta
+        studentId: userId,
+        personalId: tempPersonalId, // UUID válido para personal temporário
+        totalAmount: amount.toString(),
+        platformFee: platformFee.toString(),
+        personalAmount: personalAmount.toString(),
+        status: 'pending',
+        type: 'class_payment',
+      })
+      .returning();
+
+    console.log('✅ [PROPOSAL CARD PAYMENT] Pagamento criado no banco:', {
+      id: newPayment.id,
+      classId: newPayment.classId,
+      status: newPayment.status
+    });
+
+    // Processar pagamento real no Mercado Pago com autorização (capture=false)
+    console.log('💳 [PROPOSAL CARD PAYMENT] Processando pagamento real no Mercado Pago...');
+    
+    const mpPayment = await this.mercadoPagoService.createPayment({
+      token: cardToken,
+      amount: amount,
+      description: `Proposta de treino - ${proposalData.locationName || 'Local a definir'}`,
+      externalReference: `proposal_${processDto.classId}`,
+      capture: false, // Autorização sem captura (custódia)
+    });
+
+    console.log('✅ [PROPOSAL CARD PAYMENT] Pagamento MP processado:', {
+      id: mpPayment.id,
+      status: mpPayment.status,
+      status_detail: mpPayment.status_detail
+    });
+
+    // Atualizar status do pagamento no banco para 'authorized' (custódia)
+    await this.db
+      .update(payments)
+      .set({
+        status: 'authorized', // Status correto para custódia
+        mpPaymentId: mpPayment.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, newPayment.id));
+
+    console.log('✅ [PROPOSAL CARD PAYMENT] Status do pagamento atualizado para authorized (custódia)');
+
+    const result = {
+      success: true,
+      paymentId: newPayment.id,
+      mpPaymentId: mpPayment.id,
+      status: mpPayment.status,
+      statusDetail: mpPayment.status_detail,
+      transactionAmount: amount,
+      installments: parseInt(processDto.installments || '1'),
+      cardInfo,
+      message: 'Pagamento da proposta autorizado com sucesso (em custódia)',
+      createdAt: new Date(),
+    };
+
+    console.log('📤 [PROPOSAL CARD PAYMENT] Resposta final:', result);
+    console.log('🏁 [PROPOSAL CARD PAYMENT] ===== FIM DO PAGAMENTO COM CARTÃO PARA PROPOSTA =====');
+
+    return result;
   }
 
   // Processar pagamento com Mercado Pago

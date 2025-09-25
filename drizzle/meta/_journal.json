@@ -8,6 +8,13 @@
       "when": 1758391583657,
       "tag": "0000_friendly_jackal",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1758790834789,
+      "tag": "0001_large_scarlet_witch",
+      "breakpoints": true
     }
   ]
 }

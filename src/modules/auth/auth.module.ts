@@ -24,11 +24,6 @@ import { GamificationModule } from '../gamification/gamification.module';
         const secret = configService.get('JWT_SECRET') || 'fallback-secret';
         const expiresIn = configService.get('JWT_EXPIRES_IN') || '24h';
         
-        console.log('🔧 [AUTH JWT] Configuração:', { 
-          secret: secret ? 'definido' : 'undefined', 
-          expiresIn: expiresIn || '24h (fallback)'
-        });
-        
         return {
           secret,
           signOptions: {

@@ -239,41 +239,28 @@ export class AuthService {
 
 
   async login(loginDto: LoginDto) {
-    console.log('🔑 [AUTH] Iniciando processo de login...');
-    console.log('🔑 [AUTH] Email:', loginDto.email);
-    
     const { email, password } = loginDto;
 
     // Buscar usuário
-    console.log('🔑 [AUTH] Buscando usuário no banco de dados...');
     const user = await this.db.query.users.findFirst({
       where: eq(users.email, email),
     });
 
-    console.log('🔑 [AUTH] Resultado da busca:', user ? `Usuário encontrado (ID: ${user.id})` : 'Usuário não encontrado');
-
     if (!user) {
-      console.log('❌ [AUTH] Login falhou: usuário não encontrado');
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     // Verificar senha
-    console.log('🔑 [AUTH] Verificando senha...');
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    console.log('🔑 [AUTH] Senha válida:', isPasswordValid);
     
     if (!isPasswordValid) {
-      console.log('❌ [AUTH] Login falhou: senha incorreta');
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     // Nota: Verificação de email é apenas no cadastro, não no login
 
     // Gerar tokens
-    console.log('🔑 [AUTH] Gerando tokens JWT...');
     const tokens = await this.generateTokens(user.id, user.email, user.userType);
-
-    console.log('✅ [AUTH] Login realizado com sucesso');
     return {
       user: {
         id: user.id,

@@ -17,38 +17,26 @@ if (useMockDatabase) {
   const postgres = require('postgres');
 
   // Create connection with better error handling
-  console.log('🔌 [DATABASE] Iniciando configuração de conexão...');
-  console.log('🔌 [DATABASE] Connection string:', connectionString);
-
   try {
-    console.log('🔌 [DATABASE] Tentando conectar com o banco de dados...');
     client = postgres(connectionString, { 
       max: 1,
       idle_timeout: 20,
       connect_timeout: 10,
       onnotice: () => {}, // Silenciar notices
     });
-    console.log('✅ [DATABASE] Conexão com banco estabelecida!');
   } catch (error) {
-    console.error('❌ [DATABASE] Erro ao conectar com o banco de dados:', error);
-    console.error('❌ [DATABASE] Tipo do erro:', error.constructor.name);
-    console.error('❌ [DATABASE] Mensagem do erro:', error.message);
-    console.log('🔄 [DATABASE] Tentando conexão de fallback...');
+    console.error('❌ [DATABASE] Erro ao conectar com o banco de dados:', error.message);
     
     // Fallback para conexão local sem autenticação
     try {
-      console.log('🔄 [DATABASE] Tentando conexão local...');
       client = postgres('postgresql://localhost:5432/treinopro', {
         max: 1,
         idle_timeout: 20,
         connect_timeout: 10,
         onnotice: () => {},
       });
-      console.log('✅ [DATABASE] Conexão de fallback estabelecida!');
     } catch (fallbackError) {
-      console.error('❌ [DATABASE] Erro na conexão de fallback:', fallbackError);
-      console.error('❌ [DATABASE] Tipo do erro de fallback:', fallbackError.constructor.name);
-      console.error('❌ [DATABASE] Mensagem do erro de fallback:', fallbackError.message);
+      console.error('❌ [DATABASE] Erro na conexão de fallback:', fallbackError.message);
       console.log('🔄 [DATABASE] Usando banco mock para desenvolvimento...');
       // Criar cliente mock para desenvolvimento
       client = null;
@@ -58,4 +46,3 @@ if (useMockDatabase) {
 
 export const db = client ? drizzle(client, { schema }) : null;
 
-console.log('🔌 [DATABASE] Status final da conexão:', db ? 'Conectado' : 'Usando Mock');

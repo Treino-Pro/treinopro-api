@@ -26,9 +26,6 @@ export class UsersService {
    * Criar novo usuário
    */
   async createUser(createUserDto: CreateUserDto): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Criando novo usuário...');
-    console.log('👤 [USERS] Email:', createUserDto.email);
-    console.log('👤 [USERS] Tipo:', createUserDto.userType);
 
     // Verificar se email já existe
     const existingUser = await this.db.query.users.findFirst({
@@ -36,7 +33,6 @@ export class UsersService {
     });
 
     if (existingUser) {
-      console.log('❌ [USERS] Email já existe:', createUserDto.email);
       throw new ConflictException('Email já está em uso');
     }
 
@@ -70,8 +66,6 @@ export class UsersService {
     // Inserir usuário
     const [newUser] = await this.db.insert(users).values(userData).returning();
 
-    console.log('✅ [USERS] Usuário criado com sucesso:', newUser.id);
-
     return this.mapUserToResponse(newUser);
   }
 
@@ -79,8 +73,6 @@ export class UsersService {
    * Listar usuários com filtros e paginação
    */
   async getUsers(searchDto: UserSearchDto): Promise<UserListResponseDto> {
-    console.log('👤 [USERS] Buscando usuários...');
-    console.log('👤 [USERS] Filtros:', searchDto);
 
     const { search, userType, status, specialty, page = 1, limit = 10 } = searchDto;
     const offset = (page - 1) * limit;
@@ -127,7 +119,6 @@ export class UsersService {
       .from(users)
       .where(whereClause);
 
-    console.log('✅ [USERS] Encontrados', usersList.length, 'usuários de', total, 'total');
 
     return {
       users: usersList.map(user => this.mapUserToResponse(user)),
@@ -142,18 +133,14 @@ export class UsersService {
    * Obter usuário por ID
    */
   async getUserById(id: string): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Buscando usuário por ID:', id);
-
     const user = await this.db.query.users.findFirst({
       where: eq(users.id, id),
     });
 
     if (!user) {
-      console.log('❌ [USERS] Usuário não encontrado:', id);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    console.log('✅ [USERS] Usuário encontrado:', user.email);
     return this.mapUserToResponse(user);
   }
 
@@ -261,18 +248,14 @@ export class UsersService {
    * Obter perfil do usuário logado
    */
   async getProfile(userId: string): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Buscando perfil do usuário:', userId);
-
     const user = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
 
     if (!user) {
-      console.log('❌ [USERS] Usuário não encontrado:', userId);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    console.log('✅ [USERS] Perfil encontrado:', user.email);
     return this.mapUserToResponse(user);
   }
 

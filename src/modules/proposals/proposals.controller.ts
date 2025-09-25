@@ -68,20 +68,20 @@ export class ProposalsController {
     @Body() createProposalDto: CreateProposalDto,
     @Request() req: any
   ): Promise<ProposalResponseDto> {
-    console.log('📝 [PROPOSALS CONTROLLER] ===== INÍCIO DA CRIAÇÃO DE PROPOSTA =====');
-    console.log('📝 [PROPOSALS CONTROLLER] Dados recebidos:', JSON.stringify(createProposalDto, null, 2));
-    console.log('📝 [PROPOSALS CONTROLLER] User do request:', JSON.stringify(req.user, null, 2));
-    console.log('📝 [PROPOSALS CONTROLLER] User ID:', req.user?.sub);
-    
     try {
+      console.log('🚀 [PROPOSALS CONTROLLER] ===== INÍCIO DA CRIAÇÃO DE PROPOSTA =====');
+      console.log('👤 [PROPOSALS CONTROLLER] User ID:', req.user.sub);
+      console.log('📋 [PROPOSALS CONTROLLER] Dados recebidos do frontend:', JSON.stringify(createProposalDto, null, 2));
+      
       const result = await this.proposalsService.createProposal(createProposalDto, req.user.sub);
-      console.log('✅ [PROPOSALS CONTROLLER] Proposta criada com sucesso:', JSON.stringify(result, null, 2));
-      console.log('📝 [PROPOSALS CONTROLLER] ===== CRIAÇÃO CONCLUÍDA COM SUCESSO =====');
+      
+      console.log('✅ [PROPOSALS CONTROLLER] Proposta criada com sucesso');
+      console.log('📤 [PROPOSALS CONTROLLER] Resposta enviada para o frontend:', JSON.stringify(result, null, 2));
+      console.log('🏁 [PROPOSALS CONTROLLER] ===== FIM DA CRIAÇÃO DE PROPOSTA =====');
+      
       return result;
     } catch (error) {
-      console.log('❌ [PROPOSALS CONTROLLER] Erro ao criar proposta:', error.message);
-      console.log('❌ [PROPOSALS CONTROLLER] Stack trace:', error.stack);
-      console.log('📝 [PROPOSALS CONTROLLER] ===== CRIAÇÃO FALHOU =====');
+      console.error('❌ [PROPOSALS CONTROLLER] Erro ao criar proposta:', error.message);
       throw error;
     }
   }

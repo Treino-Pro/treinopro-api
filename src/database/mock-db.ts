@@ -43,45 +43,28 @@ export class MockDatabase {
   query = {
     users: {
       findFirst: async (options: any) => {
-        console.log('🔍 [MOCK-DB] Buscando usuário:', options);
-        console.log('🔍 [MOCK-DB] Total de usuários no banco:', this.users.length);
-        console.log('🔍 [MOCK-DB] Usuários disponíveis:', this.users.map(u => ({ id: u.id, email: u.email })));
         const { where } = options;
         
         // Verificar se where é uma função (caso do Drizzle ORM)
         if (typeof where === 'function') {
           const user = this.users.find(where);
-          console.log('🔍 [MOCK-DB] Usuário encontrado (função):', user ? 'Sim' : 'Não');
-          if (user) {
-            console.log('🔍 [MOCK-DB] Dados do usuário encontrado:', { id: user.id, email: user.email });
-          }
           return user || null;
         }
         
         // Verificar se where é um objeto SQL do Drizzle ORM
         if (where && where.queryChunks && Array.isArray(where.queryChunks)) {
-          console.log('🔍 [MOCK-DB] Processando objeto SQL do Drizzle ORM');
           // Procurar por um chunk do tipo Param que contenha o email
           for (const chunk of where.queryChunks) {
             if (chunk && chunk.constructor && chunk.constructor.name === 'Param') {
               const email = chunk.value;
               if (email) {
-                console.log('🔍 [MOCK-DB] Email encontrado no SQL:', email);
-                console.log('🔍 [MOCK-DB] Comparando com emails disponíveis:', this.users.map(u => u.email));
                 const user = this.users.find(user => user.email === email);
-                console.log('🔍 [MOCK-DB] Usuário encontrado (SQL):', user ? 'Sim' : 'Não');
-                if (user) {
-                  console.log('🔍 [MOCK-DB] Dados do usuário encontrado:', { id: user.id, email: user.email });
-                } else {
-                  console.log('🔍 [MOCK-DB] Motivo: nenhum usuário com email', email, 'encontrado');
-                }
                 return user || null;
               }
             }
           }
           
           // Se não encontrou email nos chunks, tentar buscar por outros padrões
-          console.log('🔍 [MOCK-DB] Nenhum email encontrado nos chunks, tentando busca genérica');
           // Para testes, vamos retornar null se não encontrar email específico
           return null;
         }

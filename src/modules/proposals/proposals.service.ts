@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
-import { proposals, users, classes } from '../../database/schema';
+import { proposals, users, classes, payments } from '../../database/schema';
 import { eq, and, desc, gte, lte, ilike, count, sql, or, lt } from 'drizzle-orm';
 import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
+import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { JobsService } from '../jobs/jobs.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { randomUUID } from 'crypto';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
 @Injectable()
@@ -38,7 +40,6 @@ export class ProposalsService {
     }
 
     // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
-    console.log('💳 [PROPOSALS] Processando pagamento real para proposta...');
     
     try {
       // Criar preferência de pagamento específica para propostas
@@ -52,7 +53,6 @@ export class ProposalsService {
         throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
       }
 
-      console.log('✅ [PROPOSALS] Pagamento processado:', paymentResult.paymentId);
 
       // ===== CRIAR PROPOSTA APÓS PAGAMENTO APROVADO =====
       const [proposal] = await this.db
@@ -77,7 +77,6 @@ export class ProposalsService {
         })
         .returning();
 
-      console.log('✅ [PROPOSALS] Proposta criada com pagamento:', proposal.id);
 
       // Agendar timeout para proposta se pagamento ainda está pendente
       if (paymentResult.status === 'pending') {
@@ -117,7 +116,6 @@ export class ProposalsService {
           timestamp: new Date(),
         });
         
-        console.log('📡 [PROPOSALS] Evento new_proposal enviado para todos os personais online');
       } catch (error) {
         console.error('❌ [PROPOSALS] Erro ao emitir evento new_proposal:', error);
         // Não falhar a operação por causa de problemas de WebSocket
@@ -182,7 +180,6 @@ export class ProposalsService {
     }
 
     // Buscar propostas com join na tabela de usuários
-    console.log('🔍 [PROPOSALS] Buscando propostas com condições:', conditions);
     
     const [proposalsList, totalResult] = await Promise.all([
       this.db
@@ -222,11 +219,6 @@ export class ProposalsService {
 
     const total = totalResult[0]?.count || 0;
 
-    console.log('🔍 [PROPOSALS] Resultado da query:', {
-      total: total,
-      proposalsCount: proposalsList.length,
-      firstProposal: proposalsList[0] || null
-    });
 
     return {
       proposals: proposalsList.map(proposal => this.mapToResponseDto(proposal)),
@@ -361,7 +353,6 @@ export class ProposalsService {
         userId: userId,
         timestamp: new Date(),
       });
-      console.log('📡 [PROPOSALS] Evento proposal_update (cancelled) enviado:', cancelledProposal.id);
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket para cancelamento:', error);
@@ -421,8 +412,6 @@ export class ProposalsService {
           )
         );
 
-      console.log(`🔍 [ACCEPT PROPOSAL] Verificando conflito de horário:`);
-      console.log(`  - Proposta: ${proposal.trainingDate} às ${proposal.trainingTime} (${proposal.durationMinutes}min)`);
       console.log(`  - Aulas existentes encontradas: ${existingClasses.length}`);
       console.log(`  - Aulas existentes:`, existingClasses.map(c => ({ id: c.id, date: c.date, time: c.time, status: c.status })));
 
@@ -435,7 +424,6 @@ export class ProposalsService {
 
       // Verificar sobreposição com aulas existentes
       const hasConflict = existingClasses.some((cls: any) => {
-        console.log(`🔍 [ACCEPT PROPOSAL] Verificando aula: ${cls.id}`);
         // A aula.cls.date já contém a data e hora corretas
         const classStart = new Date(cls.date);
         const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
@@ -486,8 +474,34 @@ export class ProposalsService {
       .where(eq(proposals.id, id))
       .returning();
 
+    // ===== CAPTURAR PAGAMENTO APÓS MATCH =====
+    try {
+      console.log('💰 [PROPOSALS] Capturando pagamento após match...');
+      
+      // Buscar pagamento da proposta
+      const payment = await this.db.query.payments.findFirst({
+        where: eq(payments.proposalId, id),
+      });
+
+      if (payment && payment.status === 'authorized') {
+        // Capturar pagamento no Mercado Pago
+        if (payment.mpPaymentId) {
+          await this.paymentsService.capturePaymentAfterClass(payment.classId || id, 'Match confirmado - personal aceitou proposta');
+          console.log('✅ [PROPOSALS] Pagamento capturado após match');
+        } else {
+          console.log('⚠️ [PROPOSALS] Pagamento sem mpPaymentId - pode ser simulado');
+        }
+      } else {
+        console.log('⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:', payment?.status);
+      }
+      
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao capturar pagamento após match:', error);
+      // Não falhar a operação se a captura de pagamento falhar
+      // Mas logar o erro para investigação
+    }
+
     // ===== CRIAR AULA AUTOMATICAMENTE =====
-    console.log('🏋️ [PROPOSALS] Criando aula automaticamente para proposta aceita...');
     
     // Verificar se já existe uma aula para esta proposta
     const existingClass = await this.db
@@ -497,7 +511,6 @@ export class ProposalsService {
       .limit(1);
 
     if (existingClass.length > 0) {
-      console.log('⚠️ [PROPOSALS] Aula já existe para esta proposta, pulando criação');
       // Buscar dados do usuário para incluir na resposta
       const [student] = await this.db
         .select()
@@ -526,7 +539,6 @@ export class ProposalsService {
         })
         .returning();
 
-      console.log('✅ [PROPOSALS] Aula criada automaticamente:', newClass.id);
 
       // Atualizar proposta para incluir o ID da aula criada
       await this.db
@@ -580,7 +592,6 @@ export class ProposalsService {
           userId: student.id,
           timestamp: new Date(),
         });
-        console.log('📡 [PROPOSALS] Evento proposal_update (accepted) enviado para aluno:', student.id);
       }
 
       // Evento de match confirmado para ambos
@@ -601,7 +612,6 @@ export class ProposalsService {
       };
 
       this.chatGateway.server.emit('match_confirmed', matchData);
-      console.log('📡 [PROPOSALS] Evento match_confirmed enviado para todos os usuários conectados');
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket:', error);
@@ -621,7 +631,6 @@ export class ProposalsService {
   // ===== MÉTODOS PARA WEBHOOK DE PAGAMENTO =====
 
   async updatePaymentStatus(proposalId: string, paymentStatus: string, mpPaymentId?: string): Promise<void> {
-    console.log(`💳 [PROPOSALS] Atualizando status do pagamento: ${proposalId} → ${paymentStatus}`);
     
     // Validar parâmetros obrigatórios
     if (!proposalId || !paymentStatus) {
@@ -639,7 +648,6 @@ export class ProposalsService {
 
       // Se pagamento foi aprovado, notificar que proposta está pronta
       if (paymentStatus === 'approved' || paymentStatus === 'captured') {
-        console.log('✅ [PROPOSALS] Pagamento aprovado, proposta disponível para personal trainers');
       }
 
       // Se pagamento falhou, cancelar proposta automaticamente
@@ -652,7 +660,6 @@ export class ProposalsService {
           })
           .where(eq(proposals.id, proposalId));
 
-        console.log('❌ [PROPOSALS] Pagamento falhou, proposta cancelada automaticamente');
       }
 
     } catch (error) {
@@ -674,7 +681,6 @@ export class ProposalsService {
   // ===== TIMEOUT PARA PROPOSTAS NÃO PAGAS =====
 
   async cancelExpiredProposals(): Promise<{ cancelled: number }> {
-    console.log('⏰ [PROPOSALS] Verificando propostas expiradas...');
     
     // Propostas pendentes há mais de 30 minutos com pagamento pendente
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -692,7 +698,6 @@ export class ProposalsService {
         );
 
       if (expiredProposals.length === 0) {
-        console.log('✅ [PROPOSALS] Nenhuma proposta expirada encontrada');
         return { cancelled: 0 };
       }
 
@@ -712,17 +717,14 @@ export class ProposalsService {
           )
         );
 
-      console.log(`⏰ [PROPOSALS] ${expiredProposals.length} propostas expiradas canceladas`);
 
       // Processar reembolsos automáticos
       for (const proposal of expiredProposals) {
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
           try {
-            console.log(`💸 [PROPOSALS] Processando reembolso para proposta: ${proposal.id}`);
             
             await this.processAutomaticRefund(proposal.id, proposal.paymentId, 'Proposta expirada - timeout de 30 minutos');
             
-            console.log(`✅ [PROPOSALS] Reembolso processado para proposta: ${proposal.id}`);
           } catch (error) {
             console.error(`❌ [PROPOSALS] Erro no reembolso da proposta ${proposal.id}:`, error);
             
@@ -749,7 +751,6 @@ export class ProposalsService {
   // ===== AGENDAMENTO DE LEMBRETES DE PAGAMENTO =====
 
   private async schedulePaymentReminders(proposalId: string): Promise<void> {
-    console.log(`📱 [PROPOSALS] Agendando lembretes de pagamento para proposta: ${proposalId}`);
     
     try {
       // Lembrete aos 10 minutos (20 min restantes)
@@ -770,7 +771,6 @@ export class ProposalsService {
         priority: 'critical',
       }, 25);
 
-      console.log(`✅ [PROPOSALS] Lembretes agendados para proposta: ${proposalId}`);
 
     } catch (error) {
       console.error(`❌ [PROPOSALS] Erro ao agendar lembretes para proposta ${proposalId}:`, error);
@@ -780,13 +780,11 @@ export class ProposalsService {
   // ===== SISTEMA DE REEMBOLSO AUTOMÁTICO =====
 
   async processAutomaticRefund(proposalId: string, paymentId: string, reason: string): Promise<void> {
-    console.log(`💸 [PROPOSALS] Iniciando reembolso automático: ${proposalId}`);
     
     try {
       // Verificar se é uma preferência do Mercado Pago ou pagamento simulado
       if (paymentId.startsWith('proposal_')) {
         // Pagamento real via Mercado Pago - processar reembolso via PaymentsService
-        console.log(`💳 [PROPOSALS] Processando reembolso real via MP: ${paymentId}`);
         
         // Buscar pagamento no sistema de pagamentos
         const payment = await this.findPaymentByExternalReference(paymentId);
@@ -794,12 +792,10 @@ export class ProposalsService {
         if (payment) {
           await this.paymentsService.refundPayment(payment.id, reason);
         } else {
-          console.log(`⚠️ [PROPOSALS] Pagamento não encontrado no sistema, marcando como reembolsado: ${paymentId}`);
         }
         
       } else {
         // Pagamento simulado - apenas marcar como reembolsado
-        console.log(`🎭 [PROPOSALS] Simulando reembolso para pagamento mock: ${paymentId}`);
       }
 
       // Atualizar status da proposta
@@ -811,7 +807,6 @@ export class ProposalsService {
         })
         .where(eq(proposals.id, proposalId));
 
-      console.log(`✅ [PROPOSALS] Reembolso concluído para proposta: ${proposalId}`);
       
     } catch (error) {
       console.error(`❌ [PROPOSALS] Erro no reembolso automático:`, error);
@@ -828,7 +823,6 @@ export class ProposalsService {
       
       return payment;
     } catch (error) {
-      console.log(`⚠️ [PROPOSALS] Erro ao buscar pagamento: ${error.message}`);
       return null;
     }
   }
@@ -886,12 +880,101 @@ export class ProposalsService {
     trainingDate: Date
   ): Promise<any> {
     try {
-      const tempClassId = `proposal_${Date.now()}`;
+      console.log('💳 [PROPOSALS] ===== INÍCIO DO PROCESSAMENTO DE PAGAMENTO =====');
+      console.log('👤 [PROPOSALS] User ID:', userData.id);
+      console.log('📋 [PROPOSALS] Dados da proposta:', {
+        price: createProposalDto.price,
+        paymentMethod: createProposalDto.paymentMethod,
+        cardId: createProposalDto.cardId,
+        installments: createProposalDto.installments,
+        saveCard: createProposalDto.saveCard,
+        cardNickname: createProposalDto.cardNickname
+      });
+      
+      // Gerar UUID válido para o classId temporário
+      const tempClassId = randomUUID();
+      console.log('🆔 [PROPOSALS] Class ID temporário:', tempClassId);
       
       // Calcular taxa da plataforma
       const platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
       const platformFee = createProposalDto.price * platformFeePercentage;
       const personalAmount = createProposalDto.price - platformFee;
+      
+      console.log('💰 [PROPOSALS] Cálculos financeiros:', {
+        price: createProposalDto.price,
+        platformFeePercentage: `${platformFeePercentage * 100}%`,
+        platformFee,
+        personalAmount
+      });
+
+      // ===== VERIFICAR SE DEVE PROCESSAR PAGAMENTO AUTOMÁTICO =====
+      const hasCardId = !!createProposalDto.cardId;
+      const isCardPayment = createProposalDto.paymentMethod === 'credit_card' || createProposalDto.paymentMethod === 'debit_card';
+      
+      console.log('🔍 [PROPOSALS] Verificações de pagamento automático:', {
+        hasCardId,
+        isCardPayment,
+        shouldProcessAutomatic: hasCardId && isCardPayment
+      });
+      
+      if (hasCardId && isCardPayment) {
+        console.log('🚀 [PROPOSALS] Iniciando pagamento automático com cartão salvo...');
+        
+      try {
+        const paymentDto = {
+          classId: tempClassId,
+          paymentMethod: createProposalDto.paymentMethod as StudentPaymentMethod,
+          cardId: createProposalDto.cardId,
+          cardData: null,
+          installments: createProposalDto.installments || '1',
+          saveCard: createProposalDto.saveCard || false,
+          cardNickname: createProposalDto.cardNickname,
+        };
+        
+        console.log('📤 [PROPOSALS] Dados enviados para processProposalPayment:', paymentDto);
+        
+        // Dados da proposta para o pagamento
+        const proposalData = {
+          price: createProposalDto.price,
+          personalId: 'temp-personal-id', // Será definido quando personal aceitar
+        };
+        
+        // Processar pagamento automático da proposta usando cartão salvo
+        const paymentResult = await this.studentPaymentService.processProposalPayment(
+          userData.id,
+          paymentDto,
+          proposalData
+        );
+
+          console.log('✅ [PROPOSALS] Resultado do pagamento automático:', paymentResult);
+
+          const response = {
+            success: true,
+            paymentId: tempClassId,
+            status: paymentResult.status,
+            method: createProposalDto.paymentMethod,
+            amount: createProposalDto.price,
+            platformFee,
+            personalAmount,
+            message: paymentResult.message || 'Pagamento processado com sucesso.',
+          };
+          
+          console.log('📤 [PROPOSALS] Resposta do pagamento automático:', response);
+          console.log('🏁 [PROPOSALS] ===== FIM DO PAGAMENTO AUTOMÁTICO =====');
+          
+          return response;
+
+      } catch (paymentError) {
+        console.error('❌ [PROPOSALS] Erro no pagamento automático:', paymentError.message);
+        console.error('❌ [PROPOSALS] Stack trace:', paymentError.stack);
+        console.log('🚫 [PROPOSALS] Pagamento recusado - proposta não será criada');
+        // Se o pagamento falhar, NÃO criar a proposta
+        throw new BadRequestException(`Pagamento recusado: ${paymentError.message}`);
+      }
+      }
+
+      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (PIX, Mercado Pago, ou cartão sem ID) =====
+      console.log('🔄 [PROPOSALS] Iniciando fallback para Mercado Pago...');
 
       // Criar dados para o Mercado Pago
       const preferenceData = {
@@ -904,13 +987,19 @@ export class ProposalsService {
         personalEmail: 'temp@personal.com', // Será definido quando aceita
         externalReference: tempClassId,
       };
+      
+      console.log('📋 [PROPOSALS] Dados da preferência MP:', preferenceData);
 
       // Criar preferência no Mercado Pago
       const mpPreference = await this.paymentsService['mercadoPagoService'].createPreference(preferenceData);
+      
+      console.log('✅ [PROPOSALS] Preferência MP criada:', {
+        id: mpPreference.id,
+        initPoint: mpPreference.initPoint,
+        sandboxInitPoint: mpPreference.sandboxInitPoint
+      });
 
-      console.log('✅ [PROPOSALS] Preferência MP criada:', mpPreference.id);
-
-      return {
+      const response = {
         success: true,
         paymentId: tempClassId,
         status: 'pending',
@@ -923,6 +1012,11 @@ export class ProposalsService {
         personalAmount,
         message: 'Preferência de pagamento criada com sucesso.',
       };
+      
+      console.log('📤 [PROPOSALS] Resposta do fallback MP:', response);
+      console.log('🏁 [PROPOSALS] ===== FIM DO FALLBACK MP =====');
+      
+      return response;
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
@@ -937,7 +1031,6 @@ export class ProposalsService {
   private simulatePaymentForProposal(createProposalDto: CreateProposalDto): any {
     const paymentId = `proposal_payment_${Date.now()}`;
     
-    console.log(`💳 [PROPOSALS] Fallback - Simulando pagamento ${createProposalDto.paymentMethod} para R$ ${createProposalDto.price}`);
 
     // Simular diferentes métodos de pagamento
     switch (createProposalDto.paymentMethod) {
@@ -1003,15 +1096,6 @@ export class ProposalsService {
   }
 
   private mapToResponseDto(proposal: any, student?: any): ProposalResponseDto {
-    console.log('🔍 [PROPOSALS] Mapeando proposta:', {
-      id: proposal.id,
-      studentId: proposal.studentId,
-      studentData: student ? {
-        firstName: student.firstName,
-        lastName: student.lastName,
-        email: student.email,
-      } : 'Dados do usuário não fornecidos',
-    });
 
     // Usar dados do usuário se fornecidos, senão usar dados da proposta (para compatibilidade)
     const studentFirstName = student?.firstName || proposal.studentFirstName;
@@ -1022,7 +1106,6 @@ export class ProposalsService {
       ? `${studentFirstName} ${studentLastName}`.trim()
       : 'Nome não disponível';
 
-    console.log('🔍 [PROPOSALS] Nome do aluno mapeado:', studentName);
 
     return {
       id: proposal.id,
@@ -1085,7 +1168,6 @@ export class ProposalsService {
         return; // Nenhuma proposta expirada
       }
 
-      console.log(`🧹 [PROPOSALS] Encontradas ${expiredProposals.length} propostas expiradas em tempo real`);
 
       // Deletar propostas expiradas
       for (const proposal of expiredProposals) {
@@ -1093,7 +1175,6 @@ export class ProposalsService {
           .delete(proposals)
           .where(eq(proposals.id, proposal.id));
 
-        console.log(`🗑️ [PROPOSALS] Proposta ${proposal.id} deletada (expirada em tempo real)`);
 
         // Notificar o aluno sobre a expiração via WebSocket
         this.chatGateway.server.emit('proposal_expired', {
@@ -1108,7 +1189,6 @@ export class ProposalsService {
         });
       }
 
-      console.log(`✅ [PROPOSALS] Limpeza em tempo real concluída: ${expiredProposals.length} propostas removidas`);
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro na limpeza em tempo real:', error);
     }

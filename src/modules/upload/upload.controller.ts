@@ -192,13 +192,6 @@ export class UploadController {
     @UploadedFile() file: Express.Multer.File,
     @Body() body: any
   ): Promise<any> {
-    console.log('TEST UPLOAD - Dados recebidos:');
-    console.log('- file:', !!file);
-    console.log('- file.originalname:', file?.originalname);
-    console.log('- file.size:', file?.size);
-    console.log('- file.mimetype:', file?.mimetype);
-    console.log('- body:', body);
-    
     return {
       success: true,
       file: file ? {

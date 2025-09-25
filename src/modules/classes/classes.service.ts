@@ -4,6 +4,7 @@ import { eq, and, gte, lte, desc, count, sql, or } from 'drizzle-orm';
 import { classes, users, proposals } from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { PaymentsService } from '../payments/payments.service';
 import { 
   CreateClassDto, 
   UpdateClassDto, 
@@ -27,6 +28,7 @@ export class ClassesService {
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly gamificationService: GamificationService,
     private readonly chatGateway: ChatGateway,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   async createClass(createClassDto: CreateClassDto, userId: string): Promise<ClassResponseDto> {
@@ -108,16 +110,6 @@ export class ClassesService {
     const { status, studentId, personalId, dateFrom, dateTo, page = 1, limit = 10 } = getClassesDto;
     const offset = (page - 1) * limit;
 
-    console.log('🔍 [CLASSES] getClasses chamado com:', {
-      status,
-      studentId,
-      personalId,
-      dateFrom,
-      dateTo,
-      page,
-      limit,
-      userId
-    });
 
     // Construir condições de filtro
     const conditions = [];
@@ -137,7 +129,6 @@ export class ClassesService {
     // Para aulas agendadas, filtrar apenas aulas futuras
     if (status === ClassStatus.SCHEDULED) {
       const now = new Date();
-      console.log('🔍 [CLASSES] Filtrando aulas futuras. Data atual:', now);
       
       // Primeiro, vamos ver todas as aulas do usuário sem filtro de data
       const allUserClasses = await this.db.query.classes.findMany({
@@ -158,7 +149,6 @@ export class ClassesService {
         }
       });
       
-      console.log('🔍 [CLASSES] Todas as aulas do usuário (sem filtro de data):', allUserClasses);
       
       conditions.push(gte(classes.date, now));
     }
@@ -180,7 +170,6 @@ export class ClassesService {
     }
 
     // Buscar aulas com relacionamentos
-    console.log('🔍 [CLASSES] Condições de filtro:', conditions);
     
     const classesList = await this.db.query.classes.findMany({
       where: and(...conditions),
@@ -214,8 +203,6 @@ export class ClassesService {
       offset,
     });
 
-    console.log('🔍 [CLASSES] Aulas encontradas:', classesList.length);
-    console.log('🔍 [CLASSES] Aulas:', classesList);
 
     // Contar total
     const [{ total }] = await this.db
@@ -223,7 +210,6 @@ export class ClassesService {
       .from(classes)
       .where(and(...conditions));
 
-    console.log('🔍 [CLASSES] Total de aulas:', total);
 
     return {
       classes: classesList.map(cls => this.formatClassResponse(cls)),
@@ -386,11 +372,15 @@ export class ClassesService {
       // Dar XP para o personal trainer por completar a aula
       await this.gamificationService.processClassCompletion(userId, id);
       
-      console.log(`🎮 [GAMIFICATION] XP concedido para aula completada: ${id}`);
     } catch (error) {
       console.error('❌ [GAMIFICATION] Erro ao processar XP da aula:', error);
       // Não falhar a operação se a gamificação falhar
     }
+
+    // ===== PAGAMENTO JÁ FOI CAPTURADO NO MATCH =====
+    // O pagamento é capturado quando o personal aceita a proposta (match)
+    // Aqui apenas confirmamos que a aula foi concluída
+    console.log('✅ [CLASSES] Aula concluída - pagamento já foi capturado no match');
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
@@ -417,7 +407,6 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      console.log('📡 [CLASSES] Eventos WebSocket enviados para aula completada:', id);
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
       // Não falhar a operação por causa de problemas de WebSocket

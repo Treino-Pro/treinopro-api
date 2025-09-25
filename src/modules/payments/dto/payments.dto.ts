@@ -680,3 +680,241 @@ export class MercadoPagoSplitDto {
   @IsNotEmpty()
   amount: string;
 }
+
+// ===== DTOs PARA TRANSFERÊNCIA REAL =====
+
+export class TransferRequestDto {
+  @ApiProperty({
+    description: 'ID do personal trainer',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  personalId: string;
+
+  @ApiProperty({
+    description: 'Valor da transferência',
+    example: 100.00,
+    minimum: 1.00,
+    maximum: 10000.00
+  })
+  @IsNumber()
+  @Min(1.00)
+  @Max(10000.00)
+  amount: number;
+
+  @ApiProperty({
+    description: 'Descrição da transferência',
+    example: 'Saque mensal - Janeiro 2024'
+  })
+  @IsString()
+  @IsNotEmpty()
+  description: string;
+
+  @ApiProperty({
+    description: 'Método de transferência',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
+    example: 'pix'
+  })
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
+  transferMethod: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+
+  @ApiProperty({
+    description: 'Dados específicos do método de transferência',
+    type: 'object'
+  })
+  @IsObject()
+  personalData: {
+    pixKey?: string;
+    bankAccount?: {
+      bank: string;
+      agency: string;
+      account: string;
+      accountType: string;
+    };
+    mpAccountId?: string;
+  };
+}
+
+export class ApproveWithdrawalDto {
+  @ApiProperty({
+    description: 'ID da solicitação de saque',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  withdrawalId: string;
+
+  @ApiProperty({
+    description: 'Notas do administrador',
+    example: 'Saque aprovado após verificação dos dados bancários'
+  })
+  @IsString()
+  @IsOptional()
+  adminNotes?: string;
+
+  @ApiProperty({
+    description: 'Método de transferência escolhido pelo admin',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
+    example: 'pix'
+  })
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
+  @IsOptional()
+  transferMethod?: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+}
+
+export class RejectWithdrawalDto {
+  @ApiProperty({
+    description: 'ID da solicitação de saque',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  withdrawalId: string;
+
+  @ApiProperty({
+    description: 'Motivo da rejeição',
+    example: 'Dados bancários inválidos'
+  })
+  @IsString()
+  @IsNotEmpty()
+  reason: string;
+
+  @ApiProperty({
+    description: 'Notas adicionais do administrador',
+    example: 'Favor verificar os dados da conta bancária'
+  })
+  @IsString()
+  @IsOptional()
+  adminNotes?: string;
+}
+
+export class WithdrawalRequestDto {
+  @ApiProperty({
+    description: 'Valor do saque',
+    example: 100.00,
+    minimum: 1.00,
+    maximum: 10000.00
+  })
+  @IsNumber()
+  @Min(1.00)
+  @Max(10000.00)
+  amount: number;
+
+  @ApiProperty({
+    description: 'Método de saque preferido',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
+    example: 'pix'
+  })
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
+  method: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+
+  @ApiProperty({
+    description: 'Urgência do saque',
+    enum: ['normal', 'urgent'],
+    example: 'normal'
+  })
+  @IsEnum(['normal', 'urgent'])
+  @IsOptional()
+  urgency?: 'normal' | 'urgent';
+
+  @ApiProperty({
+    description: 'Descrição do saque',
+    example: 'Saque mensal'
+  })
+  @IsString()
+  @IsOptional()
+  description?: string;
+}
+
+export class WithdrawalResponseDto {
+  @ApiProperty({
+    description: 'ID da solicitação de saque',
+    example: '123e4567-e89b-12d3-a456-426614174000'
+  })
+  id: string;
+
+  @ApiProperty({
+    description: 'ID do usuário',
+    example: '123e4567-e89b-12d3-a456-426614174001'
+  })
+  userId: string;
+
+  @ApiProperty({
+    description: 'Valor solicitado',
+    example: 100.00
+  })
+  amount: number;
+
+  @ApiProperty({
+    description: 'Taxa aplicada',
+    example: 2.50
+  })
+  fee: number;
+
+  @ApiProperty({
+    description: 'Valor líquido (após taxa)',
+    example: 97.50
+  })
+  netAmount: number;
+
+  @ApiProperty({
+    description: 'Método de saque',
+    example: 'pix'
+  })
+  method: string;
+
+  @ApiProperty({
+    description: 'Status da solicitação',
+    enum: ['pending', 'approved', 'rejected', 'processing', 'completed', 'failed'],
+    example: 'pending'
+  })
+  status: string;
+
+  @ApiProperty({
+    description: 'Descrição do saque',
+    example: 'Saque mensal'
+  })
+  description?: string;
+
+  @ApiProperty({
+    description: 'Motivo da rejeição (se aplicável)',
+    example: 'Dados bancários inválidos'
+  })
+  rejectionReason?: string;
+
+  @ApiProperty({
+    description: 'Notas do administrador',
+    example: 'Saque aprovado'
+  })
+  adminNotes?: string;
+
+  @ApiProperty({
+    description: 'ID da transferência no Mercado Pago',
+    example: '1234567890'
+  })
+  mpTransferId?: string;
+
+  @ApiProperty({
+    description: 'Data de criação',
+    example: '2024-01-15T10:00:00.000Z'
+  })
+  createdAt: Date;
+
+  @ApiProperty({
+    description: 'Data de processamento',
+    example: '2024-01-15T15:00:00.000Z'
+  })
+  processedAt?: Date;
+
+  @ApiProperty({
+    description: 'Dados do usuário',
+    type: 'object'
+  })
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+}

@@ -4,6 +4,7 @@ import { isProposalExpired } from './proposals.utils';
 import { eq, and, lt } from 'drizzle-orm';
 import { ProposalStatus } from './dto/proposals.dto';
 import { ChatGateway } from '../chat/chat.gateway';
+import { ProposalsService } from './proposals.service';
 
 @Injectable()
 export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy {
@@ -14,6 +15,7 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
+    private readonly proposalsService: ProposalsService,
   ) {}
 
   async onModuleInit() {
@@ -88,8 +90,23 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
 
       this.logger.log(`🧹 [BACKGROUND] Encontradas ${expiredProposals.length} propostas expiradas (horário do treino já passou)`);
 
-      // Deletar propostas expiradas
+      // Processar propostas expiradas (reembolso + deleção)
       for (const proposal of expiredProposals) {
+        // Processar reembolso se houver pagamento
+        if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
+          try {
+            await this.proposalsService.processAutomaticRefund(
+              proposal.id, 
+              proposal.paymentId, 
+              'Proposta expirada - reembolso automático'
+            );
+            this.logger.log(`💰 [BACKGROUND] Reembolso processado para proposta ${proposal.id}`);
+          } catch (error) {
+            this.logger.error(`❌ [BACKGROUND] Erro ao processar reembolso da proposta ${proposal.id}:`, error);
+          }
+        }
+
+        // Deletar proposta após processar reembolso
         await this.db
           .delete(proposals)
           .where(eq(proposals.id, proposal.id));

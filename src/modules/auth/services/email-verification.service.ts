@@ -34,8 +34,6 @@ export class EmailVerificationService {
       verified: false
     });
 
-    console.log(`📧 [EMAIL_VERIFICATION] Código gerado para ${email}: ${verificationCode}`);
-    console.log(`📧 [EMAIL_VERIFICATION] Expira em: ${expiresAt.toISOString()}`);
 
     // Enviar email com código
     try {
@@ -51,7 +49,6 @@ export class EmailVerificationService {
           minute: '2-digit'
         })
       });
-      console.log(`✅ [EMAIL_VERIFICATION] Email enviado com sucesso para ${email}`);
     } catch (error) {
       console.error(`❌ [EMAIL_VERIFICATION] Erro ao enviar email para ${email}:`, error);
       // Continuar mesmo se o email falhar (para desenvolvimento)
@@ -93,7 +90,6 @@ export class EmailVerificationService {
     this.verificationCodes.set(email, storedData);
     this.verifiedEmails.add(email);
     
-    console.log('✅ [EMAIL_VERIFICATION] Código verificado com sucesso para:', email);
 
     return {
       message: 'Código verificado com sucesso',
@@ -111,7 +107,6 @@ export class EmailVerificationService {
     for (const [email, data] of this.verificationCodes.entries()) {
       if (now > data.expiresAt) {
         this.verificationCodes.delete(email);
-        console.log(`🧹 [EMAIL_VERIFICATION] Código expirado removido para: ${email}`);
       }
     }
   }

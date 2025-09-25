@@ -2,6 +2,7 @@ import { pgTable, varchar, text, integer, timestamp, pgEnum, uuid, decimal, json
 import { relations } from 'drizzle-orm';
 import { users } from './users';
 import { classes } from './classes';
+import { proposals } from './proposals';
 
 // Enum para status do pagamento
 export const paymentStatusEnum = pgEnum('payment_status', [
@@ -36,9 +37,12 @@ export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   
   // Relacionamentos
-  classId: uuid('class_id').notNull().references(() => classes.id, { onDelete: 'cascade' }),
+  classId: uuid('class_id'), // Pode ser NULL para propostas
   studentId: uuid('student_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   personalId: uuid('personal_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  
+  // Para propostas (quando classId é NULL)
+  proposalId: uuid('proposal_id'), // ID da proposta quando não há aula
   
   // Dados do Mercado Pago
   mpPaymentId: varchar('mp_payment_id', { length: 255 }), // ID do pagamento no MP
@@ -344,6 +348,10 @@ export const paymentsRelations = relations(payments, ({ one, many }) => ({
   class: one(classes, {
     fields: [payments.classId],
     references: [classes.id],
+  }),
+  proposal: one(proposals, {
+    fields: [payments.proposalId],
+    references: [proposals.id],
   }),
   student: one(users, {
     fields: [payments.studentId],
