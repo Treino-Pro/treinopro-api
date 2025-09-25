@@ -141,6 +141,64 @@ export class ProposalsController {
     return this.proposalsService.getProposalStats(req.user.sub, req.user.userType);
   }
 
+  @Get('conflicts')
+  @ApiOperation({ 
+    summary: 'Buscar conflitos de horários',
+    description: 'Retorna propostas e aulas existentes que podem conflitar com um horário específico'
+  })
+  @ApiQuery({ name: 'date', required: true, description: 'Data para verificar conflitos (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'studentId', required: false, description: 'ID do aluno (opcional, usa usuário logado se não informado)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Conflitos de horários retornados com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        existingProposals: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              trainingTime: { type: 'string' },
+              status: { type: 'string' },
+              durationMinutes: { type: 'number' }
+            }
+          }
+        },
+        matchedClasses: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              time: { type: 'string' },
+              status: { type: 'string' },
+              duration: { type: 'number' }
+            }
+          }
+        },
+        blockedTimeSlots: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Lista de horários bloqueados (formato HH:MM)'
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Data inválida ou parâmetros incorretos'
+  })
+  async getTimeConflicts(
+    @Query('date') date: string,
+    @Request() req: any,
+    @Query('studentId') studentId?: string,
+  ) {
+    const targetStudentId = studentId || req.user.sub;
+    return this.proposalsService.getTimeConflicts(date, targetStudentId);
+  }
+
   @Get(':id')
   @ApiOperation({ 
     summary: 'Obter proposta por ID',

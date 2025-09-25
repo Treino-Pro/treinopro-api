@@ -39,6 +39,90 @@ export class ProposalsService {
       throw new BadRequestException('A data do treino deve ser no futuro');
     }
 
+        // ===== VALIDAR CONFLITOS DE HORÁRIO (ABORDAGEM MATEMÁTICA) =====
+        try {
+          console.log('🔍 [PROPOSALS] Validando conflitos de horário usando intervalos matemáticos...');
+          
+          const dateString = trainingDate.toISOString().split('T')[0];
+          
+          // Buscar dados necessários para validação matemática
+          const existingProposals = await this.db.query.proposals.findMany({
+            where: and(
+              eq(proposals.studentId, studentId),
+              sql`DATE(${proposals.trainingDate}) = ${dateString}`,
+              or(
+                eq(proposals.status, 'pending'),
+                eq(proposals.status, 'matched')
+              )
+            ),
+            columns: {
+              id: true,
+              trainingTime: true,
+              status: true,
+              durationMinutes: true,
+            }
+          });
+
+          const matchedClasses = await this.db.query.classes.findMany({
+            where: and(
+              sql`DATE(${classes.date}) = ${dateString}`,
+              or(
+                eq(classes.status, 'scheduled'),
+                eq(classes.status, 'active')
+              )
+            ),
+            columns: {
+              id: true,
+              time: true,
+              status: true,
+              duration: true,
+            }
+          });
+
+          // Usar validação matemática (muito mais eficiente)
+          const validation = this.canScheduleTimeMathematical(
+            createProposalDto.trainingTime,
+            createProposalDto.durationMinutes,
+            existingProposals,
+            matchedClasses
+          );
+
+          if (!validation.canSchedule) {
+            const conflictingItem = validation.conflictingItem;
+            const itemType = conflictingItem?.type === 'proposal' ? 'proposta' : 'aula';
+            const itemStatus = conflictingItem?.status === 'pending' ? 'pendente' : 
+                             conflictingItem?.status === 'matched' ? 'em andamento' : 
+                             conflictingItem?.status === 'scheduled' ? 'agendada' : 'ativa';
+            
+            let errorMessage = '';
+            
+            if (validation.reason === 'overlap') {
+              if (itemType === 'proposta') {
+                errorMessage = `Horário indisponível. Você já tem uma proposta ${itemStatus} neste horário.`;
+              } else {
+                errorMessage = `Horário indisponível. Já existe uma aula ${itemStatus} neste horário.`;
+              }
+            } else if (validation.reason === 'buffer') {
+              if (itemType === 'proposta') {
+                errorMessage = `Horário indisponível. Você já tem uma proposta ${itemStatus} muito próxima deste horário (intervalo de 1 hora necessário).`;
+              } else {
+                errorMessage = `Horário indisponível. Já existe uma aula ${itemStatus} muito próxima deste horário (intervalo de 1 hora necessário).`;
+              }
+            }
+            
+            console.log(`❌ [PROPOSALS] Horário ${createProposalDto.trainingTime} bloqueado: ${errorMessage}`);
+            throw new BadRequestException(errorMessage);
+          }
+          
+          console.log('✅ [PROPOSALS] Validação matemática de conflitos passou');
+        } catch (error) {
+          if (error instanceof BadRequestException) {
+            throw error;
+          }
+          console.error('❌ [PROPOSALS] Erro na validação de conflitos:', error);
+          throw new BadRequestException('Não foi possível validar conflitos de horário no momento. Tente novamente.');
+    }
+
     // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
     
     try {
@@ -92,11 +176,11 @@ export class ProposalsService {
       }
 
       // Buscar dados do usuário para incluir na resposta
-      const [student] = await this.db
-        .select()
-        .from(users)
-        .where(eq(users.id, studentId))
-        .limit(1);
+        const [student] = await this.db
+          .select()
+          .from(users)
+          .where(eq(users.id, studentId))
+          .limit(1);
 
       // Retornar proposta com dados do pagamento e do usuário
       const proposalResponse = this.mapToResponseDto(proposal, student);
@@ -386,7 +470,7 @@ export class ProposalsService {
       throw new BadRequestException('Apenas propostas pendentes podem ser aceitas');
     }
 
-    // ===== VALIDAR CONFLITO DE HORÁRIO COM AULAS EXISTENTES DO PERSONAL =====
+    // ===== VALIDAR CONFLITOS DE HORÁRIO =====
     try {
       // Montar intervalo do dia da proposta
       const proposedTrainingDate = new Date(proposal.trainingDate);
@@ -395,6 +479,7 @@ export class ProposalsService {
       const endOfDay = new Date(proposedTrainingDate);
       endOfDay.setHours(23, 59, 59, 999);
 
+      // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
       // Buscar aulas do personal no mesmo dia com status relevantes
       const existingClasses = await this.db
         .select()
@@ -412,49 +497,74 @@ export class ProposalsService {
           )
         );
 
-      console.log(`  - Aulas existentes encontradas: ${existingClasses.length}`);
-      console.log(`  - Aulas existentes:`, existingClasses.map(c => ({ id: c.id, date: c.date, time: c.time, status: c.status })));
+      console.log(`  - Aulas do personal encontradas: ${existingClasses.length}`);
+
+      // 2. VALIDAR CONFLITOS DO ALUNO
+      // Buscar propostas existentes do aluno para o mesmo dia
+      const existingProposals = await this.db
+        .select()
+        .from(proposals)
+        .where(
+          and(
+            eq(proposals.studentId, proposal.studentId),
+            gte(proposals.trainingDate, startOfDay),
+            lte(proposals.trainingDate, endOfDay),
+            or(
+              eq(proposals.status, 'pending'),
+              eq(proposals.status, 'matched')
+            ),
+            // Excluir a proposta atual
+            sql`${proposals.id} != ${id}`
+          )
+        );
+
+      console.log(`  - Propostas do aluno encontradas: ${existingProposals.length}`);
 
       // Calcular janela de tempo da proposta aceita
-      // A proposta.trainingDate já contém a data e hora corretas
       const proposedStart = new Date(proposedTrainingDate);
       const proposedEnd = new Date(proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000);
 
       console.log(`  - Proposta: ${proposedStart.toISOString()} até ${proposedEnd.toISOString()}`);
 
-      // Verificar sobreposição com aulas existentes
-      const hasConflict = existingClasses.some((cls: any) => {
-        // A aula.cls.date já contém a data e hora corretas
+      // Verificar conflitos com aulas do personal
+      const hasClassConflict = existingClasses.some((cls: any) => {
         const classStart = new Date(cls.date);
         const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
-
-        console.log(`  - Aula existente: ${classStart.toISOString()} até ${classEnd.toISOString()}`);
 
         // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
         const now = new Date();
         const isClassExpired = classEnd < now;
         
         if (isClassExpired) {
-          console.log(`  - Aula expirada (deveria ter terminado às ${classEnd.toISOString()}), ignorando conflito`);
           return false; // Não há conflito com aulas expiradas
         }
 
-        // overlap se não (proposedEnd <= classStart || proposedStart >= classEnd)
+        // Verificar sobreposição
         const overlaps = !(proposedEnd <= classStart || proposedStart >= classEnd);
-        console.log(`  - Sobreposição: ${overlaps}`);
-        console.log(`  - proposedStart: ${proposedStart.toISOString()}`);
-        console.log(`  - proposedEnd: ${proposedEnd.toISOString()}`);
-        console.log(`  - classStart: ${classStart.toISOString()}`);
-        console.log(`  - classEnd: ${classEnd.toISOString()}`);
-        
         return overlaps;
       });
 
-      console.log(`  - Tem conflito: ${hasConflict}`);
+      // Verificar conflitos com propostas do aluno
+      const hasProposalConflict = existingProposals.some((prop: any) => {
+        const propStart = new Date(prop.trainingDate);
+        const propEnd = new Date(propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000);
 
-      if (hasConflict) {
-        throw new BadRequestException('Conflito de horário: você já possui uma aula agendada nesse período.');
+        // Verificar sobreposição
+        const overlaps = !(proposedEnd <= propStart || proposedStart >= propEnd);
+        return overlaps;
+      });
+
+      console.log(`  - Conflito com aulas do personal: ${hasClassConflict}`);
+      console.log(`  - Conflito com propostas do aluno: ${hasProposalConflict}`);
+
+      if (hasClassConflict) {
+        throw new BadRequestException('Conflito de horário: o personal trainer já possui uma aula agendada nesse período.');
       }
+
+      if (hasProposalConflict) {
+        throw new BadRequestException('Conflito de horário: o aluno já possui uma proposta ou aula agendada nesse período.');
+      }
+
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -992,7 +1102,7 @@ export class ProposalsService {
 
       // Criar preferência no Mercado Pago
       const mpPreference = await this.paymentsService['mercadoPagoService'].createPreference(preferenceData);
-      
+
       console.log('✅ [PROPOSALS] Preferência MP criada:', {
         id: mpPreference.id,
         initPoint: mpPreference.initPoint,
@@ -1093,6 +1203,220 @@ export class ProposalsService {
       .where(and(...conditions));
 
     return stats;
+  }
+
+  // ===== VALIDAÇÃO DE CONFLITOS DE HORÁRIOS =====
+
+  async getTimeConflicts(date: string, studentId: string): Promise<{
+    existingProposals: any[];
+    matchedClasses: any[];
+    blockedTimeSlots: string[];
+  }> {
+    try {
+      console.log(`🔍 [CONFLICTS] Buscando conflitos para data ${date} e aluno ${studentId}`);
+
+      // Validar formato da data
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        throw new BadRequestException('Formato de data inválido. Use YYYY-MM-DD');
+      }
+
+      // Normalizar data para início do dia (considerando timezone)
+      const targetDateObj = new Date(targetDate);
+      const startOfDay = new Date(targetDateObj.getFullYear(), targetDateObj.getMonth(), targetDateObj.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(targetDateObj.getFullYear(), targetDateObj.getMonth(), targetDateObj.getDate(), 23, 59, 59, 999);
+      
+      console.log(`🔍 [CONFLICTS] Data buscada: ${targetDate}`);
+      console.log(`🔍 [CONFLICTS] Start of day: ${startOfDay.toISOString()}`);
+      console.log(`🔍 [CONFLICTS] End of day: ${endOfDay.toISOString()}`);
+
+      // 1. Buscar propostas existentes do aluno para o mesmo dia
+      // Usar comparação de string para data (YYYY-MM-DD)
+      const dateString = targetDate.toISOString().split('T')[0]; // 2025-09-25
+      
+      const existingProposals = await this.db.query.proposals.findMany({
+        where: and(
+          eq(proposals.studentId, studentId),
+          sql`DATE(${proposals.trainingDate}) = ${dateString}`,
+          or(
+            eq(proposals.status, 'pending'),
+            eq(proposals.status, 'matched')
+          )
+        ),
+        columns: {
+          id: true,
+          trainingTime: true,
+          status: true,
+          durationMinutes: true,
+        }
+      });
+
+      console.log(`📋 [CONFLICTS] Propostas existentes encontradas: ${existingProposals.length}`);
+
+      // 2. Buscar aulas em match do personal para o mesmo dia
+      const matchedClasses = await this.db.query.classes.findMany({
+        where: and(
+          sql`DATE(${classes.date}) = ${dateString}`,
+          or(
+            eq(classes.status, 'scheduled'),
+            eq(classes.status, 'active')
+          )
+        ),
+        columns: {
+          id: true,
+          time: true,
+          status: true,
+          duration: true,
+        }
+      });
+
+      console.log(`🏃 [CONFLICTS] Aulas em match encontradas: ${matchedClasses.length}`);
+
+      // 3. Calcular horários bloqueados baseado nas regras do mock
+      const blockedTimeSlots = this.calculateBlockedTimeSlots(existingProposals, matchedClasses);
+
+      console.log(`🚫 [CONFLICTS] Horários bloqueados: ${blockedTimeSlots.join(', ')}`);
+
+      return {
+        existingProposals,
+        matchedClasses,
+        blockedTimeSlots,
+      };
+
+    } catch (error) {
+      console.error('❌ [CONFLICTS] Erro ao buscar conflitos:', error);
+      throw error;
+    }
+  }
+
+  private calculateBlockedTimeSlots(existingProposals: any[], matchedClasses: any[]): string[] {
+    const blockedSlots = new Set<string>();
+
+    // Processar propostas existentes
+    for (const proposal of existingProposals) {
+      const startTime = this.parseTime(proposal.trainingTime);
+      const duration = proposal.durationMinutes || 60;
+      const endTime = startTime + (duration / 60);
+
+      // Bloquear 1 hora antes e depois (mesmo comportamento do mock)
+      this.addBlockedSlots(blockedSlots, startTime, endTime);
+    }
+
+    // Processar aulas em match
+    for (const classItem of matchedClasses) {
+      const startTime = this.parseTime(classItem.time);
+      const duration = classItem.duration || 60;
+      const endTime = startTime + (duration / 60);
+
+      // Bloquear 1 hora antes e depois (mesmo comportamento do mock)
+      this.addBlockedSlots(blockedSlots, startTime, endTime);
+    }
+
+    return Array.from(blockedSlots).sort();
+  }
+
+  /**
+   * NOVA ABORDAGEM: Validação usando intervalos matemáticos (muito mais eficiente)
+   * Complexidade: O(m) onde m = número de agendamentos existentes
+   * Memória: Baixa (só armazena agendamentos reais)
+   */
+  private canScheduleTimeMathematical(
+    targetTime: string, 
+    durationMinutes: number, 
+    existingProposals: any[], 
+    matchedClasses: any[]
+  ): { canSchedule: boolean; reason?: string; conflictingItem?: any } {
+    
+    const newStartMinutes = this.timeToMinutes(targetTime);
+    const newEndMinutes = newStartMinutes + durationMinutes;
+    const bufferMinutes = 60; // Buffer de 1 hora
+
+    // Verificar conflitos com propostas existentes
+    for (const proposal of existingProposals) {
+      const existingStartMinutes = this.timeToMinutes(proposal.trainingTime);
+      const existingEndMinutes = existingStartMinutes + (proposal.durationMinutes || 60);
+
+      // Verificar sobreposição direta
+      if (newStartMinutes < existingEndMinutes && newEndMinutes > existingStartMinutes) {
+        return { 
+          canSchedule: false, 
+          reason: 'overlap', 
+          conflictingItem: { type: 'proposal', ...proposal } 
+        };
+      }
+
+      // Verificar buffer de 1h antes e depois
+      const bufferStart = existingStartMinutes - bufferMinutes;
+      const bufferEnd = existingEndMinutes + bufferMinutes;
+      
+      if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
+        return { 
+          canSchedule: false, 
+          reason: 'buffer', 
+          conflictingItem: { type: 'proposal', ...proposal } 
+        };
+      }
+    }
+
+    // Verificar conflitos com aulas em match
+    for (const classItem of matchedClasses) {
+      const existingStartMinutes = this.timeToMinutes(classItem.time);
+      const existingEndMinutes = existingStartMinutes + (classItem.duration || 60);
+
+      // Verificar sobreposição direta
+      if (newStartMinutes < existingEndMinutes && newEndMinutes > existingStartMinutes) {
+        return { 
+          canSchedule: false, 
+          reason: 'overlap', 
+          conflictingItem: { type: 'class', ...classItem } 
+        };
+      }
+
+      // Verificar buffer de 1h antes e depois
+      const bufferStart = existingStartMinutes - bufferMinutes;
+      const bufferEnd = existingEndMinutes + bufferMinutes;
+      
+      if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
+        return { 
+          canSchedule: false, 
+          reason: 'buffer', 
+          conflictingItem: { type: 'class', ...classItem } 
+        };
+      }
+    }
+
+    return { canSchedule: true };
+  }
+
+  /**
+   * Converte horário HH:MM para minutos desde meia-noite
+   * Exemplo: "21:30" -> 1290 minutos
+   */
+  private timeToMinutes(time: string): number {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+
+  private parseTime(timeString: string): number {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    return hours + (minutes / 60);
+  }
+
+  private addBlockedSlots(blockedSlots: Set<string>, startTime: number, endTime: number): void {
+    // Bloquear TODO o intervalo da proposta/aula existente
+    // Exemplo: proposta 21:00-22:00 bloqueia de 21:00 até 22:00
+    
+    // Converter para minutos para facilitar o cálculo
+    const startMinutes = Math.floor(startTime * 60);
+    const endMinutes = Math.floor(endTime * 60);
+    
+    // Bloquear cada minuto no intervalo (isso garante cobertura completa)
+    for (let minutes = startMinutes; minutes < endMinutes; minutes++) {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      const timeString = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+      blockedSlots.add(timeString);
+    }
   }
 
   private mapToResponseDto(proposal: any, student?: any): ProposalResponseDto {
