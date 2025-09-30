@@ -224,6 +224,16 @@ export class GetClassesDto {
   @Min(1)
   @Max(100)
   limit?: number = 10;
+
+  @ApiPropertyOptional({
+    description: 'Campos adicionais para incluir na resposta (ex: proposal)',
+    example: 'proposal',
+    type: [String]
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  include?: string[];
 }
 
 export class ClassResponseDto {

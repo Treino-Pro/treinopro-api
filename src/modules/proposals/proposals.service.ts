@@ -752,6 +752,8 @@ export class ProposalsService {
           time: proposal.trainingTime,
           duration: proposal.durationMinutes,
           status: 'scheduled',
+          // Garantir que a modalidade esteja presente no payload em tempo real
+          proposalModality: proposal.modalityName,
           student: {
             id: student?.id,
             firstName: student?.firstName,

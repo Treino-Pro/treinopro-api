@@ -103,7 +103,28 @@ export class ClassesService {
       date: new Date(createClassDto.date),
     }).returning();
 
-    return this.formatClassResponse(newClass);
+    // Buscar a modalidade da proposta para incluir na resposta
+    const proposalWithModality = await this.db.query.proposals.findFirst({
+      where: eq(proposals.id, createClassDto.proposalId),
+      columns: {
+        id: true,
+        modalityName: true,
+        value: true,
+      },
+    });
+
+    // Adicionar dados da proposta ao objeto da aula
+    const classWithProposal = {
+      ...newClass,
+      proposal: proposalWithModality ? {
+        id: proposalWithModality.id,
+        modality: proposalWithModality.modalityName,
+        value: proposalWithModality.value,
+      } : null,
+      proposalModality: proposalWithModality?.modalityName || null,
+    };
+
+    return this.formatClassResponse(classWithProposal, true); // Incluir proposal na criação
   }
 
 
@@ -790,8 +811,8 @@ export class ClassesService {
     }));
   }
 
-  private formatClassResponse(classData: any): ClassResponseDto {
-    return {
+  private formatClassResponse(classData: any, includeProposal: boolean = false): ClassResponseDto {
+    const response: any = {
       id: classData.id,
       proposalId: classData.proposalId,
       studentId: classData.studentId,
@@ -818,8 +839,15 @@ export class ClassesService {
       updatedAt: classData.updatedAt,
       student: classData.student,
       personal: classData.personal,
-      proposal: classData.proposal,
+      proposalModality: classData.proposalModality || classData.proposal?.modality || null,
     };
+
+    // Incluir objeto proposal apenas quando solicitado
+    if (includeProposal && classData.proposal) {
+      response.proposal = classData.proposal;
+    }
+
+    return response;
   }
 
   async getClasses(
@@ -985,7 +1013,8 @@ export class ClassesService {
         }
       }
       
-      // Formatar resposta
+      // Formatar resposta usando formatClassResponse
+      const includeProposal = getClassesDto.include?.includes('proposal') || false;
       const formattedClasses = classesData.map((row: any) => {
         const classData = row.classes;
         const student = row.users;
@@ -999,31 +1028,9 @@ export class ClassesService {
         console.log(`  - NoShowReportedAt: ${classData.noShowReportedAt}`);
         console.log(`  - NoShowReportedBy: ${classData.noShowReportedBy}`);
         
-        return {
-          id: classData.id,
-          proposalId: classData.proposalId,
-          studentId: classData.studentId,
-          personalId: classData.personalId,
-          location: classData.location,
-          date: classData.date,
-          time: classData.time,
-          duration: classData.duration,
-          status: classData.status,
-          startedAt: classData.startedAt,
-          completedAt: classData.completedAt,
-          pendingConfirmationAt: classData.pendingConfirmationAt,
-          confirmedAt: classData.confirmedAt,
-          noShowReportedAt: classData.noShowReportedAt,
-          noShowReportedBy: classData.noShowReportedBy,
-          disputeStatus: classData.disputeStatus,
-          custodyExpiresAt: classData.custodyExpiresAt,
-          evidenceDeadline: classData.evidenceDeadline,
-          studentEvidence: classData.studentEvidence,
-          personalEvidence: classData.personalEvidence,
-          resolution: classData.resolution,
-          resolvedAt: classData.resolvedAt,
-          createdAt: classData.createdAt,
-          updatedAt: classData.updatedAt,
+        // Preparar dados para formatClassResponse
+        const classWithRelations = {
+          ...classData,
           student: student ? {
             id: student.id,
             firstName: student.firstName,
@@ -1038,7 +1045,10 @@ export class ClassesService {
             id: proposal.id,
             modality: proposal.modalityName,
           } : null,
+          proposalModality: proposal?.modalityName || null,
         };
+        
+        return this.formatClassResponse(classWithRelations, includeProposal);
       });
       
       return {
