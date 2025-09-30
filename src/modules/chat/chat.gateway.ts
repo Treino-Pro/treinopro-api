@@ -21,7 +21,13 @@ interface AuthenticatedSocket extends Socket {
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:8080',
+      'http://127.0.0.1:8080',
+    ],
     credentials: true,
   },
   namespace: '/chat',
@@ -44,8 +50,14 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
+      console.log('🔌 [CHAT_GATEWAY] Nova conexão WebSocket recebida');
+      console.log('🔌 [CHAT_GATEWAY] Headers:', client.handshake.headers);
+      console.log('🔌 [CHAT_GATEWAY] Query:', client.handshake.query);
+      console.log('🔌 [CHAT_GATEWAY] Auth:', client.handshake.auth);
+      
       // Extrair token do handshake
       const token = this.extractTokenFromSocket(client);
+      console.log('🔌 [CHAT_GATEWAY] Token extraído:', token ? 'Presente' : 'Ausente');
       
       if (!token) {
         this.logger.warn(`Connection rejected: No token provided`);
@@ -58,6 +70,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       client.userId = payload.sub;
       client.userType = payload.userType;
 
+      console.log('🔌 [CHAT_GATEWAY] Usuário autenticado:', { userId: client.userId, userType: client.userType });
+
       // Armazenar conexão do usuário
       this.connectedUsers.set(client.userId, client.id);
 
@@ -69,8 +83,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       });
 
       this.logger.log(`User ${client.userId} connected with socket ${client.id}`);
+      console.log('🔌 [CHAT_GATEWAY] Total de usuários conectados:', this.connectedUsers.size);
     } catch (error) {
       this.logger.error(`Connection error: ${error.message}`);
+      console.error('❌ [CHAT_GATEWAY] Erro na conexão:', error);
       client.disconnect();
     }
   }

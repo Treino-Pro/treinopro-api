@@ -168,7 +168,8 @@ export class UploadService {
     const sizes = {
       profile: 5 * 1024 * 1024, // 5MB
       document: 10 * 1024 * 1024, // 10MB
-      temp: 5 * 1024 * 1024 // 5MB
+      temp: 5 * 1024 * 1024, // 5MB
+      dispute_evidence: 10 * 1024 * 1024 // 10MB
     };
     return sizes[category] || 5 * 1024 * 1024;
   }
@@ -177,7 +178,8 @@ export class UploadService {
     const types = {
       profile: ['image/jpeg', 'image/png', 'image/webp'],
       document: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
-      temp: ['image/jpeg', 'image/png', 'image/webp']
+      temp: ['image/jpeg', 'image/png', 'image/webp'],
+      dispute_evidence: ['image/jpeg', 'image/png', 'image/webp']
     };
     return types[category] || ['image/jpeg', 'image/png', 'image/webp'];
   }
@@ -186,7 +188,8 @@ export class UploadService {
     const dimensions = {
       profile: { width: 2048, height: 2048 },
       document: { width: 4096, height: 4096 },
-      temp: { width: 2048, height: 2048 }
+      temp: { width: 2048, height: 2048 },
+      dispute_evidence: { width: 4096, height: 4096 }
     };
     return dimensions[category] || { width: 2048, height: 2048 };
   }

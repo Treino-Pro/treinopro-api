@@ -5,6 +5,7 @@ export enum FileCategory {
   PROFILE = 'profile',
   DOCUMENT = 'document',
   TEMP = 'temp',
+  DISPUTE_EVIDENCE = 'dispute_evidence',
 }
 
 export class UploadFileDto {

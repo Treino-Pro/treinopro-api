@@ -18,6 +18,7 @@ export class FileStorageUtil {
     const directories = [
       path.join(this.storageBasePath, 'images', 'profiles'),
       path.join(this.storageBasePath, 'images', 'documents'),
+      path.join(this.storageBasePath, 'images', 'dispute_evidence'),
       path.join(this.storageBasePath, 'images', 'thumbnails'),
       path.join(this.storageBasePath, 'temp'),
     ];
@@ -42,6 +43,7 @@ export class FileStorageUtil {
     const categoryPaths = {
       profile: 'images/profiles',
       document: 'images/documents',
+      dispute_evidence: 'images/dispute_evidence',
       temp: 'temp',
     };
 
@@ -53,6 +55,7 @@ export class FileStorageUtil {
     const categoryPaths = {
       profile: 'images/profiles',
       document: 'images/documents',
+      dispute_evidence: 'images/dispute_evidence',
       temp: 'temp',
     };
 

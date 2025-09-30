@@ -1,4 +1,4 @@
-import { IsUUID, IsString, IsDateString, IsInt, IsEnum, IsOptional, Min, Max } from 'class-validator';
+import { IsUUID, IsString, IsDateString, IsInt, IsEnum, IsOptional, Min, Max, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -173,6 +173,31 @@ export class GetClassesDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @ApiPropertyOptional({
+    description: 'Data específica para filtrar (formato YYYY-MM-DD)',
+    example: '2024-01-15'
+  })
+  @IsOptional()
+  @IsString()
+  date?: string;
+
+  @ApiPropertyOptional({
+    description: 'Faixa de horário para filtrar',
+    enum: ['morning', 'afternoon', 'evening'],
+    example: 'morning'
+  })
+  @IsOptional()
+  @IsString()
+  timeRange?: string;
+
+  @ApiPropertyOptional({
+    description: 'Categoria da modalidade para filtrar',
+    example: 'Musculação'
+  })
+  @IsOptional()
+  @IsString()
+  category?: string;
 
   @ApiPropertyOptional({
     description: 'Número da página',
@@ -483,13 +508,29 @@ export class ConfirmClassStartDto {
 }
 
 export class ReportNoShowDto {
+  @ApiProperty({
+    description: 'Motivo da ausência',
+    example: 'Não compareceu ao horário agendado'
+  })
+  @IsString()
+  reason: string; // Motivo da ausência
+
   @ApiPropertyOptional({
-    description: 'Observações do personal ao reportar ausência',
+    description: 'Observações adicionais',
     example: 'Aluno não compareceu no horário agendado'
   })
   @IsString()
   @IsOptional()
-  notes?: string; // Observações do personal ao reportar ausência
+  notes?: string; // Observações adicionais
+
+  @ApiPropertyOptional({
+    description: 'URLs das evidências (imagens) enviadas',
+    example: ['https://example.com/evidence1.jpg', 'https://example.com/evidence2.jpg']
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  evidenceUrls?: string[]; // URLs das evidências (imagens)
 }
 
 export class ResolveNoShowDisputeDto {

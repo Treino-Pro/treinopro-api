@@ -3,9 +3,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // Configuração global de validação
   app.useGlobalPipes(new ValidationPipe({
@@ -18,6 +20,12 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
     credentials: true,
+  });
+
+  // Configuração de arquivos estáticos
+  const storagePath = process.env.STORAGE_PATH || './storage';
+  app.useStaticAssets(join(process.cwd(), storagePath), {
+    prefix: '/static/',
   });
 
   // Configuração do Swagger

@@ -154,6 +154,53 @@ export class UploadController {
     return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.TEMP }, null);
   }
 
+  @Post('dispute-evidence')
+  @UseInterceptors(FileInterceptor('file'))
+  @UseGuards(FileValidationGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Upload de evidência de disputa (ausência)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Arquivo de evidência para disputa de ausência',
+    type: 'multipart/form-data',
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Arquivo de evidência (JPEG, PNG, WebP)'
+        },
+        metadata: {
+          type: 'string',
+          description: 'Metadados adicionais (JSON string)',
+          example: '{"classId": "uuid", "description": "Foto do local vazio"}'
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 201, description: 'Evidência enviada com sucesso', type: FileResponseDto })
+  @ApiResponse({ status: 400, description: 'Arquivo inválido ou muito grande' })
+  async uploadDisputeEvidence(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() uploadDto: UploadFileDto,
+    @Request() req: any
+  ): Promise<FileResponseDto> {
+    console.log('📸 [UPLOAD] Upload de evidência de disputa:');
+    console.log('- file:', !!file);
+    console.log('- file.originalname:', file?.originalname);
+    console.log('- file.size:', file?.size);
+    console.log('- uploadDto:', uploadDto);
+    console.log('- userId:', req.user?.id);
+    
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
+    
+    const userId = req.user?.id;
+    return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.DISPUTE_EVIDENCE }, userId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obter informações de um arquivo' })
   @ApiResponse({ status: 200, description: 'Informações do arquivo', type: FileResponseDto })

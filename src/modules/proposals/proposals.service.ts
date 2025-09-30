@@ -46,13 +46,14 @@ export class ProposalsService {
           const dateString = trainingDate.toISOString().split('T')[0];
           
           // Buscar dados necessários para validação matemática
-          const existingProposals = await this.db.query.proposals.findMany({
+          let existingProposals = await this.db.query.proposals.findMany({
             where: and(
               eq(proposals.studentId, studentId),
               sql`DATE(${proposals.trainingDate}) = ${dateString}`,
               or(
                 eq(proposals.status, 'pending'),
                 eq(proposals.status, 'matched')
+                // Propostas 'disputed', 'completed', 'cancelled' não bloqueiam criação de novas propostas
               )
             ),
             columns: {
@@ -62,6 +63,20 @@ export class ProposalsService {
               durationMinutes: true,
             }
           });
+
+          // Ignorar propostas cujo vínculo (aula) está em disputa de no-show
+          const disputedClasses = await this.db.query.classes.findMany({
+            where: and(
+              sql`DATE(${classes.date}) = ${dateString}`,
+              eq(classes.studentId, studentId as any),
+              eq(classes.status, 'no_show_dispute')
+            ),
+            columns: { proposalId: true }
+          });
+          const disputedProposalIds = new Set(disputedClasses.map(c => c.proposalId).filter(Boolean));
+          if (disputedProposalIds.size > 0) {
+            existingProposals = existingProposals.filter(p => !disputedProposalIds.has(p.id));
+          }
 
           const matchedClasses = await this.db.query.classes.findMany({
             where: and(
@@ -630,8 +645,9 @@ export class ProposalsService {
       return this.mapToResponseDto(acceptedProposal, student);
     }
     
+    let newClass;
     try {
-      const [newClass] = await this.db
+      [newClass] = await this.db
         .insert(classes)
         .values({
           studentId: proposal.studentId,
@@ -722,6 +738,43 @@ export class ProposalsService {
       };
 
       this.chatGateway.server.emit('match_confirmed', matchData);
+
+      // Evento de aula criada para ambos os usuários
+      const classData = {
+        action: 'class_created',
+        class: {
+          id: newClass.id,
+          proposalId: id,
+          studentId: proposal.studentId,
+          personalId: personalId,
+          location: proposal.locationName,
+          date: proposal.trainingDate,
+          time: proposal.trainingTime,
+          duration: proposal.durationMinutes,
+          status: 'scheduled',
+          student: {
+            id: student?.id,
+            firstName: student?.firstName,
+            lastName: student?.lastName,
+            profileImageUrl: student?.profileImageUrl,
+          },
+          personal: {
+            id: personal?.id,
+            firstName: personal?.firstName,
+            lastName: personal?.lastName,
+            profileImageUrl: personal?.profileImageUrl,
+          },
+        },
+        personalId: personalId,
+        studentId: proposal.studentId,
+        timestamp: new Date(),
+      };
+
+      console.log('📡 [PROPOSALS] Emitindo evento class_update:', JSON.stringify(classData, null, 2));
+      this.chatGateway.server.emit('class_update', classData);
+      console.log('✅ [PROPOSALS] Evento WebSocket emitido: class_created');
+      console.log('🔌 [PROPOSALS] ChatGateway server disponível:', !!this.chatGateway.server);
+      console.log('👥 [PROPOSALS] Clientes conectados:', this.chatGateway.server.sockets.sockets.size);
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket:', error);
@@ -1234,13 +1287,14 @@ export class ProposalsService {
       // Usar comparação de string para data (YYYY-MM-DD)
       const dateString = targetDate.toISOString().split('T')[0]; // 2025-09-25
       
-      const existingProposals = await this.db.query.proposals.findMany({
+      let existingProposals = await this.db.query.proposals.findMany({
         where: and(
           eq(proposals.studentId, studentId),
           sql`DATE(${proposals.trainingDate}) = ${dateString}`,
           or(
             eq(proposals.status, 'pending'),
             eq(proposals.status, 'matched')
+            // Propostas 'disputed' não bloqueiam criação de novas propostas
           )
         ),
         columns: {
@@ -1250,6 +1304,20 @@ export class ProposalsService {
           durationMinutes: true,
         }
       });
+
+      // Ignorar propostas vinculadas a aulas em disputa (no_show_dispute)
+      const disputedClasses = await this.db.query.classes.findMany({
+        where: and(
+          sql`DATE(${classes.date}) = ${dateString}`,
+          eq(classes.studentId, studentId as any),
+          eq(classes.status, 'no_show_dispute')
+        ),
+        columns: { proposalId: true }
+      });
+      const disputedProposalIds = new Set(disputedClasses.map(c => c.proposalId).filter(Boolean));
+      if (disputedProposalIds.size > 0) {
+        existingProposals = existingProposals.filter(p => !disputedProposalIds.has(p.id));
+      }
 
       console.log(`📋 [CONFLICTS] Propostas existentes encontradas: ${existingProposals.length}`);
 
@@ -1272,7 +1340,7 @@ export class ProposalsService {
 
       console.log(`🏃 [CONFLICTS] Aulas em match encontradas: ${matchedClasses.length}`);
 
-      // 3. Calcular horários bloqueados baseado nas regras do mock
+      // 3. Calcular horários bloqueados baseado nos conflitos reais
       const blockedTimeSlots = this.calculateBlockedTimeSlots(existingProposals, matchedClasses);
 
       console.log(`🚫 [CONFLICTS] Horários bloqueados: ${blockedTimeSlots.join(', ')}`);
@@ -1315,6 +1383,39 @@ export class ProposalsService {
     return Array.from(blockedSlots).sort();
   }
 
+  async debugStudentProposals(studentId: string) {
+    try {
+      console.log(`🔍 [DEBUG] Buscando propostas para aluno: ${studentId}`);
+      
+      const allProposals = await this.db.query.proposals.findMany({
+        where: eq(proposals.studentId, studentId),
+        columns: {
+          id: true,
+          studentId: true,
+          trainingDate: true,
+          trainingTime: true,
+          status: true,
+          durationMinutes: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: (proposals, { desc }) => [desc(proposals.createdAt)],
+        limit: 20
+      });
+      
+      console.log(`📊 [DEBUG] Total de propostas encontradas: ${allProposals.length}`);
+      
+      return {
+        studentId,
+        totalProposals: allProposals.length,
+        proposals: allProposals
+      };
+    } catch (error) {
+      console.error('❌ [DEBUG] Erro ao buscar propostas:', error);
+      throw error;
+    }
+  }
+
   /**
    * NOVA ABORDAGEM: Validação usando intervalos matemáticos (muito mais eficiente)
    * Complexidade: O(m) onde m = número de agendamentos existentes
@@ -1327,17 +1428,46 @@ export class ProposalsService {
     matchedClasses: any[]
   ): { canSchedule: boolean; reason?: string; conflictingItem?: any } {
     
+    console.log(`🔍 [BUFFER_DEBUG] ===== INÍCIO VALIDAÇÃO =====`);
+    console.log(`🔍 [BUFFER_DEBUG] Horário alvo: ${targetTime}`);
+    console.log(`🔍 [BUFFER_DEBUG] Duração: ${durationMinutes}min`);
+    console.log(`🔍 [BUFFER_DEBUG] Propostas existentes: ${existingProposals.length}`);
+    console.log(`🔍 [BUFFER_DEBUG] Aulas em match: ${matchedClasses.length}`);
+    
+    for (const proposal of existingProposals) {
+      console.log(`🔍 [BUFFER_DEBUG] Proposta encontrada: ${proposal.id} - Status: ${proposal.status} - Horário: ${proposal.trainingTime}`);
+    }
+    
     const newStartMinutes = this.timeToMinutes(targetTime);
     const newEndMinutes = newStartMinutes + durationMinutes;
-    const bufferMinutes = 60; // Buffer de 1 hora
+    const bufferMinutes = 0; // Sem buffer: bloquear apenas sobreposição real
 
     // Verificar conflitos com propostas existentes
     for (const proposal of existingProposals) {
+      console.log(`🔍 [BUFFER_DEBUG] Verificando proposta ${proposal.id}:`);
+      console.log(`  - Status: ${proposal.status}`);
+      console.log(`  - Horário: ${proposal.trainingTime}`);
+      console.log(`  - Duração: ${proposal.durationMinutes}min`);
+      
       const existingStartMinutes = this.timeToMinutes(proposal.trainingTime);
       const existingEndMinutes = existingStartMinutes + (proposal.durationMinutes || 60);
 
+      console.log(`  - Início (min): ${existingStartMinutes}`);
+      console.log(`  - Fim (min): ${existingEndMinutes}`);
+      console.log(`  - Novo início (min): ${newStartMinutes}`);
+      console.log(`  - Novo fim (min): ${newEndMinutes}`);
+
+      // Regra: propostas bloqueiam apenas se houver sobreposição real com o novo intervalo
+      // Estados que bloqueiam: 'pending', 'matched'
+      // Estados que NÃO bloqueiam: 'disputed', 'cancelled', 'completed'
+      if (proposal.status === 'disputed' || proposal.status === 'cancelled' || proposal.status === 'completed') {
+        console.log(`✅ [BUFFER_DEBUG] Proposta ${proposal.id} em estado ${proposal.status}, não bloqueia`);
+        continue;
+      }
+
       // Verificar sobreposição direta
       if (newStartMinutes < existingEndMinutes && newEndMinutes > existingStartMinutes) {
+        console.log(`❌ [BUFFER_DEBUG] Sobreposição direta detectada`);
         return { 
           canSchedule: false, 
           reason: 'overlap', 
@@ -1345,17 +1475,24 @@ export class ProposalsService {
         };
       }
 
-      // Verificar buffer de 1h antes e depois
-      const bufferStart = existingStartMinutes - bufferMinutes;
-      const bufferEnd = existingEndMinutes + bufferMinutes;
+      // Sem buffer: apenas sobreposição real
+      const bufferStart = existingStartMinutes - bufferMinutes; // == existingStartMinutes
+      const bufferEnd = existingEndMinutes + bufferMinutes;     // == existingEndMinutes
+      
+      console.log(`  - Buffer início (min): ${bufferStart}`);
+      console.log(`  - Buffer fim (min): ${bufferEnd}`);
+      console.log(`  - Condição buffer: ${newStartMinutes} < ${bufferEnd} && ${newEndMinutes} > ${bufferStart} = ${newStartMinutes < bufferEnd && newEndMinutes > bufferStart}`);
       
       if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
+        console.log(`❌ [BUFFER_DEBUG] Buffer de 1h detectado`);
         return { 
           canSchedule: false, 
           reason: 'buffer', 
           conflictingItem: { type: 'proposal', ...proposal } 
         };
       }
+      
+      console.log(`✅ [BUFFER_DEBUG] Proposta ${proposal.id} não conflita`);
     }
 
     // Verificar conflitos com aulas em match
@@ -1403,20 +1540,31 @@ export class ProposalsService {
   }
 
   private addBlockedSlots(blockedSlots: Set<string>, startTime: number, endTime: number): void {
-    // Bloquear TODO o intervalo da proposta/aula existente
-    // Exemplo: proposta 21:00-22:00 bloqueia de 21:00 até 22:00
+    // Bloquear horários principais do intervalo da proposta/aula existente
+    // Exemplo: proposta 21:00-22:00 bloqueia de 21:00 até 22:00 (a cada 15min)
     
     // Converter para minutos para facilitar o cálculo
     const startMinutes = Math.floor(startTime * 60);
     const endMinutes = Math.floor(endTime * 60);
     
-    // Bloquear cada minuto no intervalo (isso garante cobertura completa)
-    for (let minutes = startMinutes; minutes < endMinutes; minutes++) {
+    // Bloquear a cada 15 minutos no intervalo (mais realista e eficiente)
+    for (let minutes = startMinutes; minutes < endMinutes; minutes += 15) {
       const hours = Math.floor(minutes / 60);
       const mins = minutes % 60;
       const timeString = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
       blockedSlots.add(timeString);
     }
+    
+    // Garantir que o horário de início e fim sejam bloqueados
+    const startHours = Math.floor(startTime);
+    const startMins = Math.floor((startTime - startHours) * 60);
+    const startTimeString = `${startHours.toString().padStart(2, '0')}:${startMins.toString().padStart(2, '0')}`;
+    blockedSlots.add(startTimeString);
+    
+    const endHours = Math.floor(endTime);
+    const endMins = Math.floor((endTime - endHours) * 60);
+    const endTimeString = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+    blockedSlots.add(endTimeString);
   }
 
   private mapToResponseDto(proposal: any, student?: any): ProposalResponseDto {

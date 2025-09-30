@@ -199,6 +199,15 @@ export class ProposalsController {
     return this.proposalsService.getTimeConflicts(date, targetStudentId);
   }
 
+  @Get('debug/student/:studentId')
+  @ApiOperation({ 
+    summary: 'Debug - Listar propostas do aluno',
+    description: 'Endpoint temporário para debug de propostas'
+  })
+  async debugStudentProposals(@Param('studentId') studentId: string) {
+    return this.proposalsService.debugStudentProposals(studentId);
+  }
+
   @Get(':id')
   @ApiOperation({ 
     summary: 'Obter proposta por ID',
