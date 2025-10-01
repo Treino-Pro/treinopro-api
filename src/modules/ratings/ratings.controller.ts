@@ -10,7 +10,8 @@ import {
   UseGuards, 
   Request,
   ParseUUIDPipe,
-  ValidationPipe
+  ValidationPipe,
+  NotFoundException
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -516,6 +517,52 @@ export class RatingsController {
         effort: 0,
         progress: 0,
       },
+    };
+  }
+
+  // Endpoint para buscar rating de um usuário específico (como Uber)
+  @Get('user/:userId/rating')
+  async getUserRating(@Param('userId') userId: string): Promise<{
+    userId: string;
+    rating: number;
+    totalRatings: number;
+    userType: 'personal' | 'student';
+  }> {
+    // Verificar se o usuário existe e seu tipo
+    const user = await this.ratingsService.getUserById(userId);
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // Buscar rating baseado no tipo do usuário
+    let rating = 5.0; // Rating padrão como Uber
+    let totalRatings = 0;
+
+    if (user.userType === 'personal') {
+      // Buscar avaliações recebidas pelo personal (de alunos)
+      const personalRatings = await this.ratingsService.getReceivedRatings(userId, { type: RatingType.STUDENT_TO_PERSONAL });
+      if (personalRatings.length > 0) {
+        const totalRating = personalRatings.reduce((sum, r) => sum + r.rating, 0);
+        rating = totalRating / personalRatings.length;
+        rating = Math.max(1.0, Math.min(5.0, rating)); // Garantir entre 1.0 e 5.0
+        totalRatings = personalRatings.length;
+      }
+    } else {
+      // Buscar avaliações recebidas pelo aluno (de personais)
+      const studentRatings = await this.ratingsService.getReceivedRatings(userId, { type: RatingType.PERSONAL_TO_STUDENT });
+      if (studentRatings.length > 0) {
+        const totalRating = studentRatings.reduce((sum, r) => sum + r.rating, 0);
+        rating = totalRating / studentRatings.length;
+        rating = Math.max(1.0, Math.min(5.0, rating)); // Garantir entre 1.0 e 5.0
+        totalRatings = studentRatings.length;
+      }
+    }
+
+    return {
+      userId,
+      rating: Math.round(rating * 10) / 10, // Arredondar para 1 casa decimal
+      totalRatings,
+      userType: user.userType as 'personal' | 'student',
     };
   }
 }

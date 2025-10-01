@@ -211,7 +211,15 @@ export class AuthService {
 
       // Gerar tokens
       console.log('🎫 [AUTH] Gerando tokens JWT...');
-      const tokens = await this.generateTokens(newUser.id, newUser.email, newUser.userType);
+      const tokens = await this.generateTokens(
+        newUser.id, 
+        newUser.email, 
+        newUser.userType,
+        firstName,
+        lastName,
+        documentNumber,
+        crefParsed
+      );
       console.log('✅ [AUTH] Tokens gerados com sucesso');
 
       const response = {
@@ -260,7 +268,15 @@ export class AuthService {
     // Nota: Verificação de email é apenas no cadastro, não no login
 
     // Gerar tokens
-    const tokens = await this.generateTokens(user.id, user.email, user.userType);
+    const tokens = await this.generateTokens(
+      user.id, 
+      user.email, 
+      user.userType,
+      user.firstName,
+      user.lastName,
+      user.document,
+      user.cref
+    );
     return {
       user: {
         id: user.id,
@@ -342,7 +358,15 @@ export class AuthService {
         throw new UnauthorizedException('Usuário não encontrado');
       }
 
-      const tokens = await this.generateTokens(user.id, user.email, user.userType);
+      const tokens = await this.generateTokens(
+        user.id, 
+        user.email, 
+        user.userType,
+        user.firstName,
+        user.lastName,
+        user.document,
+        user.cref
+      );
 
       return {
         user: {
@@ -360,8 +384,16 @@ export class AuthService {
     }
   }
 
-  private async generateTokens(userId: string, email: string, userType: string) {
-    const payload = { sub: userId, email, userType };
+  private async generateTokens(userId: string, email: string, userType: string, firstName?: string, lastName?: string, document?: string, cref?: string) {
+    const payload = { 
+      sub: userId, 
+      email, 
+      userType,
+      firstName: firstName || '',
+      lastName: lastName || '',
+      document: document || '',
+      cref: cref || ''
+    };
 
     // Usar explicitamente o secret do .env para access token
     const accessToken = await this.jwtService.signAsync(payload, {

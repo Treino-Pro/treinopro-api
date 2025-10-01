@@ -19,6 +19,7 @@ import { HealthController } from './common/health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
+import { SupportModule } from './modules/support/support.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
@@ -52,6 +53,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     JobsModule,
     NotificationsModule,
     GamificationModule,
+    SupportModule,
     AdminModule,
     UploadModule,
     UsersModule,

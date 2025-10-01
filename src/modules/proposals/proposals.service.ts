@@ -1477,21 +1477,25 @@ export class ProposalsService {
         };
       }
 
-      // Sem buffer: apenas sobreposição real
-      const bufferStart = existingStartMinutes - bufferMinutes; // == existingStartMinutes
-      const bufferEnd = existingEndMinutes + bufferMinutes;     // == existingEndMinutes
-      
-      console.log(`  - Buffer início (min): ${bufferStart}`);
-      console.log(`  - Buffer fim (min): ${bufferEnd}`);
-      console.log(`  - Condição buffer: ${newStartMinutes} < ${bufferEnd} && ${newEndMinutes} > ${bufferStart} = ${newStartMinutes < bufferEnd && newEndMinutes > bufferStart}`);
-      
-      if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
-        console.log(`❌ [BUFFER_DEBUG] Buffer de 1h detectado`);
-        return { 
-          canSchedule: false, 
-          reason: 'buffer', 
-          conflictingItem: { type: 'proposal', ...proposal } 
-        };
+      // Verificar buffer apenas se bufferMinutes > 0
+      if (bufferMinutes > 0) {
+        const bufferStart = existingStartMinutes - bufferMinutes;
+        const bufferEnd = existingEndMinutes + bufferMinutes;
+        
+        console.log(`  - Buffer início (min): ${bufferStart}`);
+        console.log(`  - Buffer fim (min): ${bufferEnd}`);
+        console.log(`  - Condição buffer: ${newStartMinutes} < ${bufferEnd} && ${newEndMinutes} > ${bufferStart} = ${newStartMinutes < bufferEnd && newEndMinutes > bufferStart}`);
+        
+        if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
+          console.log(`❌ [BUFFER_DEBUG] Buffer de ${bufferMinutes}min detectado`);
+          return { 
+            canSchedule: false, 
+            reason: 'buffer', 
+            conflictingItem: { type: 'proposal', ...proposal } 
+          };
+        }
+      } else {
+        console.log(`  - Sem buffer (bufferMinutes = 0), apenas sobreposição direta verificada`);
       }
       
       console.log(`✅ [BUFFER_DEBUG] Proposta ${proposal.id} não conflita`);
@@ -1511,16 +1515,18 @@ export class ProposalsService {
         };
       }
 
-      // Verificar buffer de 1h antes e depois
-      const bufferStart = existingStartMinutes - bufferMinutes;
-      const bufferEnd = existingEndMinutes + bufferMinutes;
-      
-      if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
-        return { 
-          canSchedule: false, 
-          reason: 'buffer', 
-          conflictingItem: { type: 'class', ...classItem } 
-        };
+      // Verificar buffer apenas se bufferMinutes > 0
+      if (bufferMinutes > 0) {
+        const bufferStart = existingStartMinutes - bufferMinutes;
+        const bufferEnd = existingEndMinutes + bufferMinutes;
+        
+        if (newStartMinutes < bufferEnd && newEndMinutes > bufferStart) {
+          return { 
+            canSchedule: false, 
+            reason: 'buffer', 
+            conflictingItem: { type: 'class', ...classItem } 
+          };
+        }
       }
     }
 

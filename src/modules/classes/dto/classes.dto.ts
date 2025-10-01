@@ -1,4 +1,4 @@
-import { IsUUID, IsString, IsDateString, IsInt, IsEnum, IsOptional, Min, Max, IsArray } from 'class-validator';
+import { IsUUID, IsString, IsDateString, IsInt, IsEnum, IsOptional, Min, Max, IsArray, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -433,6 +433,30 @@ export class ClassResponseDto {
     modality: string;
     value: number;
   };
+
+  @ApiPropertyOptional({
+    description: 'URL da foto de perfil do personal trainer',
+    example: 'https://example.com/profile.jpg'
+  })
+  personalProfileImageUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Rating médio do personal trainer (sistema como Uber)',
+    example: 4.8
+  })
+  personalRating?: number;
+
+  @ApiPropertyOptional({
+    description: 'Tempo na plataforma do personal trainer (dinâmico como Uber)',
+    example: '4 dias'
+  })
+  personalTimeOnPlatform?: string;
+
+  @ApiPropertyOptional({
+    description: 'Rating médio do aluno (sistema como Uber)',
+    example: 4.9
+  })
+  studentRating?: number;
 }
 
 export class ClassStatsDto {
@@ -508,6 +532,13 @@ export class StartClassDto {
 }
 
 export class ConfirmClassStartDto {
+  @ApiProperty({
+    description: 'Se o aluno confirmou o início da aula',
+    example: true
+  })
+  @IsBoolean()
+  confirmed: boolean;
+
   @ApiPropertyOptional({
     description: 'Observações do aluno ao confirmar início',
     example: 'Confirmado, estou no local'

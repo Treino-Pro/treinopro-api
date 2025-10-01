@@ -525,4 +525,25 @@ export class RatingsService {
       completedAt: rating.completedAt,
     };
   }
+
+  // Buscar usuário por ID
+  async getUserById(userId: string): Promise<{ id: string; userType: string } | null> {
+    try {
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: {
+          id: true,
+          userType: true,
+        },
+      });
+
+      return user ? {
+        id: user.id,
+        userType: user.userType,
+      } : null;
+    } catch (error) {
+      console.error('❌ [RATINGS] Erro ao buscar usuário:', error);
+      return null;
+    }
+  }
 }

@@ -131,6 +131,10 @@ export class EmailService {
   }
 
   async sendTemplateEmail(to: string, template: string, data: Record<string, any>): Promise<void> {
+    this.logger.log(`📧 [EMAIL] Iniciando envio de email`);
+    this.logger.log(`📧 [EMAIL] Para: ${to}`);
+    this.logger.log(`📧 [EMAIL] Template: ${template}`);
+    
     const emailContent = this.getEmailTemplate(template, data);
     
     const mailOptions = {
@@ -141,7 +145,11 @@ export class EmailService {
       text: emailContent.text,
     };
 
+    this.logger.log(`📧 [EMAIL] Assunto: ${emailContent.subject}`);
+    this.logger.log(`📧 [EMAIL] De: ${mailOptions.from}`);
+
     try {
+      this.logger.log(`📧 [EMAIL] Enviando email...`);
       const result = await this.transporter.sendMail(mailOptions);
       
       // Log da URL de preview para desenvolvimento
@@ -152,7 +160,8 @@ export class EmailService {
         }
       }
 
-      this.logger.log(`✅ Email enviado com sucesso para ${to} (${template})`);
+      this.logger.log(`📧 [EMAIL] Email enviado! Message ID: ${result.messageId}`);
+      this.logger.log(`✅ [EMAIL] Email enviado com sucesso para ${to} (${template})`);
 
     } catch (error) {
       this.logger.error(`❌ Erro ao enviar email para ${to}:`, error);
@@ -310,6 +319,13 @@ export class EmailService {
           subject: 'Confirme seu cadastro no TreinoPro',
           html: this.getEmailVerificationHTML(data),
           text: this.getEmailVerificationText(data),
+        };
+
+      case 'problem-report':
+        return {
+          subject: '🚨 Novo Reporte de Problema - TreinoPro',
+          html: this.getProblemReportHTML(data),
+          text: this.getProblemReportText(data),
         };
 
       default:
@@ -596,5 +612,43 @@ export class EmailService {
 
   private getEmailVerificationText(data: any): string {
     return `TreinoPro - Verificação de Email\n\nOlá ${data.firstName},\n\nUse o código abaixo para verificar seu email:\n\nCódigo: ${data.code}\n\nEste código expira em 10 minutos.\n\nSe você não solicitou este código, ignore este email.\n\nAtenciosamente,\nEquipe TreinoPro`;
+  }
+
+  private getProblemReportHTML(data: any): string {
+    return `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa;">
+        <div style="background: #dc3545; color: white; padding: 20px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px;">🚨 Novo Reporte de Problema</h1>
+        </div>
+        
+        <div style="padding: 30px; background: white;">
+          <h2 style="color: #2c3e50; margin-top: 0;">Informações do Usuário</h2>
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <pre style="margin: 0; font-family: Arial, sans-serif; white-space: pre-line;">${data.userInfo}</pre>
+          </div>
+          
+          <h2 style="color: #2c3e50;">Detalhes do Problema</h2>
+          <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="color: #856404; margin-top: 0;">${data.title}</h3>
+            <p style="color: #856404; margin-bottom: 0; white-space: pre-line;">${data.description}</p>
+          </div>
+          
+          <div style="background: #e9ecef; padding: 15px; border-radius: 8px; font-size: 14px; color: #6c757d;">
+            <strong>Data do Reporte:</strong> ${data.reportDate}
+          </div>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6;">
+          <p style="margin: 0; color: #6c757d; font-size: 14px;">
+            TreinoPro - Sistema de Suporte<br>
+            <span style="font-size: 12px;">Este é um email automático do sistema.</span>
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private getProblemReportText(data: any): string {
+    return `TreinoPro - Novo Reporte de Problema\n\nINFORMAÇÕES DO USUÁRIO:\n${data.userInfo}\n\nDETALHES DO PROBLEMA:\nTítulo: ${data.title}\n\nDescrição:\n${data.description}\n\nData do Reporte: ${data.reportDate}\n\n---\nTreinoPro - Sistema de Suporte`;
   }
 }

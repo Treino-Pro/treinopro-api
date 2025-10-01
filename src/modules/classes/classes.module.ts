@@ -7,9 +7,10 @@ import { AuthModule } from '../auth/auth.module';
 import { GamificationModule } from '../gamification/gamification.module';
 import { ChatModule } from '../chat/chat.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { RatingsModule } from '../ratings/ratings.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, GamificationModule, ChatModule, PaymentsModule],
+  imports: [DatabaseModule, AuthModule, GamificationModule, ChatModule, PaymentsModule, RatingsModule],
   controllers: [ClassesController],
   providers: [ClassesService, ClassesCleanupService],
   exports: [ClassesService, ClassesCleanupService],

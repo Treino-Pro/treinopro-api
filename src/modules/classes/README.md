@@ -49,7 +49,7 @@ Este módulo gerencia o sistema de aulas e treinos entre alunos e personal train
 - Aula em andamento (aluno confirmou)
 - Timer ativo
 - Não pode ser editada
-- Só pode ser finalizada pelo personal
+- Pode ser finalizada pelo personal ou pelo aluno
 
 ### ✅ Completed (Concluída)
 - Aula finalizada com sucesso
