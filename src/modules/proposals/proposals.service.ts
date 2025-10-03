@@ -776,7 +776,13 @@ export class ProposalsService {
       this.chatGateway.server.emit('class_update', classData);
       console.log('✅ [PROPOSALS] Evento WebSocket emitido: class_created');
       console.log('🔌 [PROPOSALS] ChatGateway server disponível:', !!this.chatGateway.server);
-      console.log('👥 [PROPOSALS] Clientes conectados:', this.chatGateway.server.sockets.sockets.size);
+      
+      // Verificar se sockets está disponível antes de acessar
+      if (this.chatGateway.server?.sockets?.sockets) {
+        console.log('👥 [PROPOSALS] Clientes conectados:', this.chatGateway.server.sockets.sockets.size);
+      } else {
+        console.log('👥 [PROPOSALS] Sockets não disponível para contagem');
+      }
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao emitir eventos WebSocket:', error);

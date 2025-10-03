@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { Inject } from '@nestjs/common';
 import { eq, and, or, desc, count, sum, sql } from 'drizzle-orm';
 import { payments, paymentDisputes, paymentTransactions, userWallets, users, classes } from '../../database/schema';
-import { withdrawalRequests, withdrawalHistory } from '../../database/schema/withdrawals';
+import { withdrawalRequests, withdrawalHistory } from '../../database/schema/payments';
 import { MercadoPagoService, CreatePreferenceData } from './mercadopago.service';
 import { 
   CreatePaymentDto,

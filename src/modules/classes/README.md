@@ -138,7 +138,7 @@ Este módulo gerencia o sistema de aulas e treinos entre alunos e personal train
 ### Finalização de Aula
 - Apenas personal trainer pode finalizar
 - Aula deve estar ativa
-- Deve durar pelo menos 15 minutos
+- Deve durar pelo menos 1 minuto (configurado para testes)
 
 ## Integração com Outros Módulos
 

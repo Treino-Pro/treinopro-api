@@ -244,11 +244,11 @@ export const withdrawalRequests = pgTable('withdrawal_requests', {
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   fee: decimal('fee', { precision: 10, scale: 2 }).default('0.00').notNull(),
   netAmount: decimal('net_amount', { precision: 10, scale: 2 }).notNull(),
-  method: paymentMethodEnum('method').notNull(),
+  method: text('method').notNull(), // 'bank_transfer', 'mercado_pago'
   urgency: varchar('urgency', { length: 10 }).default('normal').notNull(), // normal, urgent
   
   // Status e processamento
-  status: withdrawalStatusEnum('status').default('pending').notNull(),
+  status: text('status').notNull().default('pending'), // 'pending', 'processing', 'completed', 'failed', 'cancelled'
   description: text('description'),
   transactionId: varchar('transaction_id', { length: 255 }), // ID da transação externa
   failureReason: text('failure_reason'),
@@ -261,6 +261,18 @@ export const withdrawalRequests = pgTable('withdrawal_requests', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   processedAt: timestamp('processed_at'),
   completedAt: timestamp('completed_at'),
+});
+
+// Tabela de histórico de ações de saque
+export const withdrawalHistory = pgTable('withdrawal_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  withdrawalId: uuid('withdrawal_id').references(() => withdrawalRequests.id).notNull(),
+  userId: uuid('user_id').references(() => users.id).notNull(),
+  action: varchar('action', { length: 50 }).notNull(), // 'requested', 'approved', 'rejected', 'processing', 'completed', 'failed'
+  description: text('description'),
+  adminId: uuid('admin_id').references(() => users.id), // Admin que processou
+  metadata: jsonb('metadata'), // Dados adicionais da ação
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Tabela de métodos de pagamento dos alunos

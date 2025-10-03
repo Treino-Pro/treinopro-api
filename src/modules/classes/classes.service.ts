@@ -126,7 +126,7 @@ export class ClassesService {
       proposalModality: proposalWithModality?.modalityName || null,
     };
 
-    return await this.formatClassResponse(classWithProposal, true); // Incluir proposal na criação
+    return await this.formatClassResponse(classWithProposal); // Incluir proposal na criação
   }
 
 
@@ -273,15 +273,15 @@ export class ClassesService {
       }
     }
 
-    // Verificar se a aula foi iniciada há pelo menos 15 minutos
+    // Verificar se a aula foi iniciada há pelo menos 1 minuto (para testes)
     if (classData.startedAt) {
       const now = new Date();
       const duration = (now.getTime() - classData.startedAt.getTime()) / (1000 * 60); // em minutos
       console.log('🔍 [COMPLETE_CLASS] Duração da aula:', duration, 'minutos');
 
-      if (duration < 15) {
-        console.log('❌ [COMPLETE_CLASS] Erro: Aula durou menos de 15 minutos');
-        throw new BadRequestException('A aula deve durar pelo menos 15 minutos');
+      if (duration < 1) {
+        console.log('❌ [COMPLETE_CLASS] Erro: Aula durou menos de 1 minuto');
+        throw new BadRequestException('A aula deve durar pelo menos 1 minuto');
       }
     } else {
       console.log('⚠️ [COMPLETE_CLASS] Aviso: Aula não tem startedAt definido');
@@ -296,6 +296,25 @@ export class ClassesService {
       })
       .where(eq(classes.id, id))
       .returning();
+
+    // ===== ATUALIZAR PROPOSTA VINCULADA PARA 'completed' =====
+    try {
+      const relatedProposal = await this.db.query.proposals.findFirst({
+        where: eq(proposals.id, classData.proposalId),
+        columns: { id: true, status: true },
+      });
+
+      if (relatedProposal && (relatedProposal.status === 'matched' || relatedProposal.status === 'accepted')) {
+        await this.db
+          .update(proposals)
+          .set({ status: 'completed', updatedAt: new Date() })
+          .where(eq(proposals.id, relatedProposal.id));
+
+        console.log('✅ [CLASSES] Proposta vinculada marcada como completed:', relatedProposal.id);
+      }
+    } catch (err) {
+      console.warn('⚠️ [CLASSES] Não foi possível atualizar status da proposta vinculada:', err?.message || err);
+    }
 
     // ===== INTEGRAÇÃO COM GAMIFICAÇÃO =====
     try {
@@ -540,12 +559,15 @@ export class ClassesService {
       throw new BadRequestException('A aula não está aguardando confirmação');
     }
 
+    const startTime = new Date();
+    const durationMs = classData.duration * 60 * 1000; // Converter minutos para milissegundos
+
     const [updatedClass] = await this.db
       .update(classes)
       .set({
         status: ClassStatus.ACTIVE,
-        confirmedAt: new Date(),
-        startedAt: new Date(),
+        confirmedAt: startTime,
+        startedAt: startTime,
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -564,7 +586,18 @@ export class ClassesService {
         timestamp: new Date(),
       });
       
+      // 🕐 NOVO: Evento de timer global para sincronização
+      this.chatGateway.server.emit('class_timer_started', {
+        classId,
+        startTime: startTime.toISOString(),
+        durationMs,
+        timestamp: startTime.getTime(),
+        personalId: classData.personalId,
+        studentId: userId,
+      });
+      
       console.log('✅ [CLASSES] Evento WebSocket emitido: class_confirmed');
+      console.log('🕐 [TIMER] Evento WebSocket emitido: class_timer_started');
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
@@ -835,10 +868,10 @@ export class ClassesService {
     }));
   }
 
-  private async formatClassResponse(classData: any, includeProposal: boolean = false): Promise<ClassResponseDto> {
+  private async formatClassResponse(classData: any): Promise<ClassResponseDto> {
     // Calcular dados reais do personal e aluno
     const personalStats = await this.getPersonalStats(classData.personalId);
-    const studentStats = await this.getStudentStats(classData.studentId);
+    const studentStats = await this.getStudentStats(classData.studentId, classData.id);
     
     console.log('🔍 [FORMAT_CLASS] Personal Stats:', personalStats);
     console.log('🔍 [FORMAT_CLASS] Personal Time On Platform:', personalStats.timeOnPlatform);
@@ -856,6 +889,7 @@ export class ClassesService {
       duration: classData.duration,
       status: classData.status,
       startedAt: classData.startedAt,
+      endTime: classData.completedAt, // Mapear completedAt para endTime
       completedAt: classData.completedAt,
       pendingConfirmationAt: classData.pendingConfirmationAt,
       confirmedAt: classData.confirmedAt,
@@ -881,8 +915,8 @@ export class ClassesService {
       studentRating: studentStats.rating,
     };
 
-    // Incluir objeto proposal apenas quando solicitado
-    if (includeProposal && classData.proposal) {
+    // Incluir objeto proposal se disponível
+    if (classData.proposal) {
       response.proposal = classData.proposal;
     }
 
@@ -1056,7 +1090,6 @@ export class ClassesService {
       }
       
       // Formatar resposta usando formatClassResponse
-      const includeProposal = getClassesDto.include?.includes('proposal') || false;
       const formattedClasses = await Promise.all(classesData.map(async (row: any) => {
         const classData = row.classes;
         const student = row.users;
@@ -1090,7 +1123,7 @@ export class ClassesService {
           proposalModality: proposal?.modalityName || null,
         };
         
-        return await this.formatClassResponse(classWithRelations, includeProposal);
+        return await this.formatClassResponse(classWithRelations);
       }));
       
       return {
@@ -1137,7 +1170,7 @@ export class ClassesService {
    * Tempo dinâmico: mostra dias, semanas, meses ou anos dependendo do tempo
    */
   private async getPersonalStats(personalId: string): Promise<{
-    rating: number;
+    rating: number | null;
     timeOnPlatform: string;
   }> {
     try {
@@ -1150,7 +1183,7 @@ export class ClassesService {
       });
 
       if (!personal) {
-        return { rating: 5.0, timeOnPlatform: '0 dias' }; // Rating padrão 5.0 como Uber
+        return { rating: null, timeOnPlatform: '0 dias' }; // null quando não encontrado
       }
 
       // Calcular tempo na plataforma (dinâmico como Uber)
@@ -1164,16 +1197,16 @@ export class ClassesService {
       console.log('🔍 [PERSONAL_STATS] Time On Platform:', timeOnPlatform);
 
       // Buscar rating médio do personal (sistema como Uber)
-      let rating = 5.0; // Rating padrão inicial (como Uber)
+      let rating = null; // Não há rating até ser avaliado
       try {
-        // Buscar avaliações recebidas pelo personal (de alunos)
+        // Buscar avaliações feitas pelo personal (para alunos)
         const personalRatings = await this.db
           .select({ rating: ratings.rating })
           .from(ratings)
           .where(
             and(
-              eq(ratings.ratedId, personalId),
-              eq(ratings.type, 'student_to_personal'),
+              eq(ratings.raterId, personalId),
+              eq(ratings.type, 'personal_to_student'),
               eq(ratings.status, 'completed')
             )
           );
@@ -1190,12 +1223,12 @@ export class ClassesService {
         
       } catch (error) {
         console.warn('⚠️ [CLASSES] Erro ao buscar rating do personal:', error);
-        // Em caso de erro, mantém rating padrão 5.0
-        rating = 5.0;
+        // Em caso de erro, mantém null (não avaliado)
+        rating = null;
       }
 
       const result = {
-        rating: Math.round(rating * 10) / 10, // Arredondar para 1 casa decimal
+        rating: rating ? Math.round(rating * 10) / 10 : null, // Arredondar para 1 casa decimal ou null
         timeOnPlatform,
       };
       
@@ -1203,7 +1236,7 @@ export class ClassesService {
       return result;
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao calcular stats do personal:', error);
-      return { rating: 5.0, timeOnPlatform: '0 dias' }; // Rating padrão em caso de erro
+      return { rating: null, timeOnPlatform: '0 dias' }; // null em caso de erro
     }
   }
 
@@ -1240,25 +1273,36 @@ export class ClassesService {
    * Calcula dados reais do aluno (rating)
    * Sistema de rating como Uber: começa com 5.0, varia baseado nas avaliações
    */
-  private async getStudentStats(studentId: string): Promise<{
-    rating: number;
+  private async getStudentStats(studentId: string, classId?: string): Promise<{
+    rating: number | null;
   }> {
     try {
       // Buscar rating médio do aluno (sistema como Uber)
-      let rating = 5.0; // Rating padrão inicial (como Uber)
+      let rating = null; // Não há rating até ser avaliado
       
       try {
-        // Buscar avaliações recebidas pelo aluno (de personais)
+        // Buscar avaliações feitas pelo aluno (para personais)
+        // Se classId for fornecido, buscar apenas avaliações dessa aula específica
+        const whereConditions = [
+          eq(ratings.raterId, studentId),
+          eq(ratings.type, 'student_to_personal'),
+          eq(ratings.status, 'completed')
+        ];
+        
+        if (classId) {
+          whereConditions.push(eq(ratings.classId, classId));
+        }
+        
         const studentRatings = await this.db
           .select({ rating: ratings.rating })
           .from(ratings)
-          .where(
-            and(
-              eq(ratings.ratedId, studentId),
-              eq(ratings.type, 'personal_to_student'),
-              eq(ratings.status, 'completed')
-            )
-          );
+          .where(and(...whereConditions));
+
+        console.log('🔍 [GET_STUDENT_STATS] StudentId:', studentId);
+        console.log('🔍 [GET_STUDENT_STATS] ClassId:', classId);
+        console.log('🔍 [GET_STUDENT_STATS] WhereConditions:', whereConditions);
+        console.log('🔍 [GET_STUDENT_STATS] StudentRatings encontradas:', studentRatings.length);
+        console.log('🔍 [GET_STUDENT_STATS] StudentRatings:', studentRatings);
 
         if (studentRatings.length > 0) {
           // Calcular média das avaliações recebidas
@@ -1267,21 +1311,24 @@ export class ClassesService {
           
           // Garantir que o rating fique entre 1.0 e 5.0
           rating = Math.max(1.0, Math.min(5.0, rating));
+          console.log('🔍 [GET_STUDENT_STATS] Rating calculado:', rating);
+        } else {
+          console.log('🔍 [GET_STUDENT_STATS] Nenhuma avaliação encontrada, rating = null');
         }
-        // Se não há avaliações, mantém 5.0 (rating inicial como Uber)
+        // Se não há avaliações, mantém null (não avaliado)
         
       } catch (error) {
         console.warn('⚠️ [CLASSES] Erro ao buscar rating do aluno:', error);
-        // Em caso de erro, mantém rating padrão 5.0
-        rating = 5.0;
+        // Em caso de erro, mantém null (não avaliado)
+        rating = null;
       }
 
       return {
-        rating: Math.round(rating * 10) / 10, // Arredondar para 1 casa decimal
+        rating: rating ? Math.round(rating * 10) / 10 : null, // Arredondar para 1 casa decimal ou null
       };
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao calcular stats do aluno:', error);
-      return { rating: 5.0 }; // Rating padrão em caso de erro
+      return { rating: null }; // null em caso de erro
     }
   }
 }

@@ -13,11 +13,13 @@ import {
   RatingType,
   RatingStatus
 } from './dto/ratings.dto';
+import { ChatGateway } from '../chat/chat.gateway';
 
 @Injectable()
 export class RatingsService {
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
+    private chatGateway: ChatGateway,
   ) {}
 
   // Criar nova avaliação
@@ -98,6 +100,27 @@ export class RatingsService {
         personalCommunication: createRatingDto.personalCommunication,
       })
       .returning();
+
+    // ===== EMITIR EVENTO WEBSOCKET =====
+    try {
+      const eventData = {
+        classId: createRatingDto.classId,
+        ratingType: createRatingDto.type,
+        raterId: userId,
+        ratedId: ratedUserId,
+        rating: createRatingDto.rating,
+        timestamp: new Date(),
+      };
+      
+      console.log('⭐ [RATINGS] Emitindo evento rating_created:', eventData);
+      
+      // Evento para atualizar estado das aulas
+      this.chatGateway.server.emit('rating_created', eventData);
+
+      console.log('✅ [RATINGS] Evento WebSocket emitido: rating_created');
+    } catch (error) {
+      console.error('❌ [RATINGS] Erro ao emitir evento WebSocket:', error);
+    }
 
     return this.formatRatingResponse(newRating);
   }
