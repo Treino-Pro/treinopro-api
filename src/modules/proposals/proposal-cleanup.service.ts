@@ -72,6 +72,14 @@ export class ProposalCleanupService {
       // Emitir evento para o aluno específico
       this.chatGateway.server.emit('proposal_expired', {
         action: 'proposal_expired',
+        proposal: {
+          id: proposal.id,
+          studentId: proposal.studentId,
+          locationName: proposal.locationName,
+          trainingDate: proposal.trainingDate,
+          trainingTime: proposal.trainingTime,
+          status: 'expired',
+        },
         proposalId: proposal.id,
         studentId: proposal.studentId,
         location: proposal.locationName,

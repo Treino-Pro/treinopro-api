@@ -166,6 +166,14 @@ export class ClassesController {
     return this.classesService.confirmClassStart(id, confirmDto, req.user.sub);
   }
 
+  @Post(':id/timer-expired')
+  async completeClassByTimerExpiration(
+    @Param('id') id: string,
+    @Request() req: any,
+  ): Promise<ClassResponseDto> {
+    return this.classesService.completeClassByTimerExpiration(id);
+  }
+
   @Post(':id/report-no-show')
   async reportNoShow(
     @Param('id') id: string,

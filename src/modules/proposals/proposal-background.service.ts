@@ -82,7 +82,22 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
           )
         );
 
-      const expiredProposals = candidates.filter((p: any) => isProposalExpired(now, p));
+      const expiredProposals = candidates.filter((p: any) => {
+        const isExpired = isProposalExpired(now, p);
+        
+        // Log específico para recontratações
+        if (p.targetPersonalId && isExpired) {
+          console.log(`⚠️ [BACKGROUND] ATENÇÃO: Proposta de recontratação sendo removida:`, {
+            id: p.id,
+            targetPersonalId: p.targetPersonalId,
+            trainingDate: p.trainingDate,
+            trainingTime: p.trainingTime,
+            now: now.toISOString(),
+          });
+        }
+        
+        return isExpired;
+      });
 
       if (expiredProposals.length === 0) {
         return; // Nenhuma proposta expirada
@@ -92,6 +107,8 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
 
       // Processar propostas expiradas (reembolso + deleção)
       for (const proposal of expiredProposals) {
+        this.logger.log(`🔄 [BACKGROUND] Processando proposta expirada: ${proposal.id}`);
+        
         // Processar reembolso se houver pagamento
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
           try {
@@ -130,9 +147,16 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
    */
   private async notifyProposalExpired(proposal: any) {
     try {
-      // Emitir evento para todos os usuários conectados
-      this.chatGateway.server.emit('proposal_expired', {
+      const eventData = {
         action: 'proposal_expired',
+        proposal: {
+          id: proposal.id,
+          studentId: proposal.studentId,
+          locationName: proposal.locationName,
+          trainingDate: proposal.trainingDate,
+          trainingTime: proposal.trainingTime,
+          status: 'expired',
+        },
         proposalId: proposal.id,
         studentId: proposal.studentId,
         location: proposal.locationName,
@@ -140,9 +164,21 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
         trainingTime: proposal.trainingTime,
         reason: 'Horário de início expirado sem match',
         timestamp: new Date(),
-      });
+      };
 
-      this.logger.log(`📡 [BACKGROUND] Notificação de expiração enviada para proposta ${proposal.id}`);
+      this.logger.log(`📡 [BACKGROUND] Emitindo evento proposal_expired para proposta ${proposal.id}`);
+      this.logger.log(`📡 [BACKGROUND] Dados do evento:`, JSON.stringify(eventData, null, 2));
+      
+      // Verificar se o servidor WebSocket está disponível
+      if (!this.chatGateway.server) {
+        this.logger.error('❌ [BACKGROUND] Servidor WebSocket não está disponível');
+        return;
+      }
+
+      // Emitir evento para todos os usuários conectados
+      this.chatGateway.server.emit('proposal_expired', eventData);
+
+      this.logger.log(`✅ [BACKGROUND] Notificação de expiração enviada para proposta ${proposal.id}`);
     } catch (error) {
       this.logger.error(`❌ [BACKGROUND] Erro ao notificar sobre proposta expirada ${proposal.id}:`, error);
     }

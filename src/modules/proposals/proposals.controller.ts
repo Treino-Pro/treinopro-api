@@ -27,6 +27,7 @@ import { ProposalCleanupService } from './proposal-cleanup.service';
 import { ProposalBackgroundService } from './proposal-background.service';
 import { 
   CreateProposalDto, 
+  CreateRecontractDto,
   UpdateProposalDto, 
   ProposalQueryDto, 
   ProposalResponseDto, 
@@ -82,6 +83,48 @@ export class ProposalsController {
       return result;
     } catch (error) {
       console.error('❌ [PROPOSALS CONTROLLER] Erro ao criar proposta:', error.message);
+      throw error;
+    }
+  }
+
+  @Post('recontract')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ 
+    summary: 'Criar proposta de recontratação direta',
+    description: 'Permite que um aluno crie uma proposta de recontratação direta para um personal trainer específico'
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Proposta de recontratação criada com sucesso',
+    type: ProposalResponseDto
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Dados inválidos ou data no passado'
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Apenas alunos podem criar propostas'
+  })
+  async createRecontract(
+    @Body() createRecontractDto: CreateRecontractDto,
+    @Request() req: any
+  ): Promise<ProposalResponseDto> {
+    try {
+      console.log('🚀 [PROPOSALS CONTROLLER] ===== INÍCIO DA RECONTRATAÇÃO =====');
+      console.log('👤 [PROPOSALS CONTROLLER] User ID:', req.user.sub);
+      console.log('🎯 [PROPOSALS CONTROLLER] Personal ID:', createRecontractDto.personalId);
+      console.log('📋 [PROPOSALS CONTROLLER] Dados recebidos do frontend:', JSON.stringify(createRecontractDto, null, 2));
+      
+      const result = await this.proposalsService.createRecontract(createRecontractDto, req.user.sub);
+      
+      console.log('✅ [PROPOSALS CONTROLLER] Recontratação criada com sucesso');
+      console.log('📤 [PROPOSALS CONTROLLER] Resposta enviada para o frontend:', JSON.stringify(result, null, 2));
+      console.log('🏁 [PROPOSALS CONTROLLER] ===== FIM DA RECONTRATAÇÃO =====');
+      
+      return result;
+    } catch (error) {
+      console.error('❌ [PROPOSALS CONTROLLER] Erro ao criar recontratação:', error.message);
       throw error;
     }
   }
@@ -464,6 +507,36 @@ export class ProposalsController {
         ? 'Serviço de background ativo e verificando propostas expiradas' 
         : 'Serviço de background inativo'
     };
+  }
+
+  @Get('debug/pending')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Debug - Listar propostas pendentes',
+    description: 'Endpoint temporário para debug - lista todas as propostas pendentes com detalhes'
+  })
+  async debugPendingProposals(): Promise<any> {
+    return this.proposalsService.debugPendingProposals();
+  }
+
+  @Post('debug/force-expire/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Debug - Forçar expiração de proposta',
+    description: 'Endpoint temporário para debug - força a expiração de uma proposta específica'
+  })
+  async forceExpireProposal(@Param('id') id: string): Promise<any> {
+    return this.proposalsService.forceExpireProposal(id);
+  }
+
+  @Post('debug/test-websocket')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Debug - Testar WebSocket',
+    description: 'Endpoint temporário para debug - testa se o WebSocket está funcionando'
+  })
+  async testWebSocket(): Promise<any> {
+    return this.proposalsService.testWebSocket();
   }
 
   @Post('background/force-cleanup')

@@ -157,6 +157,15 @@ export class CreateProposalDto {
   cardNickname?: string;
 }
 
+export class CreateRecontractDto extends CreateProposalDto {
+  @ApiProperty({
+    description: 'ID do personal trainer para recontratação direta',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @IsUUID()
+  personalId: string;
+}
+
 export class UpdateProposalDto {
   @ApiProperty({
     description: 'Status da proposta',

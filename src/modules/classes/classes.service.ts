@@ -338,11 +338,21 @@ export class ClassesService {
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
 
-      // Evento para ambos os usuários (aluno e personal)
-      this.chatGateway.server.emit('class_update', {
-        action: 'class_completed',
+      // Evento de timer expirado (mesmo que quando timer chega a 0)
+      this.chatGateway.server.emit('class_timer_expired', {
+        classId: id,
+        action: 'timer_expired',
         class: classResponse,
-        personalId: userId,
+        personalId: classData.personalId,
+        studentId: classData.studentId,
+        timestamp: new Date(),
+      });
+
+      // Evento de aula completada (mesmo que quando timer chega a 0)
+      this.chatGateway.server.emit('class_update', {
+        action: 'class_completed_by_timer',
+        class: classResponse,
+        personalId: classData.personalId,
         studentId: classData.studentId,
         timestamp: new Date(),
       });
@@ -359,9 +369,86 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
+      console.log('✅ [COMPLETE_CLASS] Eventos WebSocket emitidos (mesmo que timer expirado)');
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
       // Não falhar a operação por causa de problemas de WebSocket
+    }
+
+    return this.formatClassResponse(updatedClass);
+  }
+
+  // Finalizar aula automaticamente quando timer expira
+  async completeClassByTimerExpiration(classId: string): Promise<ClassResponseDto> {
+    console.log('⏰ [TIMER_EXPIRATION] Finalizando aula por expiração do timer:', classId);
+    
+    const classData = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+      with: {
+        student: true,
+        personal: true,
+        proposal: true,
+      },
+    });
+
+    if (!classData) {
+      throw new NotFoundException('Aula não encontrada');
+    }
+
+    if (classData.status !== ClassStatus.ACTIVE) {
+      console.log('⚠️ [TIMER_EXPIRATION] Aula não está ativa, ignorando expiração. Status:', classData.status);
+      return this.formatClassResponse(classData);
+    }
+
+    const [updatedClass] = await this.db
+      .update(classes)
+      .set({
+        status: ClassStatus.COMPLETED,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(classes.id, classId))
+      .returning();
+
+    // Atualizar proposta vinculada
+    try {
+      await this.db
+        .update(proposals)
+        .set({
+          status: 'completed',
+          updatedAt: new Date(),
+        })
+        .where(eq(proposals.id, classData.proposalId));
+    } catch (err) {
+      console.warn('⚠️ [TIMER_EXPIRATION] Erro ao atualizar proposta:', err);
+    }
+
+    // ===== EMITIR EVENTOS WEBSOCKET =====
+    try {
+      const classResponse = await this.formatClassResponse(updatedClass);
+
+      // Evento de timer expirado
+      this.chatGateway.server.emit('class_timer_expired', {
+        classId,
+        action: 'timer_expired',
+        class: classResponse,
+        personalId: classData.personalId,
+        studentId: classData.studentId,
+        timestamp: new Date(),
+      });
+
+      // Evento de aula completada
+      this.chatGateway.server.emit('class_update', {
+        action: 'class_completed_by_timer',
+        class: classResponse,
+        personalId: classData.personalId,
+        studentId: classData.studentId,
+        timestamp: new Date(),
+      });
+
+      console.log('✅ [TIMER_EXPIRATION] Eventos WebSocket emitidos');
+    } catch (error) {
+      console.error('❌ [TIMER_EXPIRATION] Erro ao emitir eventos WebSocket:', error);
     }
 
     return this.formatClassResponse(updatedClass);

@@ -28,6 +28,9 @@ export const proposals = pgTable('proposals', {
   // Referência à aula criada (quando aceita)
   classId: uuid('class_id'), // ID da aula criada automaticamente
   
+  // Campo para recontratação direta
+  targetPersonalId: uuid('target_personal_id'), // ID do personal específico para recontratação
+  
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

@@ -13,7 +13,22 @@ export function buildTrainingStartDate(trainingDate: Date | string, trainingTime
 
 export function isProposalExpired(now: Date, proposal: { trainingDate: Date | string; trainingTime?: string }): boolean {
   const start = buildTrainingStartDate(proposal.trainingDate, proposal.trainingTime);
-  return start.getTime() < now.getTime();
+  const isExpired = start.getTime() < now.getTime();
+  
+  // Log detalhado para debug
+  if (isExpired) {
+    console.log(`🔍 [PROPOSAL_UTILS] Proposta expirada detectada:`, {
+      proposalId: (proposal as any).id,
+      trainingDate: proposal.trainingDate,
+      trainingTime: proposal.trainingTime,
+      calculatedStart: start.toISOString(),
+      now: now.toISOString(),
+      isRecontract: !!(proposal as any).targetPersonalId,
+      timeDiff: now.getTime() - start.getTime(),
+    });
+  }
+  
+  return isExpired;
 }
 
 

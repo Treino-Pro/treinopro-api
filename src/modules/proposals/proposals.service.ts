@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { proposals, users, classes, payments } from '../../database/schema';
 import { eq, and, desc, gte, lte, ilike, count, sql, or, lt } from 'drizzle-orm';
-import { CreateProposalDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
+import { CreateProposalDto, CreateRecontractDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -247,9 +247,158 @@ export class ProposalsService {
     }
   }
 
+  async createRecontract(createRecontractDto: CreateRecontractDto, studentId: string): Promise<ProposalResponseDto> {
+    console.log('🚀 [PROPOSALS SERVICE] ===== INÍCIO DA RECONTRATAÇÃO =====');
+    console.log('👤 [PROPOSALS SERVICE] Student ID:', studentId);
+    console.log('🎯 [PROPOSALS SERVICE] Personal ID:', createRecontractDto.personalId);
+    
+    // Validar se o personal trainer existe
+    const [personal] = await this.db
+      .select()
+      .from(users)
+      .where(and(
+        eq(users.id, createRecontractDto.personalId),
+        eq(users.userType, 'personal'),
+        eq(users.status, 'active')
+      ))
+      .limit(1);
+
+    if (!personal) {
+      throw new NotFoundException('Personal trainer não encontrado ou inativo');
+    }
+
+    console.log('✅ [PROPOSALS SERVICE] Personal trainer encontrado:', personal.firstName, personal.lastName);
+
+    // Validar data (não pode ser no passado)
+    const trainingDate = new Date(createRecontractDto.trainingDate);
+    const now = new Date();
+    if (trainingDate < now) {
+      throw new BadRequestException('A data do treino não pode ser no passado');
+    }
+
+    // Buscar dados do aluno
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, studentId))
+      .limit(1);
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
+    
+    try {
+      // Criar preferência de pagamento específica para recontratação
+      const paymentResult = await this.createProposalPaymentPreference(
+        createRecontractDto,
+        user,
+        trainingDate
+      );
+
+      if (!paymentResult.success) {
+        throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
+      }
+
+      // ===== CRIAR PROPOSTA DE RECONTRATAÇÃO =====
+      const [proposal] = await this.db
+        .insert(proposals)
+        .values({
+          studentId,
+          locationId: createRecontractDto.locationId,
+          locationName: createRecontractDto.locationName,
+          locationAddress: createRecontractDto.locationAddress,
+          trainingDate: trainingDate,
+          trainingTime: createRecontractDto.trainingTime,
+          durationMinutes: createRecontractDto.durationMinutes,
+          modalityId: createRecontractDto.modalityId,
+          modalityName: createRecontractDto.modalityName,
+          price: createRecontractDto.price.toString(),
+          additionalNotes: createRecontractDto.additionalNotes || 'Recontratação direta',
+          status: ProposalStatus.PENDING,
+          // Campos de pagamento
+          paymentId: paymentResult.paymentId,
+          paymentMethod: createRecontractDto.paymentMethod,
+          paymentStatus: paymentResult.status,
+          // Campo específico para recontratação
+          targetPersonalId: createRecontractDto.personalId, // Novo campo para identificar recontratação
+        })
+        .returning();
+
+      // Agendar timeout para proposta se pagamento ainda está pendente
+      if (paymentResult.status === 'pending') {
+        await this.jobsService.scheduleProposalExpiration({
+          proposalId: proposal.id,
+          studentId: studentId,
+          createdAt: new Date(),
+          expirationTime: 30, // 30 minutos
+        });
+
+        // Agendar lembretes de pagamento
+        await this.schedulePaymentReminders(proposal.id);
+      }
+
+      // Retornar proposta com dados do pagamento e do usuário
+      const proposalResponse = this.mapToResponseDto(proposal, user);
+      
+      // ===== NOTIFICAR PERSONAL ESPECÍFICO =====
+      try {
+        // Emitir evento específico para o personal da recontratação
+        this.chatGateway.server.emit('recontract_proposal', {
+          action: 'recontract_created',
+          proposal: proposalResponse,
+          student: {
+            id: user?.id,
+            name: `${user?.firstName} ${user?.lastName}`,
+            profileImageUrl: user?.profileImageUrl,
+          },
+          personalId: createRecontractDto.personalId,
+          timestamp: new Date(),
+        });
+        
+        console.log('📡 [PROPOSALS SERVICE] Evento de recontratação emitido para personal:', createRecontractDto.personalId);
+        
+      } catch (error) {
+        console.error('❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:', error);
+        // Não falhar a operação por causa de problemas de WebSocket
+      }
+      
+      console.log('✅ [PROPOSALS SERVICE] Recontratação criada com sucesso:', proposal.id);
+      console.log('🏁 [PROPOSALS SERVICE] ===== FIM DA RECONTRATAÇÃO =====');
+      
+      return {
+        ...proposalResponse,
+        payment: {
+          paymentId: paymentResult.paymentId,
+          status: paymentResult.status,
+          method: createRecontractDto.paymentMethod,
+          amount: createRecontractDto.price,
+          preferenceId: paymentResult.preferenceId,
+          checkoutUrl: paymentResult.checkoutUrl,
+          sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
+          qrCode: paymentResult.qrCode,
+          qrCodeBase64: paymentResult.qrCodeBase64,
+          platformFee: paymentResult.platformFee,
+          personalAmount: paymentResult.personalAmount,
+          message: paymentResult.message,
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ [PROPOSALS SERVICE] Erro no pagamento da recontratação:', error.message);
+      
+      // Se falhar no pagamento, não criar a proposta
+      throw new BadRequestException(`Erro no pagamento: ${error.message}`);
+    }
+  }
+
   async getProposals(query: ProposalQueryDto, userId: string, userType: string): Promise<ProposalListResponseDto> {
     const { page = 1, limit = 10, status, modality, dateFrom, dateTo } = query;
     const offset = (page - 1) * limit;
+
+    // Limpeza automática é feita pelo ProposalBackgroundService a cada 30 segundos
 
     // Construir condições de filtro
     const conditions = [];
@@ -1619,6 +1768,153 @@ export class ProposalsService {
   }
 
   /**
+   * Debug: Lista todas as propostas pendentes com detalhes
+   */
+  async debugPendingProposals(): Promise<any> {
+    try {
+      const now = new Date();
+      
+      const pendingProposals = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.status, ProposalStatus.PENDING))
+        .orderBy(desc(proposals.createdAt));
+
+      const debugInfo = pendingProposals.map((p: any) => {
+        const start = new Date(p.trainingDate);
+        const [hhStr, mmStr] = String(p.trainingTime ?? '00:00').split(':');
+        const hh = Number(hhStr ?? 0);
+        const mm = Number(mmStr ?? 0);
+        start.setHours(hh, mm, 0, 0);
+        
+        return {
+          id: p.id,
+          trainingDate: p.trainingDate,
+          trainingTime: p.trainingTime,
+          calculatedStart: start.toISOString(),
+          now: now.toISOString(),
+          isExpired: start.getTime() < now.getTime(),
+          isRecontract: !!p.targetPersonalId,
+          targetPersonalId: p.targetPersonalId,
+          timeDiff: now.getTime() - start.getTime(),
+          createdAt: p.createdAt,
+        };
+      });
+
+      return {
+        total: pendingProposals.length,
+        now: now.toISOString(),
+        proposals: debugInfo,
+      };
+    } catch (error) {
+      console.error('❌ [DEBUG] Erro ao buscar propostas pendentes:', error);
+      throw error;
+    }
+  }
+
+  async forceExpireProposal(proposalId: string): Promise<any> {
+    try {
+      console.log('🧪 [DEBUG] Forçando expiração da proposta:', proposalId);
+      
+      // Buscar proposta
+      const [proposal] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, proposalId))
+        .limit(1);
+
+      if (!proposal) {
+        throw new Error('Proposta não encontrada');
+      }
+
+      if (proposal.status !== 'pending') {
+        throw new Error(`Proposta já foi processada (status: ${proposal.status})`);
+      }
+
+      // Deletar proposta
+      await this.db
+        .delete(proposals)
+        .where(eq(proposals.id, proposalId));
+
+      // Emitir evento WebSocket
+      this.chatGateway.server.emit('proposal_expired', {
+        action: 'proposal_expired',
+        proposal: {
+          id: proposal.id,
+          studentId: proposal.studentId,
+          locationName: proposal.locationName,
+          trainingDate: proposal.trainingDate,
+          trainingTime: proposal.trainingTime,
+          status: 'expired',
+        },
+        proposalId: proposal.id,
+        studentId: proposal.studentId,
+        location: proposal.locationName,
+        trainingDate: proposal.trainingDate,
+        trainingTime: proposal.trainingTime,
+        reason: 'Expiração forçada para teste',
+        timestamp: new Date(),
+      });
+
+      console.log('✅ [DEBUG] Proposta expirada e evento WebSocket emitido');
+
+      return {
+        success: true,
+        message: 'Proposta expirada com sucesso',
+        proposalId: proposal.id,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('❌ [DEBUG] Erro ao forçar expiração:', error);
+      throw error;
+    }
+  }
+
+  async testWebSocket(): Promise<any> {
+    try {
+      console.log('🧪 [DEBUG] Testando WebSocket...');
+      
+      // Verificar se o servidor WebSocket está disponível
+      if (!this.chatGateway.server) {
+        throw new Error('Servidor WebSocket não está disponível');
+      }
+
+      // Emitir evento de teste
+      const testData = {
+        action: 'proposal_expired',
+        proposal: {
+          id: 'test-proposal-id',
+          studentId: 'test-student-id',
+          locationName: 'Test Location',
+          trainingDate: new Date().toISOString(),
+          trainingTime: '12:00',
+          status: 'expired',
+        },
+        proposalId: 'test-proposal-id',
+        studentId: 'test-student-id',
+        location: 'Test Location',
+        trainingDate: new Date().toISOString(),
+        trainingTime: '12:00',
+        reason: 'Teste de WebSocket',
+        timestamp: new Date(),
+      };
+
+      this.chatGateway.server.emit('proposal_expired', testData);
+      console.log('✅ [DEBUG] Evento de teste WebSocket emitido');
+
+      return {
+        success: true,
+        message: 'Evento de teste WebSocket emitido',
+        data: testData,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('❌ [DEBUG] Erro ao testar WebSocket:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Verifica e limpa propostas expiradas em tempo real
    * Chamado quando propostas são consultadas para garantir dados atualizados
    */
@@ -1644,7 +1940,22 @@ export class ProposalsService {
           const hh = Number(hhStr ?? 0);
           const mm = Number(mmStr ?? 0);
           start.setHours(hh, mm, 0, 0);
-          return start.getTime() < now.getTime();
+          
+          const isExpired = start.getTime() < now.getTime();
+          
+          // Log para debug
+          if (isExpired) {
+            console.log(`🗑️ [PROPOSALS] Proposta expirada detectada:`, {
+              id: p.id,
+              trainingDate: p.trainingDate,
+              trainingTime: p.trainingTime,
+              calculatedStart: start.toISOString(),
+              now: now.toISOString(),
+              isRecontract: !!p.targetPersonalId
+            });
+          }
+          
+          return isExpired;
         } catch (_) {
           return false;
         }
@@ -1665,6 +1976,14 @@ export class ProposalsService {
         // Notificar o aluno sobre a expiração via WebSocket
         this.chatGateway.server.emit('proposal_expired', {
           action: 'proposal_expired',
+          proposal: {
+            id: proposal.id,
+            studentId: proposal.studentId,
+            locationName: proposal.locationName,
+            trainingDate: proposal.trainingDate,
+            trainingTime: proposal.trainingTime,
+            status: 'expired',
+          },
           proposalId: proposal.id,
           studentId: proposal.studentId,
           location: proposal.locationName,

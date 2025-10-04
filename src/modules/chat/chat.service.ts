@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
 import { messages, users, classes } from '../../database/schema';
-import { eq, and, desc, count, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
 import { SendMessageDto, GetMessagesDto, MarkAsReadDto, MessageResponseDto, ChatStatsDto } from './dto/chat.dto';
 
 @Injectable()
@@ -133,7 +133,7 @@ export class ChatService {
       .from(messages)
       .leftJoin(users, eq(messages.senderId, users.id))
       .where(eq(messages.classId, classId))
-      .orderBy(desc(messages.sentAt))
+      .orderBy(asc(messages.sentAt))
       .limit(limit)
       .offset(offset);
 
