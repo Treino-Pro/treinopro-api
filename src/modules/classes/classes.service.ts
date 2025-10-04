@@ -965,6 +965,12 @@ export class ClassesService {
     console.log('🔍 [FORMAT_CLASS] Class ID:', classData.id);
     console.log('🔍 [FORMAT_CLASS] Personal ID:', classData.personalId);
     
+    // Debug: verificar tipos dos campos
+    console.log('🔍 [FORMAT_CLASS] Debug tipos dos campos:');
+    console.log('  - duration:', classData.duration, 'tipo:', typeof classData.duration);
+    console.log('  - personalRating:', personalStats.rating, 'tipo:', typeof personalStats.rating);
+    console.log('  - studentRating:', studentStats.rating, 'tipo:', typeof studentStats.rating);
+    
     const response: any = {
       id: classData.id,
       proposalId: classData.proposalId,
@@ -973,7 +979,7 @@ export class ClassesService {
       location: classData.location,
       date: classData.date,
       time: classData.time,
-      duration: classData.duration,
+      duration: Number(classData.duration), // Garantir que seja número
       status: classData.status,
       startedAt: classData.startedAt,
       endTime: classData.completedAt, // Mapear completedAt para endTime
@@ -996,15 +1002,18 @@ export class ClassesService {
       proposalModality: classData.proposalModality || classData.proposal?.modality || null,
       // Dados reais do personal
       personalProfileImageUrl: classData.personal?.profileImageUrl || null,
-      personalRating: personalStats.rating,
+      personalRating: personalStats.rating ? Number(personalStats.rating) : null,
       personalTimeOnPlatform: personalStats.timeOnPlatform,
       // Dados reais do aluno
-      studentRating: studentStats.rating,
+      studentRating: studentStats.rating ? Number(studentStats.rating) : null,
     };
 
     // Incluir objeto proposal se disponível
     if (classData.proposal) {
-      response.proposal = classData.proposal;
+      response.proposal = {
+        ...classData.proposal,
+        value: Number(classData.proposal.value), // Garantir que seja número
+      };
     }
 
     console.log('🔍 [FORMAT_CLASS] Response personalTimeOnPlatform:', response.personalTimeOnPlatform);
@@ -1184,11 +1193,6 @@ export class ClassesService {
         const personal = personalMap[classData.personalId];
         
         // Debug: verificar status de cada aula
-        console.log(`🔍 [CLASSES] Aula ${classData.id}:`);
-        console.log(`  - Status: ${classData.status}`);
-        console.log(`  - DisputeStatus: ${classData.disputeStatus}`);
-        console.log(`  - NoShowReportedAt: ${classData.noShowReportedAt}`);
-        console.log(`  - NoShowReportedBy: ${classData.noShowReportedBy}`);
         
         // Preparar dados para formatClassResponse
         const classWithRelations = {
@@ -1206,6 +1210,7 @@ export class ClassesService {
           proposal: proposal ? {
             id: proposal.id,
             modality: proposal.modalityName,
+            value: proposal.price, // Corrigir: usar 'price' em vez de 'value'
           } : null,
           proposalModality: proposal?.modalityName || null,
         };
