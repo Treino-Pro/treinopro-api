@@ -464,6 +464,7 @@ export class WalletResponseDto {
     name: string;
     email: string;
     role: string;
+    userType?: string;
   };
   
   createdAt: Date;
@@ -916,5 +917,6 @@ export class WithdrawalResponseDto {
     name: string;
     email: string;
     role: string;
+    userType?: string;
   };
 }

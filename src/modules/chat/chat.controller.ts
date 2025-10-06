@@ -14,6 +14,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ChatService } from './chat.service';
+import { ChatGateway } from './chat.gateway';
 import {
   SendMessageDto,
   GetMessagesDto,
@@ -27,7 +28,10 @@ import {
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   @Post('messages')
   @HttpCode(HttpStatus.CREATED)
@@ -56,7 +60,21 @@ export class ChatController {
     @Request() req: any,
     @Body() sendMessageDto: SendMessageDto,
   ): Promise<MessageResponseDto> {
-    return this.chatService.sendMessage(req.user.sub, sendMessageDto);
+    const message = await this.chatService.sendMessage(req.user.sub, sendMessageDto);
+
+    // Emitir evento em tempo real para a sala da classe
+    try {
+      const classId = sendMessageDto.classId;
+      this.chatGateway.server?.to(`class_${classId}`).emit('new_message', {
+        classId,
+        message,
+        timestamp: new Date(),
+      });
+    } catch (_) {
+      // Não interromper o fluxo REST caso o WS não esteja disponível
+    }
+
+    return message;
   }
 
   @Get('messages')

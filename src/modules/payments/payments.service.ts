@@ -917,6 +917,7 @@ export class PaymentsService {
         id: wallet.user.id,
         name: wallet.user.name,
         email: wallet.user.email,
+        role: wallet.user.role,
         userType: wallet.user.userType,
       } : undefined,
       createdAt: wallet.createdAt,
@@ -1263,6 +1264,7 @@ export class PaymentsService {
         id: withdrawal.user.id,
         name: withdrawal.user.name,
         email: withdrawal.user.email,
+        role: withdrawal.user.role,
         userType: withdrawal.user.userType,
       } : undefined,
     };
