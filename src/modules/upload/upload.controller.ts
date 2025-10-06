@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  ExecutionContext,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -30,7 +31,6 @@ export class UploadController {
 
   @Post('profile-image')
   @UseInterceptors(FileInterceptor('file'))
-  @UseGuards(FileValidationGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Upload de foto de perfil' })
   @ApiConsumes('multipart/form-data')
@@ -71,6 +71,19 @@ export class UploadController {
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado');
     }
+    
+    // Validar arquivo manualmente
+    const fileValidationGuard = new FileValidationGuard();
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          file,
+          body: { ...uploadDto, category: FileCategory.PROFILE }
+        })
+      })
+    } as ExecutionContext;
+    
+    await fileValidationGuard.canActivate(mockContext);
     
     const userId = req.user?.id;
     return this.uploadService.uploadFile(file, { ...uploadDto, category: FileCategory.PROFILE }, userId);

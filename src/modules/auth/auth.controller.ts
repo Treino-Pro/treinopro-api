@@ -34,7 +34,21 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login realizado com sucesso' })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas' })
   async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+    try { console.log('🔐 [AUTH][Controller] HIT /auth/login', loginDto.email); } catch (_) {}
+    const result = await this.authService.login(loginDto);
+    try {
+      console.log('🔐 [AUTH][Controller] login result:', {
+        userId: result?.user?.id,
+        email: result?.user?.email,
+        firstName: result?.user?.firstName,
+        lastName: result?.user?.lastName,
+        userType: result?.user?.userType,
+        isVerified: result?.user?.isVerified,
+        hasAccessToken: Boolean(result?.accessToken),
+        hasRefreshToken: Boolean(result?.refreshToken),
+      });
+    } catch (_) {}
+    return result;
   }
 
   @Post('forgot-password')

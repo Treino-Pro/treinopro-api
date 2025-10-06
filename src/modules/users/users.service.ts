@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Inject } from '@nestjs/common';
 import { eq, and, or, like, desc, asc, count, sql } from 'drizzle-orm';
-import { users } from '../../database/schema';
+import { users, files } from '../../database/schema';
 import { 
   CreateUserDto, 
   UpdateUserDto, 
@@ -141,7 +141,23 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    return this.mapUserToResponse(user);
+    const response = this.mapUserToResponse(user);
+    try {
+      console.log('👤 [USERS] getProfile - Response DTO:', {
+        id: response.id,
+        email: response.email,
+        firstName: response.firstName,
+        lastName: response.lastName,
+        documentType: response.documentType,
+        documentNumber: response.documentNumber,
+        profileImageId: response.profileImageId,
+        profileImageUrl: (response as any).profileImageUrl,
+        userType: response.userType,
+        status: response.status,
+      });
+    } catch (_) {}
+
+    return response;
   }
 
   /**
@@ -254,6 +270,38 @@ export class UsersService {
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // Debug de documentos
+    try {
+      console.log('👤 [USERS] getProfile - userId:', userId);
+      console.log('👤 [USERS] documentType:', user.documentType);
+      console.log('👤 [USERS] documentNumber:', user.documentNumber);
+      console.log('👤 [USERS] completo:', user);
+    } catch (_) {}
+
+    // Enriquecer com URL da imagem de perfil, se existir
+    if (user.profileImageId) {
+      try {
+        const file = await this.db.query.files.findFirst({
+          where: eq(files.id, user.profileImageId),
+        });
+        if (file?.url) {
+          const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+          // Reescrever a base da URL para garantir que use o BASE_URL atual
+          try {
+            const original = new URL(file.url);
+            const normalizedBase = new URL(baseUrl);
+            const normalizedUrl = `${normalizedBase.origin}${original.pathname}`;
+            (user as any).profileImageUrl = normalizedUrl;
+          } catch (_) {
+            // Se parsing falhar, usar fallback simples
+            (user as any).profileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ Falha ao buscar URL da imagem de perfil:', e);
+      }
     }
 
     return this.mapUserToResponse(user);
@@ -394,6 +442,8 @@ export class UsersService {
    * Mapear usuário para DTO de resposta
    */
   private mapUserToResponse(user: any): UserResponseDto {
+    // Se houver profileImageId, tentar buscar URL pública do arquivo
+    const profileImageUrl = user.profileImageUrl || user.profileImage?.url || user.imageUrl || null;
     return {
       id: user.id,
       email: user.email,
@@ -406,6 +456,10 @@ export class UsersService {
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
       profileImageId: user.profileImageId,
+      documentType: user.documentType,
+      documentNumber: user.documentNumber,
+      // Campo adicional amigável ao app:
+      ...(profileImageUrl ? { profileImageUrl } : {}),
       cref: user.cref,
       crefValidated: user.crefValidated,
       specialties: user.specialties,

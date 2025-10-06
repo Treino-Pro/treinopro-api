@@ -240,8 +240,26 @@ export class UsersController {
     description: 'Usuário não encontrado'
   })
   async getProfile(@Request() req: any): Promise<UserResponseDto> {
-    const userId = req.user.sub;
-    return this.usersService.getProfile(userId);
+    try { console.log('👤 [USERS][Controller] HIT /users/profile/me'); } catch (_) {}
+    const userId = req.user?.id ?? req.user?.sub;
+    try {
+      console.log('👤 [USERS][Controller] user payload:', req.user);
+      console.log('👤 [USERS][Controller] resolved userId:', userId);
+    } catch (_) {}
+    const response = await this.usersService.getProfile(userId);
+    try {
+      console.log('👤 [USERS][Controller] Response:', {
+        id: response.id,
+        email: response.email,
+        firstName: response.firstName,
+        lastName: response.lastName,
+        documentType: response.documentType,
+        documentNumber: response.documentNumber,
+        profileImageId: response.profileImageId,
+        profileImageUrl: (response as any).profileImageUrl,
+      });
+    } catch (_) {}
+    return response;
   }
 
   @Put('profile/me')

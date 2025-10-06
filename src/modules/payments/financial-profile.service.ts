@@ -79,7 +79,7 @@ export class FinancialProfileService {
       where: eq(users.id, userId),
     });
 
-    if (!user || user.role !== 'personal') {
+    if (!user || user.userType !== 'personal') {
       throw new ForbiddenException('Apenas personal trainers podem configurar perfil financeiro');
     }
 

@@ -36,6 +36,12 @@ export class FileValidationGuard implements CanActivate {
     console.log('- request.body:', request.body);
     console.log('- request.headers:', request.headers);
     console.log('- category:', category);
+    console.log('- file details:', file ? {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      fieldname: file.fieldname
+    } : 'null');
 
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado');

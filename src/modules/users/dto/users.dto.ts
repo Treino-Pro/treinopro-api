@@ -285,6 +285,12 @@ export class UserResponseDto {
   @ApiPropertyOptional({ example: 'uuid-da-imagem-perfil', description: 'ID da imagem de perfil' })
   profileImageId?: string;
 
+  @ApiPropertyOptional({ example: 'CPF', description: 'Tipo de documento' })
+  documentType?: string;
+
+  @ApiPropertyOptional({ example: '123.456.789-00', description: 'Número do documento (CPF/CNH/RG)' })
+  documentNumber?: string;
+
   @ApiPropertyOptional({ example: 'SP-106227', description: 'Número do CREF' })
   cref?: string;
 

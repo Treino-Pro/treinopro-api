@@ -1,10 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
-import { files } from '../../database/schema';
+import { files, users } from '../../database/schema';
 import { FileStorageUtil } from './utils/file-storage.util';
 import { ImageProcessingUtil } from './utils/image-processing.util';
 import { FileUploadResult, FileValidationOptions, ImageProcessingOptions } from './interfaces/file.interface';
-import { UploadFileDto, FileResponseDto } from './dto/upload.dto';
+import { UploadFileDto, FileResponseDto, FileCategory } from './dto/upload.dto';
 
 @Injectable()
 export class UploadService {
@@ -81,6 +81,18 @@ export class UploadService {
         isProcessed: uploadDto.category !== 'temp',
         metadata: uploadDto.metadata
       }).returning();
+
+      // Se for imagem de perfil e tivermos userId, associar ao usuário
+      try {
+        if ((uploadDto.category === FileCategory.PROFILE) && userId) {
+          await this.db.update(users)
+            .set({ profileImageId: fileRecord[0].id })
+            .where(eq(users.id, userId));
+        }
+      } catch (e) {
+        // Não falhar o upload caso a associação falhe; apenas logar
+        console.error('⚠️ Falha ao associar profileImageId ao usuário:', e);
+      }
 
       return this.mapToFileResponseDto(fileRecord[0]);
     } catch (error) {
