@@ -60,6 +60,11 @@ export class GamificationService {
 
   private emitProfileUpdate(action: string, payload: Record<string, any>, userId: string): void {
     try {
+      this.logger.log(`🎯 [GAMIFICATION] ===== EMITINDO EVENTO WEBSOCKET =====`);
+      this.logger.log(`🎯 [GAMIFICATION] Action: ${action}`);
+      this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
+      this.logger.log(`🎯 [GAMIFICATION] Payload: ${JSON.stringify(payload)}`);
+      
       const eventId = randomUUID();
       const now = Date.now();
       // Limpeza de TTL
@@ -77,13 +82,17 @@ export class GamificationService {
         timestamp: new Date(),
       };
 
+      this.logger.log(`🎯 [GAMIFICATION] EventPayload: ${JSON.stringify(eventPayload)}`);
+
       // Persistir no Event Store (melhor esforço, ignora se tabela não existe)
       this.persistEventToStore(eventId, userId, action, eventPayload).catch((err) => {
         this.logger.warn(`⚠️ [GAMIFICATION] EventStore indisponível: ${err?.message || err}`);
       });
 
-      // Emitir em tempo real
-      this.chatGateway.server.emit('profile_update', eventPayload);
+      // Emitir em tempo real - usar o action como tipo de evento
+      this.logger.log(`🎯 [GAMIFICATION] Emitindo evento WebSocket: ${action}`);
+      this.chatGateway.server.emit(action, eventPayload);
+      this.logger.log(`🎯 [GAMIFICATION] Evento WebSocket emitido com sucesso`);
 
       // Enfileirar para processamento assíncrono
       try {
@@ -96,6 +105,8 @@ export class GamificationService {
       this.persistDailyMetric(userId, action, eventPayload).catch((err) => {
         this.logger.warn(`⚠️ [GAMIFICATION] Metrics indisponível: ${err?.message || err}`);
       });
+      
+      this.logger.log(`✅ [GAMIFICATION] ===== EVENTO WEBSOCKET FINALIZADO =====`);
     } catch (error) {
       this.logger.error('❌ [GAMIFICATION] Erro ao emitir evento WebSocket:', error as any);
     }
@@ -566,8 +577,14 @@ export class GamificationService {
 
   async updateMissionProgress(progressDto: MissionProgressDto): Promise<UserMissionResponseDto[]> {
     const { userId, action, count, metadata } = progressDto;
+    
+    this.logger.log(`🎯 [GAMIFICATION] ===== ATUALIZANDO PROGRESSO DE MISSÕES =====`);
+    this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
+    this.logger.log(`🎯 [GAMIFICATION] Action: ${action}`);
+    this.logger.log(`🎯 [GAMIFICATION] Count: ${count}`);
 
     // Buscar missões ativas do usuário que correspondem à ação
+    this.logger.log(`🎯 [GAMIFICATION] Buscando missões ativas...`);
     const activeMissions = await this.db
       .select()
       .from(userMissions)
@@ -578,14 +595,23 @@ export class GamificationService {
         eq(missions.action, action)
       ));
 
+    this.logger.log(`🎯 [GAMIFICATION] Missões ativas encontradas: ${activeMissions.length}`);
+
     const updatedMissions = [];
 
     for (const userMission of activeMissions) {
+      this.logger.log(`🎯 [GAMIFICATION] Processando missão: ${userMission.missions.title}`);
+      this.logger.log(`🎯 [GAMIFICATION] Progresso atual: ${userMission.user_missions.progress}`);
+      this.logger.log(`🎯 [GAMIFICATION] Total necessário: ${userMission.missions.requirements.count}`);
+      
       const newProgress = userMission.user_missions.progress + count;
       const totalRequired = userMission.missions.requirements.count;
 
+      this.logger.log(`🎯 [GAMIFICATION] Novo progresso: ${newProgress}/${totalRequired}`);
+
       if (newProgress >= totalRequired) {
         // Missão completada
+        this.logger.log(`🎯 [GAMIFICATION] Missão completada! Atualizando status...`);
         await this.db
           .update(userMissions)
           .set({
@@ -597,6 +623,7 @@ export class GamificationService {
           .where(eq(userMissions.id, userMission.user_missions.id));
 
         // Dar XP ao usuário
+        this.logger.log(`🎯 [GAMIFICATION] Adicionando XP de recompensa: ${userMission.missions.xpReward}`);
         await this.addXP(userId, {
           xpAmount: userMission.missions.xpReward,
           source: XPSource.MISSION,
@@ -618,6 +645,7 @@ export class GamificationService {
         updatedMissions.push(completedMissionData);
 
         // ===== EVENTO WEBSOCKET PARA MISSÃO COMPLETADA =====
+        this.logger.log(`🎯 [GAMIFICATION] Emitindo evento WebSocket mission_completed...`);
         this.emitProfileUpdate('mission_completed', {
           profile: {
             mission: {
@@ -631,11 +659,15 @@ export class GamificationService {
             }
           },
         }, userId);
+        this.logger.log(`🎯 [GAMIFICATION] Evento WebSocket emitido com sucesso`);
 
         // Atribuir próxima missão automaticamente
+        this.logger.log(`🎯 [GAMIFICATION] Atribuindo próxima missão...`);
         await this.assignNextMission(userId);
+        this.logger.log(`🎯 [GAMIFICATION] Próxima missão atribuída`);
       } else {
         // Atualizar progresso
+        this.logger.log(`🎯 [GAMIFICATION] Atualizando progresso da missão...`);
         await this.db
           .update(userMissions)
           .set({
@@ -652,6 +684,7 @@ export class GamificationService {
         });
 
         // ===== EVENTO WEBSOCKET PARA PROGRESSO DE MISSÃO =====
+        this.logger.log(`🎯 [GAMIFICATION] Emitindo evento WebSocket mission_progressed...`);
         this.emitProfileUpdate('mission_progressed', {
           profile: {
             mission: {
@@ -664,9 +697,12 @@ export class GamificationService {
             }
           },
         }, userId);
+        this.logger.log(`🎯 [GAMIFICATION] Evento WebSocket mission_progressed emitido`);
+        this.logger.log(`🎯 [GAMIFICATION] Progresso atualizado: ${newProgress}/${totalRequired}`);
       }
     }
 
+    this.logger.log(`✅ [GAMIFICATION] ===== ATUALIZAÇÃO DE MISSÕES FINALIZADA =====`);
     return updatedMissions;
   }
 
@@ -1129,29 +1165,59 @@ export class GamificationService {
   // ===== MÉTODOS DE INTEGRAÇÃO =====
 
   async processClassCompletion(userId: string, classId: string): Promise<void> {
+    this.logger.log(`🎯 [GAMIFICATION] ===== INICIANDO PROCESSAMENTO DE CONCLUSÃO =====`);
+    this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
+    this.logger.log(`🎯 [GAMIFICATION] ClassId: ${classId}`);
+    
     // Dar XP por completar aula
+    this.logger.log(`🎯 [GAMIFICATION] Adicionando XP por aula completada...`);
     await this.addXP(userId, {
       xpAmount: 50, // XP fixo por aula completada
       source: XPSource.CLASS_COMPLETION,
       sourceId: classId,
       description: 'Aula completada',
     });
+    this.logger.log(`🎯 [GAMIFICATION] XP adicionado com sucesso`);
 
     // Atualizar progresso de missões relacionadas a aulas
-    await this.updateMissionProgress({
+    this.logger.log(`🎯 [GAMIFICATION] Atualizando progresso de missões...`);
+    const updatedMissions = await this.updateMissionProgress({
       userId,
-      action: 'complete_class',
+      action: 'attend_class',
       count: 1,
       metadata: { classId },
     });
+    this.logger.log(`🎯 [GAMIFICATION] Progresso de missões atualizado`);
 
     // Atualizar progresso de conquistas relacionadas a aulas
+    this.logger.log(`🎯 [GAMIFICATION] Atualizando progresso de conquistas...`);
     await this.updateAchievementProgress({
       userId,
-      action: 'complete_class',
+      action: 'attend_class',
       count: 1,
       metadata: { classId },
     });
+    this.logger.log(`🎯 [GAMIFICATION] Progresso de conquistas atualizado`);
+    
+    // Emitir evento consolidado com as missões atualizadas para resolver race condition
+    this.logger.log(`🎯 [GAMIFICATION] Emitindo evento consolidado de conclusão...`);
+    this.emitProfileUpdate('class_completion_processed', {
+      profile: {
+        classId,
+        missionsUpdated: updatedMissions.map(m => ({
+          id: m.mission.id,
+          title: m.mission.title,
+          progress: m.progress,
+          totalRequired: m.totalRequired,
+          status: m.status,
+        })),
+        xpGained: 50,
+        source: 'class_completion',
+      },
+    }, userId);
+    this.logger.log(`🎯 [GAMIFICATION] Evento consolidado emitido com sucesso`);
+    
+    this.logger.log(`✅ [GAMIFICATION] ===== PROCESSAMENTO DE CONCLUSÃO FINALIZADO =====`);
   }
 
   async processDailyLogin(userId: string): Promise<void> {

@@ -9,6 +9,7 @@ import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePassw
 import { CrefService } from '../cref/cref.service';
 import { EmailVerificationService } from './services/email-verification.service';
 import { GamificationService } from '../gamification/gamification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +20,7 @@ export class AuthService {
     private crefService: CrefService,
     private emailVerificationService: EmailVerificationService,
     private gamificationService: GamificationService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -293,26 +295,87 @@ export class AuthService {
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
+    console.log(`🔐 [AUTH] Iniciando processo de recuperação de senha para: ${email}`);
+
     const user = await this.db.query.users.findFirst({
       where: eq(users.email, email),
     });
 
     if (!user) {
+      console.log(`❌ [AUTH] Usuário não encontrado para email: ${email}`);
       // Por segurança, não revelar se o email existe ou não
       return { message: 'Se o email existir, você receberá instruções para redefinir sua senha' };
     }
 
-    // TODO: Implementar envio de email com token de reset
-    // Por enquanto, apenas retornar sucesso
-    return { message: 'Se o email existir, você receberá instruções para redefinir sua senha' };
+    console.log(`✅ [AUTH] Usuário encontrado: ${user.firstName} ${user.lastName}`);
+
+    try {
+      // Usar o método específico para recuperação de senha
+      const result = await this.emailVerificationService.sendPasswordResetCode(email, user.firstName);
+      
+      console.log(`📧 [AUTH] Código de recuperação enviado para ${email}`);
+      console.log(`⏰ [AUTH] Expira em: ${result.expiresAt}`);
+      
+      return { 
+        message: 'Código de recuperação enviado para seu email',
+        expiresAt: result.expiresAt
+      };
+    } catch (error) {
+      console.error(`❌ [AUTH] Erro ao enviar código de recuperação para ${email}:`, error);
+      // Por segurança, não revelar o erro específico
+      return { message: 'Se o email existir, você receberá instruções para redefinir sua senha' };
+    }
   }
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     const { password, token } = resetPasswordDto;
 
-    // TODO: Validar token de reset
+    console.log(`🔐 [AUTH] Iniciando reset de senha com token: ${token}`);
+
+    // TODO: Implementar validação de token de reset
     // Por enquanto, apenas retornar erro
     throw new BadRequestException('Funcionalidade de reset de senha ainda não implementada');
+  }
+
+  async resetPasswordWithCode(email: string, code: string, newPassword: string) {
+    console.log(`🔐 [AUTH] Iniciando reset de senha para: ${email}`);
+
+    try {
+      // Verificar se o código já foi verificado anteriormente
+      const isVerified = await this.emailVerificationService.isCodeVerified(email);
+      
+      if (!isVerified) {
+        console.log(`❌ [AUTH] Código não foi verificado para ${email}`);
+        throw new BadRequestException('Código não foi verificado. Complete a verificação primeiro');
+      }
+
+      console.log(`✅ [AUTH] Código já verificado para ${email}`);
+
+      // Buscar usuário
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.email, email),
+      });
+
+      if (!user) {
+        console.log(`❌ [AUTH] Usuário não encontrado para email: ${email}`);
+        throw new BadRequestException('Usuário não encontrado');
+      }
+
+      // Hash da nova senha
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Atualizar senha no banco
+      await this.db.update(users)
+        .set({ passwordHash: hashedPassword, updatedAt: new Date() })
+        .where(eq(users.email, email));
+
+      console.log(`✅ [AUTH] Senha atualizada com sucesso para ${email}`);
+
+      return { message: 'Senha alterada com sucesso' };
+    } catch (error) {
+      console.error(`❌ [AUTH] Erro ao resetar senha para ${email}:`, error);
+      throw error;
+    }
   }
 
   async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {
@@ -502,4 +565,104 @@ export class AuthService {
       }
     };
   }
+
+  async sendGuardianAuthorizationEmail(guardianName: string, guardianEmail: string, studentName: string) {
+    console.log('📧 [AUTH] Enviando email de autorização para responsável...');
+    console.log(`📧 [AUTH] Responsável: ${guardianName} (${guardianEmail})`);
+    console.log(`📧 [AUTH] Aluno: ${studentName}`);
+
+    try {
+      // Gerar OTP de 6 dígitos
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Armazenar OTP temporariamente (em produção, usar Redis ou banco de dados)
+      // Por enquanto, vamos usar um Map em memória
+      if (!this.guardianOtpStorage) {
+        this.guardianOtpStorage = new Map();
+      }
+      
+      this.guardianOtpStorage.set(guardianEmail, {
+        code: otpCode,
+        createdAt: new Date(),
+        studentName: studentName,
+        guardianName: guardianName
+      });
+
+      // Enviar email usando o serviço de notificações
+      await this.notificationsService.sendEmailToAddress(
+        guardianEmail,
+        'guardian-authorization',
+        {
+          guardianName: guardianName,
+          studentName: studentName,
+          otpCode: otpCode
+        }
+      );
+
+      console.log(`✅ [AUTH] Email de autorização enviado para ${guardianEmail}`);
+
+      return {
+        message: 'Email de autorização enviado com sucesso',
+        otpCode: otpCode // Apenas para desenvolvimento/teste
+      };
+
+    } catch (error) {
+      console.error('❌ [AUTH] Erro ao enviar email de autorização:', error);
+      throw new BadRequestException('Erro ao enviar email de autorização');
+    }
+  }
+
+  async verifyGuardianOtp(guardianEmail: string, otpCode: string) {
+    console.log('🔐 [AUTH] Verificando OTP do responsável...');
+    console.log(`🔐 [AUTH] Email: ${guardianEmail}`);
+    console.log(`🔐 [AUTH] Código: ${otpCode}`);
+
+    try {
+      if (!this.guardianOtpStorage) {
+        throw new BadRequestException('Código não encontrado ou expirado');
+      }
+
+      const storedData = this.guardianOtpStorage.get(guardianEmail);
+      
+      if (!storedData) {
+        throw new BadRequestException('Código não encontrado ou expirado');
+      }
+
+      // Verificar se o código expirou (24 horas)
+      const now = new Date();
+      const timeDiff = now.getTime() - storedData.createdAt.getTime();
+      const hoursDiff = timeDiff / (1000 * 3600);
+
+      if (hoursDiff > 24) {
+        this.guardianOtpStorage.delete(guardianEmail);
+        throw new BadRequestException('Código expirado. Solicite um novo código.');
+      }
+
+      if (storedData.code !== otpCode) {
+        throw new BadRequestException('Código inválido');
+      }
+
+      // Remover o código após verificação bem-sucedida
+      this.guardianOtpStorage.delete(guardianEmail);
+
+      console.log(`✅ [AUTH] OTP do responsável verificado com sucesso`);
+
+      return {
+        message: 'Autorização confirmada com sucesso',
+        verified: true
+      };
+
+    } catch (error) {
+      console.error('❌ [AUTH] Erro ao verificar OTP do responsável:', error);
+      throw error;
+    }
+  }
+
+  // Map temporário para armazenar OTPs (em produção, usar Redis)
+  private guardianOtpStorage: Map<string, {
+    code: string;
+    createdAt: Date;
+    studentName: string;
+    guardianName: string;
+  }> | null = null;
 }

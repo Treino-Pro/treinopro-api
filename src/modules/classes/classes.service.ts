@@ -423,6 +423,22 @@ export class ClassesService {
       console.warn('⚠️ [TIMER_EXPIRATION] Erro ao atualizar proposta:', err);
     }
 
+    // ===== PROCESSAR GAMIFICAÇÃO =====
+    try {
+      console.log('🎯 [TIMER_EXPIRATION] Processando gamificação para aluno e personal...');
+      
+      // Processar gamificação para o aluno
+      await this.gamificationService.processClassCompletion(classData.studentId, classId);
+      console.log('✅ [TIMER_EXPIRATION] Gamificação processada para aluno:', classData.studentId);
+      
+      // Processar gamificação para o personal trainer
+      await this.gamificationService.processClassCompletion(classData.personalId, classId);
+      console.log('✅ [TIMER_EXPIRATION] Gamificação processada para personal:', classData.personalId);
+      
+    } catch (error) {
+      console.error('❌ [TIMER_EXPIRATION] Erro ao processar gamificação:', error);
+    }
+
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);

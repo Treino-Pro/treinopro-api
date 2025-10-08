@@ -226,9 +226,9 @@ describe('GamificationService', () => {
         description: 'Complete 5 classes this week',
         xpReward: 100,
         type: MissionType.WEEKLY,
-        action: 'complete_class',
+        action: 'attend_class',
         requirements: {
-          action: 'complete_class',
+          action: 'attend_class',
           count: 5,
           timeframe: 'week',
         },
@@ -261,9 +261,9 @@ describe('GamificationService', () => {
         description: 'Complete your first class',
         xpReward: 50,
         category: AchievementCategory.TRAINING,
-        action: 'complete_class',
+        action: 'attend_class',
         requirements: {
-          action: 'complete_class',
+          action: 'attend_class',
           count: 1,
         },
       };

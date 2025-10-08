@@ -252,6 +252,13 @@ export class EmailService {
           text: this.getRefundProcessedText(data),
         };
 
+      case 'guardian-authorization':
+        return {
+          subject: 'Autorização de uso do TreinoPro pelo seu filho(a)',
+          html: this.getGuardianAuthorizationHTML(data),
+          text: this.getGuardianAuthorizationText(data),
+        };
+
       case 'verification-code':
         return {
           subject: '🔐 Seu código de verificação - TreinoPro',
@@ -319,6 +326,13 @@ export class EmailService {
           subject: 'Confirme seu cadastro no TreinoPro',
           html: this.getEmailVerificationHTML(data),
           text: this.getEmailVerificationText(data),
+        };
+
+      case 'password-reset':
+        return {
+          subject: '🔐 Recuperação de Senha - TreinoPro',
+          html: this.getPasswordResetHTML(data),
+          text: this.getPasswordResetText(data),
         };
 
       case 'problem-report':
@@ -650,5 +664,184 @@ export class EmailService {
 
   private getProblemReportText(data: any): string {
     return `TreinoPro - Novo Reporte de Problema\n\nINFORMAÇÕES DO USUÁRIO:\n${data.userInfo}\n\nDETALHES DO PROBLEMA:\nTítulo: ${data.title}\n\nDescrição:\n${data.description}\n\nData do Reporte: ${data.reportDate}\n\n---\nTreinoPro - Sistema de Suporte`;
+  }
+
+  private getGuardianAuthorizationHTML(data: any): string {
+    return `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+        <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #2c3e50; margin-bottom: 10px;">TreinoPro</h1>
+            <h2 style="color: #34495e; font-weight: normal;">Autorização de uso do TreinoPro pelo seu filho(a)</h2>
+          </div>
+          
+          <p style="color: #555; font-size: 16px; line-height: 1.5;">
+            Olá, <strong>${data.guardianName}</strong>! 👋
+          </p>
+          
+          <p style="color: #555; font-size: 16px; line-height: 1.5;">
+            Recebemos um pedido de cadastro no aplicativo TreinoPro, feito por <strong>${data.studentName}</strong>, que informou ser menor de idade e indicou você como responsável legal.
+          </p>
+          
+          <p style="color: #555; font-size: 16px; line-height: 1.5;">
+            O TreinoPro é uma plataforma que conecta alunos e personal trainers para aulas presenciais de forma segura, flexível e supervisionada.<br>
+            Para que seu filho(a) possa utilizar o aplicativo, precisamos da sua autorização digital.
+          </p>
+          
+          <div style="background-color: #e8f4fd; border: 1px solid #b3d9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #2c3e50; margin: 0; font-size: 14px; font-weight: bold;">
+              Nosso termo de uso:
+            </p>
+            <p style="color: #3498db; margin: 5px 0 0 0; font-size: 14px;">
+              <a href="https://www.treinopro.com/termos-de-uso" style="color: #3498db; text-decoration: none;">
+                https://www.treinopro.com/termos-de-uso
+              </a>
+            </p>
+          </div>
+          
+          <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #856404; margin: 0 0 15px 0; font-size: 16px; font-weight: bold;">
+              ✅ O que você precisa fazer
+            </p>
+            <p style="color: #856404; margin: 0 0 15px 0; font-size: 14px;">
+              Abaixo o código para autorizar o uso do aplicativo:
+            </p>
+            
+            <div style="text-align: center; margin: 20px 0;">
+              <div style="background-color: #f8f9fa; border: 2px dashed #dee2e6; padding: 20px; border-radius: 8px; display: inline-block;">
+                <span style="font-size: 32px; font-weight: bold; color: #2c3e50; letter-spacing: 5px; font-family: monospace;">
+                  ${data.otpCode}
+                </span>
+              </div>
+            </div>
+            
+            <p style="color: #856404; margin: 15px 0 0 0; font-size: 12px; font-style: italic;">
+              (ao utilizar o código, você confirmará que leu e aceita os termos de uso específicos para menores de idade)
+            </p>
+          </div>
+          
+          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+            <p style="color: #155724; margin: 0; font-size: 14px; line-height: 1.4;">
+              <strong>Importante:</strong> Este código é válido por 24 horas. Se não for utilizado neste período, será necessário solicitar um novo código.
+            </p>
+          </div>
+          
+          <p style="color: #777; font-size: 14px; line-height: 1.5; margin-top: 30px;">
+            Se você não é o responsável legal de <strong>${data.studentName}</strong> ou não autoriza o uso do aplicativo, pode ignorar este email com segurança.
+          </p>
+          
+          <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+          
+          <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
+            © 2024 TreinoPro. Todos os direitos reservados.
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private getGuardianAuthorizationText(data: any): string {
+    return `TreinoPro - Autorização de uso pelo seu filho(a)
+
+Olá, ${data.guardianName}!
+
+Recebemos um pedido de cadastro no aplicativo TreinoPro, feito por ${data.studentName}, que informou ser menor de idade e indicou você como responsável legal.
+
+O TreinoPro é uma plataforma que conecta alunos e personal trainers para aulas presenciais de forma segura, flexível e supervisionada.
+Para que seu filho(a) possa utilizar o aplicativo, precisamos da sua autorização digital.
+
+Nosso termo de uso:
+https://www.treinopro.com/termos-de-uso
+
+✅ O que você precisa fazer
+
+Abaixo o código para autorizar o uso do aplicativo:
+
+CÓDIGO: ${data.otpCode}
+
+(ao utilizar o código, você confirmará que leu e aceita os termos de uso específicos para menores de idade)
+
+Este código é válido por 24 horas.
+
+Se você não é o responsável legal de ${data.studentName} ou não autoriza o uso do aplicativo, pode ignorar este email com segurança.
+
+Atenciosamente,
+Equipe TreinoPro`;
+  }
+
+  private getPasswordResetHTML(data: any): string {
+    return `
+      <div style="max-width: 600px; margin: 0 auto; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa;">
+        <div style="background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%); padding: 30px; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 600;">🔐 Recuperação de Senha</h1>
+          <p style="color: white; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">TreinoPro</p>
+        </div>
+        
+        <div style="background-color: white; padding: 40px 30px;">
+          <h2 style="color: #2d3748; margin: 0 0 20px 0; font-size: 24px; font-weight: 600;">Olá, ${data.firstName}!</h2>
+          
+          <p style="color: #4a5568; font-size: 16px; line-height: 1.6; margin: 0 0 25px 0;">
+            Recebemos uma solicitação para redefinir a senha da sua conta TreinoPro.
+          </p>
+          
+          <p style="color: #4a5568; font-size: 16px; line-height: 1.6; margin: 0 0 30px 0;">
+            Para continuar com a recuperação de senha, use o código de verificação abaixo:
+          </p>
+          
+          <div style="background-color: #f7fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+            <p style="color: #2d3748; font-size: 14px; margin: 0 0 15px 0; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Código de Verificação</p>
+            <div style="background-color: white; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; display: inline-block;">
+              <span style="color: #ff6b35; font-size: 32px; font-weight: 700; letter-spacing: 4px; font-family: 'Courier New', monospace;">
+                ${data.code}
+              </span>
+            </div>
+          </div>
+          
+          <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 25px 0;">
+            <p style="color: #856404; margin: 0; font-size: 14px; font-weight: 600;">
+              ⏰ <strong>Este código expira em:</strong> ${data.expiresAt}
+            </p>
+          </div>
+          
+          <div style="background-color: #f8f9fa; border-left: 4px solid #ff6b35; padding: 20px; margin: 25px 0;">
+            <p style="color: #2d3748; margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">🛡️ Dica de Segurança:</p>
+            <p style="color: #4a5568; margin: 0; font-size: 14px; line-height: 1.5;">
+              Nunca compartilhe este código com outras pessoas. Nossa equipe nunca solicitará este código por telefone ou email.
+            </p>
+          </div>
+          
+          <p style="color: #718096; font-size: 14px; line-height: 1.5; margin: 30px 0 0 0;">
+            Se você não solicitou a recuperação de senha, pode ignorar este email com segurança. Sua conta permanecerá segura.
+          </p>
+          
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+          
+          <p style="color: #a0aec0; font-size: 12px; text-align: center; margin: 0;">
+            © 2024 TreinoPro. Todos os direitos reservados.
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private getPasswordResetText(data: any): string {
+    return `TreinoPro - Recuperação de Senha
+
+Olá, ${data.firstName}!
+
+Recebemos uma solicitação para redefinir a senha da sua conta TreinoPro.
+
+Para continuar com a recuperação de senha, use o código de verificação abaixo:
+
+CÓDIGO: ${data.code}
+
+Este código expira em: ${data.expiresAt}
+
+🛡️ Dica de Segurança:
+Nunca compartilhe este código com outras pessoas. Nossa equipe nunca solicitará este código por telefone ou email.
+
+Se você não solicitou a recuperação de senha, pode ignorar este email com segurança. Sua conta permanecerá segura.
+
+© 2024 TreinoPro. Todos os direitos reservados.`;
   }
 }

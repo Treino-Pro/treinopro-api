@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
-import { proposals, users, classes, payments } from '../../database/schema';
+import { proposals, users, classes, payments, ratings } from '../../database/schema';
 import { eq, and, desc, gte, lte, ilike, count, sql, or, lt } from 'drizzle-orm';
 import { CreateProposalDto, CreateRecontractDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
@@ -854,6 +854,23 @@ export class ProposalsService {
         .where(eq(users.id, personalId))
         .limit(1);
 
+      // Calcular rating médio do personal
+      let personalRating = 0.0;
+      if (personal) {
+        const personalRatings = await this.db
+          .select({ rating: ratings.rating })
+          .from(ratings)
+          .where(and(
+            eq(ratings.ratedId, personalId),
+            eq(ratings.type, 'student_to_personal')
+          ));
+
+        if (personalRatings.length > 0) {
+          const totalRating = personalRatings.reduce((sum, r) => sum + r.rating, 0);
+          personalRating = totalRating / personalRatings.length;
+        }
+      }
+
       // Evento para o aluno (proposta foi aceita)
       if (student) {
         this.chatGateway.server.emit('proposal_update', {
@@ -863,6 +880,7 @@ export class ProposalsService {
             id: personal?.id,
             name: personal?.name,
             profileImageUrl: personal?.profileImageUrl,
+            rating: personalRating,
           },
           userId: student.id,
           timestamp: new Date(),
@@ -882,6 +900,7 @@ export class ProposalsService {
           id: personal?.id,
           name: personal?.name,
           profileImageUrl: personal?.profileImageUrl,
+          rating: personalRating,
         },
         timestamp: new Date(),
       };

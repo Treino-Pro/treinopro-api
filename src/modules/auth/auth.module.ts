@@ -10,6 +10,7 @@ import { CrefModule } from '../cref/cref.module';
 import { EmailVerificationService } from './services/email-verification.service';
 import { EmailService } from '../notifications/services/email.service';
 import { GamificationModule } from '../gamification/gamification.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { GamificationModule } from '../gamification/gamification.module';
     DatabaseModule,
     CrefModule, // Importar o módulo CREF
     forwardRef(() => GamificationModule), // Importar o módulo de gamificação
+    NotificationsModule, // Importar o módulo de notificações
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

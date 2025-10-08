@@ -54,6 +54,19 @@ export class NotificationsService {
     }
   }
 
+  async sendEmailToAddress(email: string, template: string, data: Record<string, any>): Promise<void> {
+    try {
+      // Enviar email diretamente para o endereço fornecido
+      await this.emailService.sendTemplateEmail(email, template, data);
+
+      this.logger.log(`📧 Email enviado com sucesso para ${email} (${template})`);
+
+    } catch (error) {
+      this.logger.error(`❌ Erro ao enviar email para ${email}:`, error);
+      throw error;
+    }
+  }
+
   async sendInAppNotification(userId: string, template: string, data: Record<string, any>): Promise<void> {
     try {
       // Buscar dados do usuário

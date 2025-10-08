@@ -70,6 +70,16 @@ export class AuthController {
     return this.authService.resetPassword(resetPasswordDto);
   }
 
+  @Post('reset-password-with-code')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Redefinir senha com código de verificação' })
+  @ApiResponse({ status: 200, description: 'Senha redefinida com sucesso' })
+  @ApiResponse({ status: 400, description: 'Código inválido' })
+  async resetPasswordWithCode(@Body() body: { email: string; code: string; newPassword: string }) {
+    return this.authService.resetPasswordWithCode(body.email, body.code, body.newPassword);
+  }
+
   @Post('change-password')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -109,6 +119,37 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Código inválido ou expirado' })
   async verifyCode(@Body() body: { email: string; code: string }) {
     return this.authService.verifyCode(body.email, body.code);
+  }
+
+  @Post('send-guardian-authorization')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enviar email de autorização para responsável de menor de idade' })
+  @ApiResponse({ status: 200, description: 'Email de autorização enviado com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async sendGuardianAuthorization(@Body() body: { 
+    guardianName: string; 
+    guardianEmail: string; 
+    studentName: string; 
+  }) {
+    return this.authService.sendGuardianAuthorizationEmail(
+      body.guardianName, 
+      body.guardianEmail, 
+      body.studentName
+    );
+  }
+
+  @Post('verify-guardian-otp')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar OTP de autorização do responsável' })
+  @ApiResponse({ status: 200, description: 'OTP verificado com sucesso' })
+  @ApiResponse({ status: 400, description: 'OTP inválido ou expirado' })
+  async verifyGuardianOtp(@Body() body: { 
+    guardianEmail: string; 
+    otpCode: string; 
+  }) {
+    return this.authService.verifyGuardianOtp(body.guardianEmail, body.otpCode);
   }
 
   @Post('create-admin')
