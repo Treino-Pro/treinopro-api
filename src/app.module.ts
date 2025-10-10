@@ -20,6 +20,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
 import { SupportModule } from './modules/support/support.module';
+import { HealthQuestionnaireModule } from './modules/health-questionnaire/health-questionnaire.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
@@ -54,6 +55,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     NotificationsModule,
     GamificationModule,
     SupportModule,
+    HealthQuestionnaireModule,
     AdminModule,
     UploadModule,
     UsersModule,

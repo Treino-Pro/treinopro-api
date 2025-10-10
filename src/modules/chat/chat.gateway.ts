@@ -328,6 +328,37 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     });
   }
 
+  // Handler para timeout de busca de proposta (3 minutos)
+  @SubscribeMessage('proposal_search_timeout')
+  async handleProposalSearchTimeout(
+    @MessageBody() data: { proposalId: string; reason: string; timestamp: string },
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    try {
+      this.logger.log(`⏰ [CHAT_GATEWAY] Timer de busca expirado para proposta ${data.proposalId}`);
+      
+      // Emitir evento de volta para sincronizar com outros clientes
+      this.server.emit('proposal_expired', {
+        action: 'proposal_expired',
+        proposal: {
+          id: data.proposalId,
+          status: 'pending', // Proposta vira pendente após timeout
+        },
+        proposalId: data.proposalId,
+        reason: data.reason,
+        timestamp: new Date(),
+      });
+
+      this.logger.log(`📡 [CHAT_GATEWAY] Evento proposal_expired emitido para proposta ${data.proposalId}`);
+      
+    } catch (error) {
+      this.logger.error(`❌ [CHAT_GATEWAY] Erro ao processar timeout de busca: ${error.message}`);
+      client.emit('error', { 
+        message: 'Erro ao processar timeout de busca' 
+      });
+    }
+  }
+
   // Método para verificar se um usuário está online
   isUserOnline(userId: string): boolean {
     return this.connectedUsers.has(userId);

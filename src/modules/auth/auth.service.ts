@@ -251,9 +251,12 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Buscar usuário
+    // Buscar usuário com imagem de perfil
     const user = await this.db.query.users.findFirst({
       where: eq(users.email, email),
+      with: {
+        profileImage: true,
+      },
     });
 
     if (!user) {
@@ -287,6 +290,7 @@ export class AuthService {
         lastName: user.lastName,
         userType: user.userType,
         isVerified: user.isVerified,
+        profileImageUrl: user.profileImage?.url,
       },
       ...tokens,
     };

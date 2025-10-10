@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or, inArray } from 'drizzle-orm';
-import { classes, users, proposals, ratings } from '../../database/schema';
+import { classes, users, proposals, ratings, payments } from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
@@ -329,10 +329,52 @@ export class ClassesService {
       // Não falhar a operação se a gamificação falhar
     }
 
-    // ===== PAGAMENTO JÁ FOI CAPTURADO NO MATCH =====
-    // O pagamento é capturado quando o personal aceita a proposta (match)
-    // Aqui apenas confirmamos que a aula foi concluída
-    console.log('✅ [CLASSES] Aula concluída - pagamento já foi capturado no match');
+    // ===== APLICAR SPLIT E ATUALIZAR CARTEIRA APÓS CONCLUSÃO DA AULA =====
+    try {
+      console.log('💰 [COMPLETE_CLASS] ===== INICIANDO REPASSE APÓS CONCLUSÃO DA AULA =====');
+      console.log('💰 [COMPLETE_CLASS] Class ID:', id);
+      console.log('💰 [COMPLETE_CLASS] User ID (quem está completando):', userId);
+      
+      // Buscar pagamento da aula
+      const payment = await this.db.query.payments.findFirst({
+        where: eq(payments.classId, id),
+        with: {
+          student: true,
+          personal: true,
+        },
+      });
+
+      console.log('💰 [COMPLETE_CLASS] Pagamento encontrado:', {
+        paymentId: payment?.id,
+        status: payment?.status,
+        totalAmount: payment?.totalAmount,
+        platformFee: payment?.platformFee,
+        personalAmount: payment?.personalAmount,
+        personalId: payment?.personalId,
+        studentId: payment?.studentId
+      });
+
+      if (payment && payment.status === 'captured') {
+        console.log('✅ [COMPLETE_CLASS] Pagamento capturado - iniciando repasse para o personal');
+        // Aplicar split e atualizar carteira do personal
+        await this.paymentsService.updateWallets(payment);
+        console.log('✅ [COMPLETE_CLASS] Split aplicado e carteira do personal atualizada com sucesso');
+      } else {
+        console.log('⚠️ [COMPLETE_CLASS] Pagamento não encontrado ou não capturado:', {
+          paymentExists: !!payment,
+          paymentStatus: payment?.status,
+          expectedStatus: 'captured'
+        });
+      }
+      
+      console.log('💰 [COMPLETE_CLASS] ===== PROCESSO DE REPASSE FINALIZADO =====');
+      
+    } catch (error) {
+      console.error('❌ [COMPLETE_CLASS] Erro ao aplicar split após conclusão:', error);
+      console.error('❌ [COMPLETE_CLASS] Stack trace:', error.stack);
+      // Não falhar a operação se a atualização de carteira falhar
+      // Mas logar o erro para investigação
+    }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
@@ -944,31 +986,40 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  async getClassDisputes(userId: string): Promise<ClassDisputeDto[]> {
-    const disputes = await this.db.query.classes.findMany({
-      where: and(
-        or(
-          eq(classes.studentId, userId),
-          eq(classes.personalId, userId)
+  async getClassDisputes(userId: string): Promise<any[]> {
+    console.log('🔍 [CLASSES] Buscando disputas para usuário:', userId);
+    
+    try {
+      const disputes = await this.db.query.classes.findMany({
+        where: and(
+          or(
+            eq(classes.studentId, userId),
+            eq(classes.personalId, userId)
+          ),
+          eq(classes.status, ClassStatus.NO_SHOW_DISPUTE)
         ),
-        eq(classes.status, ClassStatus.NO_SHOW_DISPUTE)
-      ),
-      orderBy: [desc(classes.noShowReportedAt)],
-    });
+        orderBy: [desc(classes.createdAt)],
+      });
 
-    return disputes.map(dispute => ({
-      id: dispute.id,
-      classId: dispute.id,
-      reportedBy: dispute.noShowReportedBy,
-      status: dispute.disputeStatus,
-      reportedAt: dispute.noShowReportedAt,
-      studentEvidence: dispute.studentEvidence,
-      personalEvidence: dispute.personalEvidence,
-      resolution: dispute.resolution,
-      resolvedAt: dispute.resolvedAt,
-      custodyExpiresAt: dispute.custodyExpiresAt,
-      evidenceDeadline: dispute.evidenceDeadline,
-    }));
+      console.log('🔍 [CLASSES] Disputas encontradas:', disputes.length);
+
+      return disputes.map(dispute => ({
+        id: dispute.id,
+        classId: dispute.id,
+        reportedBy: dispute.noShowReportedBy || 'student',
+        status: dispute.disputeStatus || 'pending',
+        reportedAt: dispute.noShowReportedAt || dispute.createdAt,
+        studentEvidence: dispute.studentEvidence || null,
+        personalEvidence: dispute.personalEvidence || null,
+        resolution: dispute.resolution || null,
+        resolvedAt: dispute.resolvedAt || null,
+        custodyExpiresAt: dispute.custodyExpiresAt || dispute.createdAt,
+        evidenceDeadline: dispute.evidenceDeadline || dispute.createdAt,
+      }));
+    } catch (error) {
+      console.error('❌ [CLASSES] Erro ao buscar disputas:', error);
+      return [];
+    }
   }
 
   private async formatClassResponse(classData: any): Promise<ClassResponseDto> {

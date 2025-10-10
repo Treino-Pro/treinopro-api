@@ -32,12 +32,9 @@ export class ProposalsService {
       throw new ForbiddenException('Apenas alunos podem criar propostas');
     }
 
-    // Validar se a data não é no passado
+    // Validação de tempo removida - permite criar propostas para qualquer horário
     const trainingDate = new Date(createProposalDto.trainingDate);
-    const now = new Date();
-    if (trainingDate <= now) {
-      throw new BadRequestException('A data do treino deve ser no futuro');
-    }
+    console.log('🔍 [PROPOSALS] Data do treino recebida:', createProposalDto.trainingDate);
 
         // ===== VALIDAR CONFLITOS DE HORÁRIO (ABORDAGEM MATEMÁTICA) =====
         try {
@@ -63,6 +60,19 @@ export class ProposalsService {
               durationMinutes: true,
             }
           });
+
+          // Filtrar explicitamente propostas canceladas, disputadas e completadas
+          const beforeFilter = existingProposals.length;
+          existingProposals = existingProposals.filter(proposal => 
+            proposal.status !== 'cancelled' && 
+            proposal.status !== 'disputed' && 
+            proposal.status !== 'completed'
+          );
+          const afterFilter = existingProposals.length;
+          
+          if (beforeFilter !== afterFilter) {
+            console.log(`🔍 [PROPOSALS] Filtro aplicado: ${beforeFilter} → ${afterFilter} propostas (removidas: ${beforeFilter - afterFilter})`);
+          }
 
           // Ignorar propostas cujo vínculo (aula) está em disputa de no-show
           const disputedClasses = await this.db.query.classes.findMany({
@@ -138,43 +148,54 @@ export class ProposalsService {
           throw new BadRequestException('Não foi possível validar conflitos de horário no momento. Tente novamente.');
     }
 
-    // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
-    
+    // ===== CRIAR PROPOSTA PRIMEIRO =====
+    const [proposal] = await this.db
+      .insert(proposals)
+      .values({
+        studentId,
+        locationId: createProposalDto.locationId,
+        locationName: createProposalDto.locationName,
+        locationAddress: createProposalDto.locationAddress,
+        trainingDate: trainingDate,
+        trainingTime: createProposalDto.trainingTime,
+        durationMinutes: createProposalDto.durationMinutes,
+        modalityId: createProposalDto.modalityId,
+        modalityName: createProposalDto.modalityName,
+        price: createProposalDto.price.toString(),
+        additionalNotes: createProposalDto.additionalNotes,
+        status: ProposalStatus.PENDING,
+        // Campos de pagamento serão preenchidos após processamento
+        paymentId: null,
+        paymentMethod: createProposalDto.paymentMethod,
+        paymentStatus: 'pending',
+      })
+      .returning();
+
+    // ===== PROCESSAR PAGAMENTO APÓS CRIAR PROPOSTA =====
     try {
-      // Criar preferência de pagamento específica para propostas
+      // Criar preferência de pagamento específica para propostas usando ID real
       const paymentResult = await this.createProposalPaymentPreference(
         createProposalDto,
         user[0],
-        trainingDate
+        trainingDate,
+        proposal.id // Usar ID real da proposta
       );
 
       if (!paymentResult.success) {
+        // Se pagamento falhar, deletar proposta criada
+        await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
       }
 
-
-      // ===== CRIAR PROPOSTA APÓS PAGAMENTO APROVADO =====
-      const [proposal] = await this.db
-        .insert(proposals)
-        .values({
-          studentId,
-          locationId: createProposalDto.locationId,
-          locationName: createProposalDto.locationName,
-          locationAddress: createProposalDto.locationAddress,
-          trainingDate: trainingDate,
-          trainingTime: createProposalDto.trainingTime,
-          durationMinutes: createProposalDto.durationMinutes,
-          modalityId: createProposalDto.modalityId,
-          modalityName: createProposalDto.modalityName,
-          price: createProposalDto.price.toString(),
-          additionalNotes: createProposalDto.additionalNotes,
-          status: ProposalStatus.PENDING,
-          // Campos de pagamento
+      // Atualizar proposta com dados do pagamento
+      await this.db
+        .update(proposals)
+        .set({
           paymentId: paymentResult.paymentId,
-          paymentMethod: createProposalDto.paymentMethod,
           paymentStatus: paymentResult.status,
+          updatedAt: new Date(),
         })
-        .returning();
+        .where(eq(proposals.id, proposal.id));
 
 
       // Agendar timeout para proposta se pagamento ainda está pendente
@@ -197,8 +218,15 @@ export class ProposalsService {
           .where(eq(users.id, studentId))
           .limit(1);
 
+      // Buscar proposta atualizada do banco para ter o paymentStatus correto
+      const [updatedProposal] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, proposal.id))
+        .limit(1);
+
       // Retornar proposta com dados do pagamento e do usuário
-      const proposalResponse = this.mapToResponseDto(proposal, student);
+      const proposalResponse = this.mapToResponseDto(updatedProposal, student);
       
       // ===== NOTIFICAR TODOS OS PERSONAIS ONLINE =====
       try {
@@ -287,44 +315,56 @@ export class ProposalsService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // ===== PROCESSAR PAGAMENTO ANTES DE CRIAR PROPOSTA =====
-    
+    // ===== CRIAR PROPOSTA DE RECONTRATAÇÃO PRIMEIRO =====
+    const [proposal] = await this.db
+      .insert(proposals)
+      .values({
+        studentId,
+        locationId: createRecontractDto.locationId,
+        locationName: createRecontractDto.locationName,
+        locationAddress: createRecontractDto.locationAddress,
+        trainingDate: trainingDate,
+        trainingTime: createRecontractDto.trainingTime,
+        durationMinutes: createRecontractDto.durationMinutes,
+        modalityId: createRecontractDto.modalityId,
+        modalityName: createRecontractDto.modalityName,
+        price: createRecontractDto.price.toString(),
+        additionalNotes: createRecontractDto.additionalNotes || 'Recontratação direta',
+        status: ProposalStatus.PENDING,
+        // Campos de pagamento serão preenchidos após processamento
+        paymentId: null,
+        paymentMethod: createRecontractDto.paymentMethod,
+        paymentStatus: 'pending',
+        // Campo específico para recontratação
+        targetPersonalId: createRecontractDto.personalId, // Novo campo para identificar recontratação
+      })
+      .returning();
+
+    // ===== PROCESSAR PAGAMENTO APÓS CRIAR PROPOSTA =====
     try {
-      // Criar preferência de pagamento específica para recontratação
+      // Criar preferência de pagamento específica para recontratação usando ID real
       const paymentResult = await this.createProposalPaymentPreference(
         createRecontractDto,
         user,
-        trainingDate
+        trainingDate,
+        proposal.id // Usar ID real da proposta
       );
 
       if (!paymentResult.success) {
+        // Se pagamento falhar, deletar proposta criada
+        await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
       }
 
-      // ===== CRIAR PROPOSTA DE RECONTRATAÇÃO =====
-      const [proposal] = await this.db
-        .insert(proposals)
-        .values({
-          studentId,
-          locationId: createRecontractDto.locationId,
-          locationName: createRecontractDto.locationName,
-          locationAddress: createRecontractDto.locationAddress,
-          trainingDate: trainingDate,
-          trainingTime: createRecontractDto.trainingTime,
-          durationMinutes: createRecontractDto.durationMinutes,
-          modalityId: createRecontractDto.modalityId,
-          modalityName: createRecontractDto.modalityName,
-          price: createRecontractDto.price.toString(),
-          additionalNotes: createRecontractDto.additionalNotes || 'Recontratação direta',
-          status: ProposalStatus.PENDING,
-          // Campos de pagamento
+      // Atualizar proposta com dados do pagamento
+      await this.db
+        .update(proposals)
+        .set({
           paymentId: paymentResult.paymentId,
-          paymentMethod: createRecontractDto.paymentMethod,
           paymentStatus: paymentResult.status,
-          // Campo específico para recontratação
-          targetPersonalId: createRecontractDto.personalId, // Novo campo para identificar recontratação
+          updatedAt: new Date(),
         })
-        .returning();
+        .where(eq(proposals.id, proposal.id));
 
       // Agendar timeout para proposta se pagamento ainda está pendente
       if (paymentResult.status === 'pending') {
@@ -665,7 +705,7 @@ export class ProposalsService {
 
       // 2. VALIDAR CONFLITOS DO ALUNO
       // Buscar propostas existentes do aluno para o mesmo dia
-      const existingProposals = await this.db
+      let existingProposals = await this.db
         .select()
         .from(proposals)
         .where(
@@ -683,6 +723,22 @@ export class ProposalsService {
         );
 
       console.log(`  - Propostas do aluno encontradas: ${existingProposals.length}`);
+
+      // Ignorar propostas matched cujas aulas estão em disputa de no-show
+      const disputedClasses = await this.db.query.classes.findMany({
+        where: and(
+          sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
+          eq(classes.studentId, proposal.studentId as any),
+          eq(classes.status, 'no_show_dispute')
+        ),
+        columns: { proposalId: true }
+      });
+      const disputedProposalIds = new Set(disputedClasses.map(c => c.proposalId).filter(Boolean));
+      if (disputedProposalIds.size > 0) {
+        const beforeFilter = existingProposals.length;
+        existingProposals = existingProposals.filter(p => !disputedProposalIds.has(p.id));
+        console.log(`  - Propostas filtradas (aulas em disputa): ${beforeFilter} → ${existingProposals.length}`);
+      }
 
       // Calcular janela de tempo da proposta aceita
       const proposedStart = new Date(proposedTrainingDate);
@@ -748,32 +804,8 @@ export class ProposalsService {
       .where(eq(proposals.id, id))
       .returning();
 
-    // ===== CAPTURAR PAGAMENTO APÓS MATCH =====
-    try {
-      console.log('💰 [PROPOSALS] Capturando pagamento após match...');
-      
-      // Buscar pagamento da proposta
-      const payment = await this.db.query.payments.findFirst({
-        where: eq(payments.proposalId, id),
-      });
-
-      if (payment && payment.status === 'authorized') {
-        // Capturar pagamento no Mercado Pago
-        if (payment.mpPaymentId) {
-          await this.paymentsService.capturePaymentAfterClass(payment.classId || id, 'Match confirmado - personal aceitou proposta');
-          console.log('✅ [PROPOSALS] Pagamento capturado após match');
-        } else {
-          console.log('⚠️ [PROPOSALS] Pagamento sem mpPaymentId - pode ser simulado');
-        }
-      } else {
-        console.log('⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:', payment?.status);
-      }
-      
-    } catch (error) {
-      console.error('❌ [PROPOSALS] Erro ao capturar pagamento após match:', error);
-      // Não falhar a operação se a captura de pagamento falhar
-      // Mas logar o erro para investigação
-    }
+    // ===== PAGAMENTO SERÁ CAPTURADO APÓS CRIAÇÃO DA AULA =====
+    console.log('💰 [PROPOSALS] Pagamento será capturado após criação da aula...');
 
     // ===== CRIAR AULA AUTOMATICAMENTE =====
     
@@ -823,6 +855,53 @@ export class ProposalsService {
           updatedAt: new Date(),
         })
         .where(eq(proposals.id, id));
+
+      // ===== CAPTURAR PAGAMENTO APÓS CRIAÇÃO DA AULA =====
+      try {
+        console.log('💰 [PROPOSALS] Capturando pagamento após criação da aula...');
+        console.log('🔍 [PROPOSALS] Buscando pagamento para proposta ID:', id);
+        
+        // Buscar pagamento da proposta
+        const payment = await this.db.query.payments.findFirst({
+          where: eq(payments.proposalId, id), // Busca direta por ID da proposta
+        });
+        
+        console.log('💰 [PROPOSALS] Pagamento encontrado:', {
+          paymentId: payment?.id,
+          proposalId: payment?.proposalId,
+          classId: payment?.classId,
+          status: payment?.status,
+          totalAmount: payment?.totalAmount,
+          personalAmount: payment?.personalAmount
+        });
+
+        if (payment && payment.status === 'authorized') {
+          // Atualizar pagamento com classId e personalId
+          await this.db
+            .update(payments)
+            .set({ 
+              classId: newClass.id, 
+              personalId: personalId, // Definir personalId quando aceitar
+              updatedAt: new Date() 
+            })
+            .where(eq(payments.id, payment.id));
+
+          // Capturar pagamento no Mercado Pago
+          if (payment.mpPaymentId) {
+            await this.paymentsService.capturePaymentAfterClass(newClass.id, 'Match confirmado - personal aceitou proposta');
+            console.log('✅ [PROPOSALS] Pagamento capturado após criação da aula');
+          } else {
+            console.log('⚠️ [PROPOSALS] Pagamento sem mpPaymentId - pode ser simulado');
+          }
+        } else {
+          console.log('⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:', payment?.status);
+        }
+        
+      } catch (error) {
+        console.error('❌ [PROPOSALS] Erro ao capturar pagamento após criação da aula:', error);
+        // Não falhar a operação se a captura de pagamento falhar
+        // Mas logar o erro para investigação
+      }
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
@@ -1216,7 +1295,8 @@ export class ProposalsService {
   private async createProposalPaymentPreference(
     createProposalDto: CreateProposalDto,
     userData: any,
-    trainingDate: Date
+    trainingDate: Date,
+    proposalId: string
   ): Promise<any> {
     try {
       console.log('💳 [PROPOSALS] ===== INÍCIO DO PROCESSAMENTO DE PAGAMENTO =====');
@@ -1230,9 +1310,7 @@ export class ProposalsService {
         cardNickname: createProposalDto.cardNickname
       });
       
-      // Gerar UUID válido para o classId temporário
-      const tempClassId = randomUUID();
-      console.log('🆔 [PROPOSALS] Class ID temporário:', tempClassId);
+      console.log('🆔 [PROPOSALS] Proposal ID real:', proposalId);
       
       // Calcular taxa da plataforma
       const platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
@@ -1253,7 +1331,10 @@ export class ProposalsService {
       console.log('🔍 [PROPOSALS] Verificações de pagamento automático:', {
         hasCardId,
         isCardPayment,
-        shouldProcessAutomatic: hasCardId && isCardPayment
+        shouldProcessAutomatic: hasCardId && isCardPayment,
+        cardIdReceived: createProposalDto.cardId,
+        paymentMethodReceived: createProposalDto.paymentMethod,
+        cardDataReceived: createProposalDto.cardData
       });
       
       if (hasCardId && isCardPayment) {
@@ -1261,7 +1342,7 @@ export class ProposalsService {
         
       try {
         const paymentDto = {
-          classId: tempClassId,
+          classId: proposalId, // Usar ID real da proposta
           paymentMethod: createProposalDto.paymentMethod as StudentPaymentMethod,
           cardId: createProposalDto.cardId,
           cardData: null,
@@ -1289,7 +1370,7 @@ export class ProposalsService {
 
           const response = {
             success: true,
-            paymentId: tempClassId,
+            paymentId: proposalId, // Usar ID real da proposta
             status: paymentResult.status,
             method: createProposalDto.paymentMethod,
             amount: createProposalDto.price,
@@ -1314,17 +1395,24 @@ export class ProposalsService {
 
       // ===== FALLBACK: CRIAR PREFERÊNCIA MP (PIX, Mercado Pago, ou cartão sem ID) =====
       console.log('🔄 [PROPOSALS] Iniciando fallback para Mercado Pago...');
+      console.log('🔄 [PROPOSALS] Motivo do fallback:', {
+        hasCardId,
+        isCardPayment,
+        paymentMethod: createProposalDto.paymentMethod,
+        cardId: createProposalDto.cardId,
+        cardData: createProposalDto.cardData
+      });
 
       // Criar dados para o Mercado Pago
       const preferenceData = {
-        classId: tempClassId,
+        classId: proposalId, // Usar ID real da proposta
         title: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString()}`,
         totalAmount: createProposalDto.price,
         platformFee,
         personalAmount,
         studentEmail: userData.email,
         personalEmail: 'temp@personal.com', // Será definido quando aceita
-        externalReference: tempClassId,
+        externalReference: proposalId, // Usar ID real da proposta
       };
       
       console.log('📋 [PROPOSALS] Dados da preferência MP:', preferenceData);
@@ -1340,7 +1428,7 @@ export class ProposalsService {
 
       const response = {
         success: true,
-        paymentId: tempClassId,
+        paymentId: proposalId, // Usar ID real da proposta
         status: 'pending',
         method: createProposalDto.paymentMethod,
         amount: createProposalDto.price,
@@ -1359,16 +1447,17 @@ export class ProposalsService {
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
+      console.error('❌ [PROPOSALS] Stack trace:', error.stack);
+      console.log('🔄 [PROPOSALS] Caindo no fallback de simulação devido ao erro acima');
       
       // Fallback para simulação se MP falhar
-      return this.simulatePaymentForProposal(createProposalDto);
+      return this.simulatePaymentForProposal(createProposalDto, proposalId);
     }
   }
 
   // ===== FALLBACK: SIMULAÇÃO DE PAGAMENTO =====
 
-  private simulatePaymentForProposal(createProposalDto: CreateProposalDto): any {
-    const paymentId = `proposal_payment_${Date.now()}`;
+  private simulatePaymentForProposal(createProposalDto: CreateProposalDto, proposalId: string): any {
     
 
     // Simular diferentes métodos de pagamento
@@ -1376,12 +1465,12 @@ export class ProposalsService {
       case 'pix':
         return {
           success: true,
-          paymentId,
+          paymentId: proposalId, // Usar ID real da proposta
           status: 'pending',
           method: 'pix',
           amount: createProposalDto.price,
-          qrCode: `pix_qr_${paymentId}`,
-          qrCodeBase64: Buffer.from(`pix_qr_${paymentId}`).toString('base64'),
+          qrCode: `pix_qr_${proposalId}`,
+          qrCodeBase64: Buffer.from(`pix_qr_${proposalId}`).toString('base64'),
           message: 'PIX gerado com sucesso (simulação). Escaneie o QR Code para pagar.',
         };
 
@@ -1389,7 +1478,7 @@ export class ProposalsService {
       case 'debit_card':
         return {
           success: true,
-          paymentId,
+          paymentId: proposalId, // Usar ID real da proposta
           status: 'approved', // Cartão aprovado imediatamente (mock)
           method: createProposalDto.paymentMethod,
           amount: createProposalDto.price,
@@ -1399,11 +1488,11 @@ export class ProposalsService {
       case 'mercado_pago':
         return {
           success: true,
-          paymentId,
+          paymentId: proposalId, // Usar ID real da proposta
           status: 'pending',
           method: 'mercado_pago',
           amount: createProposalDto.price,
-          checkoutUrl: `https://mercadopago.com/checkout/${paymentId}`,
+          checkoutUrl: `https://mercadopago.com/checkout/${proposalId}`,
           message: 'Redirecionando para o Mercado Pago (simulação)...',
         };
 
@@ -1481,6 +1570,19 @@ export class ProposalsService {
         }
       });
 
+      // Filtrar explicitamente propostas canceladas, disputadas e completadas
+      const beforeFilter = existingProposals.length;
+      existingProposals = existingProposals.filter(proposal => 
+        proposal.status !== 'cancelled' && 
+        proposal.status !== 'disputed' && 
+        proposal.status !== 'completed'
+      );
+      const afterFilter = existingProposals.length;
+      
+      if (beforeFilter !== afterFilter) {
+        console.log(`🔍 [CONFLICTS] Filtro aplicado: ${beforeFilter} → ${afterFilter} propostas (removidas: ${beforeFilter - afterFilter})`);
+      }
+
       // Ignorar propostas vinculadas a aulas em disputa (no_show_dispute)
       const disputedClasses = await this.db.query.classes.findMany({
         where: and(
@@ -1542,7 +1644,7 @@ export class ProposalsService {
       const duration = proposal.durationMinutes || 60;
       const endTime = startTime + (duration / 60);
 
-      // Bloquear 1 hora antes e depois (mesmo comportamento do mock)
+      // Bloquear apenas o intervalo real da proposta (sem buffer)
       this.addBlockedSlots(blockedSlots, startTime, endTime);
     }
 
@@ -1552,7 +1654,7 @@ export class ProposalsService {
       const duration = classItem.duration || 60;
       const endTime = startTime + (duration / 60);
 
-      // Bloquear 1 hora antes e depois (mesmo comportamento do mock)
+      // Bloquear apenas o intervalo real da aula (sem buffer)
       this.addBlockedSlots(blockedSlots, startTime, endTime);
     }
 

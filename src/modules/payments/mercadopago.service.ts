@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { MercadoPagoConfig, Preference, Payment, PaymentRefund } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment, PaymentRefund, CardToken } from 'mercadopago';
 
 export interface CreatePreferenceData {
   classId: string;
@@ -30,6 +30,7 @@ export class MercadoPagoService {
   private preference: Preference;
   private payment: Payment;
   private paymentRefund: PaymentRefund;
+  private cardToken: CardToken;
 
   constructor() {
     // Configurar cliente do Mercado Pago
@@ -47,6 +48,7 @@ export class MercadoPagoService {
     this.preference = new Preference(this.client);
     this.payment = new Payment(this.client);
     this.paymentRefund = new PaymentRefund(this.client);
+    this.cardToken = new CardToken(this.client);
 
     this.logger.log(`MercadoPago Service inicializado - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`);
   }
@@ -295,35 +297,53 @@ export class MercadoPagoService {
     description: string;
     externalReference: string;
     capture?: boolean;
+    cardBrand?: string;
   }): Promise<any> {
     try {
       this.logger.log(`Criando pagamento MP: ${paymentData.externalReference}`);
       
+      // Usar bandeira do cartão passada diretamente
+      let paymentMethodId = 'visa';
+      let issuerId = 25;
+      
+      if (paymentData.cardBrand) {
+        const cardBrand = paymentData.cardBrand.toLowerCase();
+        if (cardBrand === 'mastercard') {
+          paymentMethodId = 'mastercard';
+          issuerId = 1; // Mastercard issuer ID
+        } else if (cardBrand === 'visa') {
+          paymentMethodId = 'visa';
+          issuerId = 25; // Visa issuer ID
+        }
+      }
+
       const paymentRequest = {
         transaction_amount: paymentData.amount,
         token: paymentData.token,
         description: paymentData.description,
         installments: 1,
-        payment_method_id: 'credit_card', // Será determinado pelo token
-        issuer_id: null,
+        payment_method_id: paymentMethodId,
+        issuer_id: issuerId,
         payer: {
+          email: 'test@example.com',
           type: 'customer',
+          identification: {
+            type: 'CPF',
+            number: '12345678909',
+          },
         },
         external_reference: paymentData.externalReference,
-        capture: paymentData.capture !== false, // Default true, false para autorização
-        additional_info: {
-          items: [
-            {
-              id: paymentData.externalReference,
-              title: paymentData.description,
-              description: paymentData.description,
-              quantity: 1,
-              unit_price: paymentData.amount,
-              currency_id: 'BRL',
-            },
-          ],
-        },
       };
+
+      // Log detalhado do payload
+      this.logger.log(`🔍 [MP DEBUG] Payload completo:`, JSON.stringify(paymentRequest, null, 2));
+      this.logger.log(`🔍 [MP DEBUG] Dados de entrada:`, {
+        token: paymentData.token?.substring(0, 20) + '...',
+        amount: paymentData.amount,
+        description: paymentData.description,
+        externalReference: paymentData.externalReference,
+        capture: paymentData.capture
+      });
 
       const response = await this.payment.create({
         body: paymentRequest,
@@ -338,6 +358,51 @@ export class MercadoPagoService {
     }
   }
 
+
+  // Criar token de cartão no Mercado Pago
+  async createCardToken(cardData: {
+    cardNumber: string;
+    expirationMonth: string;
+    expirationYear: string;
+    securityCode: string;
+    cardholderName: string;
+  }): Promise<string> {
+    try {
+      this.logger.log(`Criando token de cartão para: ${cardData.cardholderName}`);
+      
+      const cardTokenRequest = {
+        card_number: cardData.cardNumber.replace(/\s/g, ''), // Remove espaços
+        expiration_month: cardData.expirationMonth,
+        expiration_year: cardData.expirationYear,
+        security_code: cardData.securityCode,
+        cardholder: {
+          name: cardData.cardholderName,
+        },
+      };
+
+      this.logger.log(`🔍 [MP CARD TOKEN] Payload:`, {
+        card_number_masked: cardData.cardNumber.replace(/\d(?=\d{4})/g, "*"), // Mascarar número para log
+        card_number_length: cardData.cardNumber.length,
+        card_number_clean: cardData.cardNumber.replace(/\s/g, ''), // Número sem espaços
+        card_number_sent_to_mp: cardTokenRequest.card_number, // Número real enviado para MP
+        expiration_month: cardTokenRequest.expiration_month,
+        expiration_year: cardTokenRequest.expiration_year,
+        security_code: "***",
+        cardholder_name: cardData.cardholderName,
+      });
+
+      const response = await this.cardToken.create({
+        body: cardTokenRequest,
+      });
+
+      this.logger.log(`Token de cartão criado com sucesso: ${response.id}`);
+      
+      return response.id;
+    } catch (error) {
+      this.logger.error(`Erro ao criar token de cartão:`, error);
+      throw new BadRequestException(`Erro ao processar cartão: ${error.message}`);
+    }
+  }
 
   // Obter configuração atual
   getConfig(): any {

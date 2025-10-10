@@ -162,6 +162,11 @@ export class UpdateUserDto {
 
 // DTOs para perfil
 export class UpdateProfileDto {
+  @ApiPropertyOptional({ example: 'joao@email.com', description: 'Email do usuário' })
+  @IsOptional()
+  @IsEmail({}, { message: 'Email deve ter um formato válido' })
+  email?: string;
+
   @ApiPropertyOptional({ example: 'João', description: 'Primeiro nome' })
   @IsOptional()
   @IsString({ message: 'Primeiro nome deve ser uma string' })
@@ -284,6 +289,9 @@ export class UserResponseDto {
   // Campos opcionais
   @ApiPropertyOptional({ example: 'uuid-da-imagem-perfil', description: 'ID da imagem de perfil' })
   profileImageId?: string;
+
+  @ApiPropertyOptional({ example: 'https://api.treinopro.com/files/profile-image.jpg', description: 'URL da imagem de perfil' })
+  profileImageUrl?: string;
 
   @ApiPropertyOptional({ example: 'CPF', description: 'Tipo de documento' })
   documentType?: string;

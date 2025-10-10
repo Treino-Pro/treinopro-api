@@ -91,6 +91,17 @@ export class ClassesController {
     return this.classesService.getClassStats(req.user.sub);
   }
 
+  @Get('disputes')
+  @ApiOperation({ summary: 'Listar disputas do usuário' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Disputas listadas com sucesso',
+    type: [ClassDisputeDto]
+  })
+  async getClassDisputes(@Request() req: any): Promise<any[]> {
+    return this.classesService.getClassDisputes(req.user.sub);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obter aula por ID' })
   @ApiParam({ name: 'id', description: 'ID da aula' })
@@ -201,10 +212,6 @@ export class ClassesController {
     return this.classesService.resolveNoShowDispute(id, resolveDto, req.user.sub);
   }
 
-  @Get('disputes')
-  async getClassDisputes(@Request() req: any): Promise<ClassDisputeDto[]> {
-    return this.classesService.getClassDisputes(req.user.sub);
-  }
 
   @Post(':id/cleanup')
   @ApiOperation({ summary: 'Limpar aula expirada manualmente' })

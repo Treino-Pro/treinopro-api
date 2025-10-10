@@ -252,18 +252,47 @@ export class PaymentsService {
 
   // Atualizar carteiras dos usuários
   async updateWallets(payment: any): Promise<void> {
+    console.log('💰 [UPDATE_WALLETS] ===== INÍCIO DO REPASSE PARA O PERSONAL =====');
+    console.log('💰 [UPDATE_WALLETS] Payment ID:', payment.id);
+    console.log('💰 [UPDATE_WALLETS] Class ID:', payment.classId);
+    console.log('💰 [UPDATE_WALLETS] Personal ID:', payment.personalId);
+    console.log('💰 [UPDATE_WALLETS] Student ID:', payment.studentId);
+    console.log('💰 [UPDATE_WALLETS] Valores:', {
+      totalAmount: payment.totalAmount,
+      platformFee: payment.platformFee,
+      personalAmount: payment.personalAmount,
+      status: payment.status
+    });
+
     // Buscar carteira atual do personal
     const personalWallet = await this.getUserWallet(payment.personalId);
+    console.log('💰 [UPDATE_WALLETS] Carteira atual do personal:', {
+      personalId: payment.personalId,
+      availableBalance: personalWallet.availableBalance,
+      totalEarned: personalWallet.totalEarned
+    });
+    
+    // Calcular novos valores
+    const newAvailableBalance = personalWallet.availableBalance + parseFloat(payment.personalAmount);
+    const newTotalEarned = personalWallet.totalEarned + parseFloat(payment.personalAmount);
+    
+    console.log('💰 [UPDATE_WALLETS] Novos valores calculados:', {
+      valorAdicionado: payment.personalAmount,
+      novoSaldoDisponivel: newAvailableBalance,
+      novoTotalGanho: newTotalEarned
+    });
     
     // Atualizar carteira do personal (somar ganhos)
     await this.updateWallet(payment.personalId, {
-      availableBalance: personalWallet.availableBalance + parseFloat(payment.personalAmount),
-      totalEarned: personalWallet.totalEarned + parseFloat(payment.personalAmount),
+      availableBalance: newAvailableBalance,
+      totalEarned: newTotalEarned,
     });
 
-    console.log(`💳 Carteira do personal ${payment.personalId} atualizada: +R$ ${payment.personalAmount}`);
+    console.log('✅ [UPDATE_WALLETS] Carteira do personal atualizada com sucesso');
+    console.log(`💳 [UPDATE_WALLETS] Personal ${payment.personalId} recebeu: +R$ ${payment.personalAmount}`);
 
     // Criar transações
+    console.log('📝 [UPDATE_WALLETS] Criando transação de ganhos do personal...');
     await this.createTransaction({
       paymentId: payment.id,
       userId: payment.personalId,
@@ -272,7 +301,9 @@ export class PaymentsService {
       description: `Ganhos da aula ${payment.classId}`,
       status: PaymentStatus.CAPTURED,
     });
+    console.log('✅ [UPDATE_WALLETS] Transação de ganhos do personal criada');
 
+    console.log('📝 [UPDATE_WALLETS] Criando transação de pagamento do aluno...');
     await this.createTransaction({
       paymentId: payment.id,
       userId: payment.studentId,
@@ -281,6 +312,9 @@ export class PaymentsService {
       description: `Pagamento da aula ${payment.classId}`,
       status: PaymentStatus.CAPTURED,
     });
+    console.log('✅ [UPDATE_WALLETS] Transação de pagamento do aluno criada');
+    
+    console.log('💰 [UPDATE_WALLETS] ===== REPASSE CONCLUÍDO COM SUCESSO =====');
   }
 
   // Criar disputa
@@ -702,6 +736,10 @@ export class PaymentsService {
 
   // Atualizar carteira
   async updateWallet(userId: string, updateDto: UpdateWalletDto): Promise<WalletResponseDto> {
+    console.log('💳 [UPDATE_WALLET] ===== ATUALIZANDO CARTEIRA =====');
+    console.log('💳 [UPDATE_WALLET] User ID:', userId);
+    console.log('💳 [UPDATE_WALLET] Dados de atualização:', updateDto);
+    
     const [updatedWallet] = await this.db
       .update(userWallets)
       .set({
@@ -710,6 +748,9 @@ export class PaymentsService {
       })
       .where(eq(userWallets.userId, userId))
       .returning();
+
+    console.log('✅ [UPDATE_WALLET] Carteira atualizada no banco:', updatedWallet);
+    console.log('💳 [UPDATE_WALLET] ===== CARTEIRA ATUALIZADA COM SUCESSO =====');
 
     return this.formatWalletResponse(updatedWallet);
   }
@@ -779,6 +820,16 @@ export class PaymentsService {
 
   // Métodos auxiliares privados
   private async createTransaction(data: any): Promise<TransactionResponseDto> {
+    console.log('📝 [CREATE_TRANSACTION] ===== CRIANDO TRANSAÇÃO =====');
+    console.log('📝 [CREATE_TRANSACTION] Dados da transação:', {
+      paymentId: data.paymentId,
+      userId: data.userId,
+      type: data.type,
+      amount: data.amount,
+      description: data.description,
+      status: data.status
+    });
+    
     const [transaction] = await this.db
       .insert(paymentTransactions)
       .values({
@@ -786,6 +837,9 @@ export class PaymentsService {
         processedAt: data.status === PaymentStatus.CAPTURED ? new Date() : null,
       })
       .returning();
+
+    console.log('✅ [CREATE_TRANSACTION] Transação criada no banco:', transaction);
+    console.log('📝 [CREATE_TRANSACTION] ===== TRANSAÇÃO CRIADA COM SUCESSO =====');
 
     return this.formatTransactionResponse(transaction);
   }

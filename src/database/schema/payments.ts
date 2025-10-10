@@ -39,7 +39,7 @@ export const payments = pgTable('payments', {
   // Relacionamentos
   classId: uuid('class_id'), // Pode ser NULL para propostas
   studentId: uuid('student_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  personalId: uuid('personal_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  personalId: uuid('personal_id').references(() => users.id, { onDelete: 'cascade' }),
   
   // Para propostas (quando classId é NULL)
   proposalId: uuid('proposal_id'), // ID da proposta quando não há aula
