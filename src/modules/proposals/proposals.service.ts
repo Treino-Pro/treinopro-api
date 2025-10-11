@@ -61,12 +61,14 @@ export class ProposalsService {
             }
           });
 
-          // Filtrar explicitamente propostas canceladas, disputadas e completadas
+          // Filtrar explicitamente propostas canceladas, disputadas, completadas e sem horário
           const beforeFilter = existingProposals.length;
           existingProposals = existingProposals.filter(proposal => 
             proposal.status !== 'cancelled' && 
             proposal.status !== 'disputed' && 
-            proposal.status !== 'completed'
+            proposal.status !== 'completed' &&
+            proposal.trainingTime !== null && 
+            proposal.trainingTime !== undefined
           );
           const afterFilter = existingProposals.length;
           
@@ -86,6 +88,22 @@ export class ProposalsService {
           const disputedProposalIds = new Set(disputedClasses.map(c => c.proposalId).filter(Boolean));
           if (disputedProposalIds.size > 0) {
             existingProposals = existingProposals.filter(p => !disputedProposalIds.has(p.id));
+          }
+
+          // Ignorar propostas matched cujas aulas estão canceladas
+          const cancelledClasses = await this.db.query.classes.findMany({
+            where: and(
+              sql`DATE(${classes.date}) = ${dateString}`,
+              eq(classes.studentId, studentId as any),
+              eq(classes.status, 'cancelled')
+            ),
+            columns: { proposalId: true }
+          });
+          const cancelledProposalIds = new Set(cancelledClasses.map(c => c.proposalId).filter(Boolean));
+          if (cancelledProposalIds.size > 0) {
+            const beforeCancelledFilter = existingProposals.length;
+            existingProposals = existingProposals.filter(p => !cancelledProposalIds.has(p.id));
+            console.log(`  - Propostas filtradas (aulas canceladas): ${beforeCancelledFilter} → ${existingProposals.length}`);
           }
 
           const matchedClasses = await this.db.query.classes.findMany({
@@ -1727,6 +1745,12 @@ export class ProposalsService {
       console.log(`  - Horário: ${proposal.trainingTime}`);
       console.log(`  - Duração: ${proposal.durationMinutes}min`);
       
+      // Pular propostas sem horário definido
+      if (!proposal.trainingTime) {
+        console.log(`⚠️ [BUFFER_DEBUG] Proposta ${proposal.id} sem horário definido, pulando`);
+        continue;
+      }
+      
       const existingStartMinutes = this.timeToMinutes(proposal.trainingTime);
       const existingEndMinutes = existingStartMinutes + (proposal.durationMinutes || 60);
 
@@ -1813,7 +1837,11 @@ export class ProposalsService {
    * Converte horário HH:MM para minutos desde meia-noite
    * Exemplo: "21:30" -> 1290 minutos
    */
-  private timeToMinutes(time: string): number {
+  private timeToMinutes(time: string | null | undefined): number {
+    if (!time) {
+      console.log(`⚠️ [TIME_DEBUG] Horário nulo/undefined: ${time}`);
+      return 0; // Retorna 0 para horários nulos (meia-noite)
+    }
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
   }

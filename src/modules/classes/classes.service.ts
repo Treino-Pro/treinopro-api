@@ -534,6 +534,23 @@ export class ClassesService {
       .where(eq(classes.id, id))
       .returning();
 
+    // ===== ATUALIZAR STATUS DA PROPOSTA ASSOCIADA =====
+    if (classData.proposalId) {
+      try {
+        await this.db
+          .update(proposals)
+          .set({
+            status: 'cancelled',
+            updatedAt: new Date(),
+          })
+          .where(eq(proposals.id, classData.proposalId));
+        
+        console.log(`✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'cancelled'`);
+      } catch (error) {
+        console.error(`❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`, error);
+      }
+    }
+
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
@@ -786,6 +803,23 @@ export class ClassesService {
       })
       .where(eq(classes.id, classId))
       .returning();
+
+    // ===== ATUALIZAR STATUS DA PROPOSTA ASSOCIADA =====
+    if (classData.proposalId) {
+      try {
+        await this.db
+          .update(proposals)
+          .set({
+            status: 'disputed',
+            updatedAt: new Date(),
+          })
+          .where(eq(proposals.id, classData.proposalId));
+        
+        console.log(`✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'disputed'`);
+      } catch (error) {
+        console.error(`❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`, error);
+      }
+    }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
