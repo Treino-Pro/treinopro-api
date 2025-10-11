@@ -199,10 +199,24 @@ export class ProposalsService {
         proposal.id // Usar ID real da proposta
       );
 
-      if (!paymentResult.success) {
+      // Considerar sucesso quando MP autorizar/aprovar.
+      // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
+      const statusOk = ['authorized', 'approved', 'captured'].includes(String(paymentResult.status || '').toLowerCase());
+      const isSimulated = Boolean((paymentResult as any)?._simulated);
+      const allowSimulated = process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
+      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+
+      if (
+        !paymentResult.success ||
+        !statusOk ||
+        (isSimulated && !(allowSimulated && isTestEnv))
+      ) {
         // Se pagamento falhar, deletar proposta criada
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
-        throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
+        const reason = isSimulated
+          ? 'Pagamento em simulação (sandbox) não permite criar proposta'
+          : (paymentResult.message || 'Falha no pagamento');
+        throw new BadRequestException(`Falha no pagamento: ${reason}`);
       }
 
       // Atualizar proposta com dados do pagamento
@@ -287,8 +301,17 @@ export class ProposalsService {
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro no pagamento:', error.message);
-      
-      // Se falhar no pagamento, não criar a proposta
+      // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
+      try {
+        // 'proposal' existe no escopo externo
+        if (proposal?.id) {
+          await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
+          console.log('🗑️ [PROPOSALS] Proposta removida devido a falha no pagamento:', proposal.id);
+        }
+      } catch (cleanupErr) {
+        console.error('⚠️ [PROPOSALS] Erro ao remover proposta após falha no pagamento:', cleanupErr);
+      }
+      // Propagar erro amigável
       throw new BadRequestException(`Erro no pagamento: ${error.message}`);
     }
   }
@@ -368,10 +391,24 @@ export class ProposalsService {
         proposal.id // Usar ID real da proposta
       );
 
-      if (!paymentResult.success) {
+      // Considerar sucesso quando MP autorizar/aprovar.
+      // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
+      const statusOk = ['authorized', 'approved', 'captured'].includes(String(paymentResult.status || '').toLowerCase());
+      const isSimulated = Boolean((paymentResult as any)?._simulated);
+      const allowSimulated = process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
+      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+
+      if (
+        !paymentResult.success ||
+        !statusOk ||
+        (isSimulated && !(allowSimulated && isTestEnv))
+      ) {
         // Se pagamento falhar, deletar proposta criada
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
-        throw new BadRequestException(`Falha no pagamento: ${paymentResult.message}`);
+        const reason = isSimulated
+          ? 'Pagamento em simulação (sandbox) não permite criar proposta'
+          : (paymentResult.message || 'Falha no pagamento');
+        throw new BadRequestException(`Falha no pagamento: ${reason}`);
       }
 
       // Atualizar proposta com dados do pagamento
@@ -446,8 +483,16 @@ export class ProposalsService {
 
     } catch (error) {
       console.error('❌ [PROPOSALS SERVICE] Erro no pagamento da recontratação:', error.message);
-      
-      // Se falhar no pagamento, não criar a proposta
+      // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
+      try {
+        if (proposal?.id) {
+          await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
+          console.log('🗑️ [PROPOSALS SERVICE] Proposta de recontratação removida por falha no pagamento:', proposal.id);
+        }
+      } catch (cleanupErr) {
+        console.error('⚠️ [PROPOSALS SERVICE] Erro ao remover proposta de recontratação após falha:', cleanupErr);
+      }
+      // Propagar erro amigável
       throw new BadRequestException(`Erro no pagamento: ${error.message}`);
     }
   }
@@ -1367,6 +1412,8 @@ export class ProposalsService {
           installments: createProposalDto.installments || '1',
           saveCard: createProposalDto.saveCard || false,
           cardNickname: createProposalDto.cardNickname,
+          payerEmail: createProposalDto.payerEmail, // ✅ Passar email do pagador
+          payerCpf: createProposalDto.payerCpf, // ✅ Passar CPF do pagador
         };
         
         console.log('📤 [PROPOSALS] Dados enviados para processProposalPayment:', paymentDto);
@@ -1375,6 +1422,7 @@ export class ProposalsService {
         const proposalData = {
           price: createProposalDto.price,
           personalId: 'temp-personal-id', // Será definido quando personal aceitar
+          studentEmail: userData.email,
         };
         
         // Processar pagamento automático da proposta usando cartão salvo
@@ -1466,60 +1514,20 @@ export class ProposalsService {
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
       console.error('❌ [PROPOSALS] Stack trace:', error.stack);
-      console.log('🔄 [PROPOSALS] Caindo no fallback de simulação devido ao erro acima');
+      console.log('🚫 [PROPOSALS] Pagamento falhou - proposta não será criada');
       
-      // Fallback para simulação se MP falhar
-      return this.simulatePaymentForProposal(createProposalDto, proposalId);
+      // CORREÇÃO: Se o pagamento falhar, NÃO criar a proposta
+      throw new BadRequestException(`Erro ao processar pagamento: ${error.message}`);
     }
   }
 
-  // ===== FALLBACK: SIMULAÇÃO DE PAGAMENTO =====
+  // ===== MÉTODO DE SIMULAÇÃO DESABILITADO =====
+  // Este método foi desabilitado para evitar criação de propostas sem pagamento real
+  // Em caso de erro de pagamento, a proposta não deve ser criada
 
   private simulatePaymentForProposal(createProposalDto: CreateProposalDto, proposalId: string): any {
-    
-
-    // Simular diferentes métodos de pagamento
-    switch (createProposalDto.paymentMethod) {
-      case 'pix':
-        return {
-          success: true,
-          paymentId: proposalId, // Usar ID real da proposta
-          status: 'pending',
-          method: 'pix',
-          amount: createProposalDto.price,
-          qrCode: `pix_qr_${proposalId}`,
-          qrCodeBase64: Buffer.from(`pix_qr_${proposalId}`).toString('base64'),
-          message: 'PIX gerado com sucesso (simulação). Escaneie o QR Code para pagar.',
-        };
-
-      case 'credit_card':
-      case 'debit_card':
-        return {
-          success: true,
-          paymentId: proposalId, // Usar ID real da proposta
-          status: 'approved', // Cartão aprovado imediatamente (mock)
-          method: createProposalDto.paymentMethod,
-          amount: createProposalDto.price,
-          message: 'Pagamento aprovado com sucesso (simulação).',
-        };
-
-      case 'mercado_pago':
-        return {
-          success: true,
-          paymentId: proposalId, // Usar ID real da proposta
-          status: 'pending',
-          method: 'mercado_pago',
-          amount: createProposalDto.price,
-          checkoutUrl: `https://mercadopago.com/checkout/${proposalId}`,
-          message: 'Redirecionando para o Mercado Pago (simulação)...',
-        };
-
-      default:
-        return {
-          success: false,
-          message: 'Método de pagamento não suportado',
-        };
-    }
+    // MÉTODO DESABILITADO - Não deve ser usado em produção
+    throw new BadRequestException('Simulação de pagamento desabilitada. Pagamento real é obrigatório.');
   }
 
   async getProposalStats(userId: string, userType: string): Promise<any> {

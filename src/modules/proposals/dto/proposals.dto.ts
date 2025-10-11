@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength, IsIn, IsBoolean } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength, IsIn, IsBoolean, IsEmail, Length, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum ProposalStatus {
@@ -155,6 +155,26 @@ export class CreateProposalDto {
   @IsOptional()
   @IsString()
   cardNickname?: string;
+
+  @ApiProperty({
+    description: 'Email do pagador (aluno)',
+    example: 'aluno@email.com',
+    required: false,
+  })
+  @IsOptional()
+  @IsEmail()
+  payerEmail?: string;
+
+  @ApiProperty({
+    description: 'CPF do pagador (aluno) - apenas dígitos',
+    example: '12345678901',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(11, 11, { message: 'CPF deve ter 11 dígitos' })
+  @Matches(/^\d+$/, { message: 'CPF deve conter apenas dígitos' })
+  payerCpf?: string;
 }
 
 export class CreateRecontractDto extends CreateProposalDto {

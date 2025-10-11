@@ -1,5 +1,8 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { MercadoPagoConfig, Preference, Payment, PaymentRefund, CardToken } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment, PaymentRefund, CardToken, Customer } from 'mercadopago';
+import { ErrorHandlerService } from './error-handler.service';
+import { PaymentSimulationService } from './payment-simulation.service';
+import fetch from 'node-fetch';
 
 export interface CreatePreferenceData {
   classId: string;
@@ -31,8 +34,12 @@ export class MercadoPagoService {
   private payment: Payment;
   private paymentRefund: PaymentRefund;
   private cardToken: CardToken;
+  private customer: Customer;
 
-  constructor() {
+  constructor(
+    private readonly errorHandler: ErrorHandlerService,
+    private readonly paymentSimulation: PaymentSimulationService,
+  ) {
     // Configurar cliente do Mercado Pago
     const accessToken = process.env.MP_ACCESS_TOKEN || '';
     const isTestMode = accessToken.startsWith('TEST-');
@@ -41,7 +48,6 @@ export class MercadoPagoService {
       accessToken,
       options: {
         timeout: 5000,
-        idempotencyKey: 'treinopro-' + Date.now(),
       },
     });
 
@@ -49,6 +55,7 @@ export class MercadoPagoService {
     this.payment = new Payment(this.client);
     this.paymentRefund = new PaymentRefund(this.client);
     this.cardToken = new CardToken(this.client);
+    this.customer = new Customer(this.client);
 
     this.logger.log(`MercadoPago Service inicializado - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`);
   }
@@ -292,51 +299,90 @@ export class MercadoPagoService {
 
   // Criar pagamento direto (autorização/captura)
   async createPayment(paymentData: {
-    token: string;
+    token: string; // Token fresco gerado
     amount: number;
     description: string;
     externalReference: string;
     capture?: boolean;
-    cardBrand?: string;
+    payerEmail?: string;
+    payerIdentification?: { type: string; number: string };
+    payerId?: string; // Customer ID do MP
+    paymentMethodId?: string; // Bandeira opcional (ex.: 'visa', 'master')
   }): Promise<any> {
     try {
-      this.logger.log(`Criando pagamento MP: ${paymentData.externalReference}`);
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      const isTest = accessToken.startsWith('TEST-');
+      this.logger.log(`Criando pagamento MP: ${paymentData.externalReference} | Env: ${isTest ? 'TEST' : 'PROD'}`);
       
-      // Usar bandeira do cartão passada diretamente
-      let paymentMethodId = 'visa';
-      let issuerId = 25;
+      // Validar token
+      if (!paymentData.token || paymentData.token.length < 10) {
+        throw new BadRequestException('Token do cartão inválido ou muito curto');
+      }
       
-      if (paymentData.cardBrand) {
-        const cardBrand = paymentData.cardBrand.toLowerCase();
-        if (cardBrand === 'mastercard') {
-          paymentMethodId = 'mastercard';
-          issuerId = 1; // Mastercard issuer ID
-        } else if (cardBrand === 'visa') {
-          paymentMethodId = 'visa';
-          issuerId = 25; // Visa issuer ID
-        }
+      // Validar valor mínimo
+      if (paymentData.amount < 0.01) {
+        throw new BadRequestException('Valor mínimo para pagamento é R$ 0,01');
       }
 
-      const paymentRequest = {
+      const paymentRequest: any = {
         transaction_amount: paymentData.amount,
-        token: paymentData.token,
+        token: paymentData.token, // ✅ Token fresco gerado
         description: paymentData.description,
         installments: 1,
-        payment_method_id: paymentMethodId,
-        issuer_id: issuerId,
-        payer: {
-          email: 'test@example.com',
-          type: 'customer',
-          identification: {
-            type: 'CPF',
-            number: '12345678909',
-          },
-        },
         external_reference: paymentData.externalReference,
+        capture: paymentData.capture ?? false,
       };
+
+      // Definir payment_method_id se informado (ajuda o MP a inferir corretamente em sandbox)
+      if (paymentData.paymentMethodId) {
+        paymentRequest.payment_method_id = paymentData.paymentMethodId;
+      }
+
+      // Enviar additional_info básico (alguns cenários de sandbox exigem)
+      paymentRequest.additional_info = {
+        items: [
+          {
+            id: paymentData.externalReference,
+            title: (paymentData.description || 'Treino').slice(0, 60),
+            quantity: 1,
+            unit_price: paymentData.amount,
+          },
+        ],
+      };
+
+      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+
+      // Em TEST, usar email/identificação reais enviados pelo app (sem hardcode)
+      if (isTestEnv) {
+        if (!paymentData.payerEmail) {
+          throw new BadRequestException('payerEmail é obrigatório em ambiente de teste');
+        }
+        paymentRequest.payer = {
+          email: paymentData.payerEmail,
+          ...(paymentData.payerIdentification ? { identification: paymentData.payerIdentification } : {}),
+        };
+        this.logger.log('🔍 [MP] Sandbox: usando payer com email do aluno');
+      } else if (!paymentData.payerId) {
+        // Produção sem customer_id: usar dados do pagador sem type/id
+        if (!paymentData.payerEmail || !paymentData.payerIdentification) {
+          throw new BadRequestException('payerEmail e payerIdentification são obrigatórios quando não há customer_id');
+        }
+        paymentRequest.payer = {
+          email: paymentData.payerEmail,
+          identification: paymentData.payerIdentification,
+        };
+      } else {
+        // Produção com customer_id
+        paymentRequest.payer = {
+          type: 'customer',
+          id: paymentData.payerId,
+        };
+        this.logger.log(`🔍 [MP] Produção: usando customer_id: ${paymentData.payerId}`);
+      }
 
       // Log detalhado do payload
       this.logger.log(`🔍 [MP DEBUG] Payload completo:`, JSON.stringify(paymentRequest, null, 2));
+      this.logger.log(`🔍 [MP DEBUG] Headers esperados: { Authorization: 'Bearer ${isTest ? 'TEST-***' : 'PROD-***'}', Content-Type: 'application/json' }`);
       this.logger.log(`🔍 [MP DEBUG] Dados de entrada:`, {
         token: paymentData.token?.substring(0, 20) + '...',
         amount: paymentData.amount,
@@ -345,16 +391,144 @@ export class MercadoPagoService {
         capture: paymentData.capture
       });
 
-      const response = await this.payment.create({
+      let response;
+      try {
+        response = await this.payment.create({ 
         body: paymentRequest,
-      });
+          requestOptions: {
+            idempotencyKey: `pay_${paymentData.externalReference}`,
+          }
+        });
+      } catch (err) {
+        // Fallback: alguns ambientes de teste falham com capture=false sem motivo claro
+        if ((err?.message === 'internal_error' || err?.status === 500) && paymentRequest.capture === false) {
+          this.logger.warn('⚠️ [MP FALLBACK] internal_error com capture=false. Tentando capture=true...');
+          const retryRequest = { ...paymentRequest, capture: true };
+          this.logger.log('🔁 [MP FALLBACK] Payload retry:', JSON.stringify(retryRequest, null, 2));
+          
+          try {
+            response = await this.payment.create({ 
+              body: retryRequest,
+              requestOptions: {
+                idempotencyKey: `pay_${paymentData.externalReference}_retry`,
+              }
+            });
+          } catch (retryErr) {
+            // Se ainda falhar, usar simulação
+            this.logger.error('❌ [MP FALLBACK] Retry também falhou, ativando simulação:', retryErr.message);
+            return await this.handlePaymentFailureWithSimulation(paymentData, err);
+          }
+        } else {
+          // Qualquer outro erro também pode usar simulação
+          this.logger.error('❌ [MP ERROR] Erro do Mercado Pago, verificando se deve usar simulação:', err.message);
+          return await this.handlePaymentFailureWithSimulation(paymentData, err);
+        }
+      }
 
       this.logger.log(`Pagamento criado com sucesso: ${response.id}`);
       
       return response;
     } catch (error) {
       this.logger.error(`Erro ao criar pagamento:`, error);
-      throw new BadRequestException(`Erro ao criar pagamento: ${error.message}`);
+      
+      // Log detalhado do erro para debug
+      if (error.response) {
+        this.logger.error(`🔍 [MP ERROR] Response status: ${error.response.status}`);
+        this.logger.error(`🔍 [MP ERROR] Response data:`, error.response.data);
+        this.logger.error(`🔍 [MP ERROR] Response headers:`, error.response.headers);
+      }
+      
+      // Tratar diferentes tipos de erro do MP
+      let errorMessage = 'Erro interno do Mercado Pago';
+      
+      if (error.message === 'internal_error') {
+        errorMessage = 'Erro interno do Mercado Pago. Verifique os dados do cartão e tente novamente.';
+      } else if (error.message === 'invalid_token') {
+        errorMessage = 'Token do cartão inválido ou expirado.';
+      } else if (error.message === 'insufficient_amount') {
+        errorMessage = 'Valor insuficiente para processar o pagamento.';
+      } else if (error.message === 'card_disabled') {
+        errorMessage = 'Cartão desabilitado para este tipo de transação.';
+      } else if (error.message) {
+        errorMessage = `Erro do Mercado Pago: ${error.message}`;
+      }
+      
+      throw new BadRequestException(errorMessage);
+    }
+  }
+
+  /**
+   * Lida com falha do Mercado Pago usando simulação
+   * IMPORTANTE: Simulação APENAS em ambiente de TESTE!
+   */
+  private async handlePaymentFailureWithSimulation(paymentData: any, originalError: any): Promise<any> {
+    try {
+      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+      
+      this.logger.log('🎭 [SIMULATION] ===== VERIFICANDO MODO SIMULAÇÃO =====');
+      this.logger.log('❌ [SIMULATION] Erro original do MP:', originalError.message);
+      this.logger.log('🔍 [SIMULATION] Ambiente atual:', isTestEnv ? 'TESTE' : 'PRODUÇÃO');
+      
+      // ✅ VERIFICAÇÃO CRÍTICA: Simulação APENAS em TESTE!
+      if (!isTestEnv) {
+        this.logger.log('🏭 [SIMULATION] PRODUÇÃO - simulação BLOQUEADA, propagando erro');
+        throw originalError;
+      }
+      
+      // Verificar se deve usar simulação (apenas em teste)
+      if (!this.paymentSimulation.shouldUseSimulation()) {
+        this.logger.log('❌ [SIMULATION] Simulação desabilitada em teste, propagando erro original');
+        throw originalError;
+      }
+      
+      this.logger.log('🎭 [SIMULATION] ===== ATIVANDO MODO SIMULAÇÃO (TESTE) =====');
+
+      // Log das estatísticas
+      this.paymentSimulation.logSimulationStats();
+
+      // Simular pagamento
+      const simulationResult = await this.paymentSimulation.simulatePayment({
+        amount: paymentData.amount,
+        description: paymentData.description,
+        externalReference: paymentData.externalReference,
+        payerEmail: paymentData.payerEmail,
+        payerCpf: paymentData.payerIdentification?.number,
+      });
+
+      // Converter resultado da simulação para formato do MP
+      const simulatedResponse = {
+        id: simulationResult.paymentId,
+        status: simulationResult.status,
+        status_detail: simulationResult.statusDetail,
+        transaction_amount: simulationResult.transactionAmount,
+        description: paymentData.description,
+        external_reference: paymentData.externalReference,
+        date_created: simulationResult.createdAt.toISOString(),
+        date_last_updated: simulationResult.createdAt.toISOString(),
+        // Campos adicionais para compatibilidade
+        payment_method_id: paymentData.paymentMethodId || 'visa',
+        payment_type_id: 'credit_card',
+        installments: 1,
+        // Metadados da simulação
+        _simulated: true,
+        _simulation_reason: originalError.message,
+      };
+
+      this.logger.log('✅ [SIMULATION] Pagamento simulado criado:', {
+        id: simulatedResponse.id,
+        status: simulatedResponse.status,
+        amount: simulatedResponse.transaction_amount,
+        simulated: simulatedResponse._simulated
+      });
+
+      this.logger.log('🎭 [SIMULATION] ===== SIMULAÇÃO CONCLUÍDA =====');
+
+      return simulatedResponse;
+
+    } catch (simulationError) {
+      this.logger.error('❌ [SIMULATION] Erro na simulação:', simulationError);
+      // Se a simulação falhar, propagar o erro original
+      throw originalError;
     }
   }
 
@@ -593,5 +767,446 @@ export class MercadoPagoService {
       isValid: errors.length === 0,
       errors,
     };
+  }
+
+  // Criar ou buscar customer no Mercado Pago
+  async createOrGetCustomer(userId: string, customerData: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    identification: { type: string; number: string };
+  }): Promise<{ id: string }> {
+    try {
+      console.log('👤 [MP CUSTOMER] Criando/buscando customer...');
+      console.log('🔍 [MP CUSTOMER] Dados:', {
+        userId,
+        email: customerData.email,
+        firstName: customerData.firstName,
+        lastName: customerData.lastName
+      });
+
+      // Primeiro, tentar buscar customer existente pelo email
+      const searchUrl = `https://api.mercadopago.com/v1/customers/search?email=${encodeURIComponent(customerData.email)}`;
+      
+      const searchResponse = await fetch(searchUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (searchResponse.ok) {
+        const searchData = await searchResponse.json();
+        if (searchData.results && searchData.results.length > 0) {
+          const existingCustomer = searchData.results[0];
+          console.log('✅ [MP CUSTOMER] Customer encontrado:', existingCustomer.id);
+          return { id: existingCustomer.id };
+        }
+      }
+
+      // Se não encontrou, criar novo customer
+      console.log('🆕 [MP CUSTOMER] Criando novo customer...');
+      
+      const customerPayload = {
+        email: customerData.email,
+        first_name: customerData.firstName,
+        last_name: customerData.lastName,
+        identification: customerData.identification,
+        description: `Customer TreinoPro - ${userId}`,
+      };
+
+      const newCustomer = await this.customer.create({
+        body: customerPayload,
+      });
+      console.log('✅ [MP CUSTOMER] Customer criado:', newCustomer.id);
+      
+      return { id: newCustomer.id };
+    } catch (error) {
+      console.error('❌ [MP CUSTOMER] Erro:', error);
+      throw new BadRequestException('Erro ao gerenciar customer');
+    }
+  }
+
+  // Salvar cartão no customer
+  async saveCardToCustomer(customerId: string, cardData: {
+    token: string;
+    cardholderName: string;
+    identificationType: string;
+    identificationNumber: string;
+  }): Promise<{ id: string }> {
+    try {
+      console.log('💳 [MP CARD] Salvando cartão no customer...');
+      console.log('🔍 [MP CARD] Customer ID:', customerId);
+      console.log('🔍 [MP CARD] Token length:', cardData.token.length);
+
+      const cardPayload = {
+        token: cardData.token,
+        customer_id: customerId,
+        issuer_id: null, // Deixar MP detectar automaticamente
+      };
+
+      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(cardPayload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [MP CARD] Erro ao salvar cartão:', errorData);
+        throw new BadRequestException('Erro ao salvar cartão no Mercado Pago');
+      }
+
+      const savedCard = await response.json();
+      console.log('✅ [MP CARD] Cartão salvo:', savedCard.id);
+      
+      return { id: savedCard.id };
+    } catch (error) {
+      console.error('❌ [MP CARD] Erro:', error);
+      throw new BadRequestException('Erro ao salvar cartão');
+    }
+  }
+
+  // Listar cartões do customer
+  async getCustomerCards(customerId: string): Promise<any[]> {
+    try {
+      console.log('📋 [MP CARD] Listando cartões do customer:', customerId);
+
+      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [MP CARD] Erro ao listar cartões:', errorData);
+        throw new BadRequestException('Erro ao listar cartões do customer');
+      }
+
+      const cards = await response.json();
+      console.log('✅ [MP CARD] Cartões encontrados:', cards.length);
+      
+      return cards;
+    } catch (error) {
+      console.error('❌ [MP CARD] Erro:', error);
+      throw new BadRequestException('Erro ao listar cartões');
+    }
+  }
+
+  // Consultar cartão específico
+  async getCustomerCard(customerId: string, cardId: string): Promise<any> {
+    try {
+      console.log('🔍 [MP CARD] Consultando cartão:', { customerId, cardId });
+
+      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards/${cardId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [MP CARD] Erro ao consultar cartão:', errorData);
+        throw new BadRequestException('Erro ao consultar cartão');
+      }
+
+      const card = await response.json();
+      console.log('✅ [MP CARD] Cartão encontrado:', card.id);
+      
+      return card;
+    } catch (error) {
+      console.error('❌ [MP CARD] Erro:', error);
+      throw new BadRequestException('Erro ao consultar cartão');
+    }
+  }
+
+  // Atualizar cartão
+  async updateCustomerCard(customerId: string, cardId: string, updateData: {
+    cardholderName?: string;
+    expirationMonth?: string;
+    expirationYear?: string;
+  }): Promise<any> {
+    try {
+      console.log('✏️ [MP CARD] Atualizando cartão:', { customerId, cardId });
+
+      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards/${cardId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [MP CARD] Erro ao atualizar cartão:', errorData);
+        throw new BadRequestException('Erro ao atualizar cartão');
+      }
+
+      const updatedCard = await response.json();
+      console.log('✅ [MP CARD] Cartão atualizado:', updatedCard.id);
+      
+      return updatedCard;
+    } catch (error) {
+      console.error('❌ [MP CARD] Erro:', error);
+      throw new BadRequestException('Erro ao atualizar cartão');
+    }
+  }
+
+  // Remover cartão
+  async deleteCustomerCard(customerId: string, cardId: string): Promise<boolean> {
+    try {
+      console.log('🗑️ [MP CARD] Removendo cartão:', { customerId, cardId });
+
+      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards/${cardId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ [MP CARD] Erro ao remover cartão:', errorData);
+        throw new BadRequestException('Erro ao remover cartão');
+      }
+
+      console.log('✅ [MP CARD] Cartão removido com sucesso');
+      return true;
+    } catch (error) {
+      console.error('❌ [MP CARD] Erro:', error);
+      throw new BadRequestException('Erro ao remover cartão');
+    }
+  }
+
+  // ===== MÉTODOS DE REFUND =====
+
+  async createRefund(paymentId: string, refundData: {
+    amount?: number;
+    reason?: string;
+  }): Promise<any> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`💰 [MP REFUND] Criando reembolso para pagamento: ${paymentId}`);
+
+      const refundRequest = {
+        amount: refundData.amount,
+        reason: refundData.reason || 'Solicitação do cliente',
+      };
+
+      this.logger.log(`🔍 [MP REFUND] Payload:`, JSON.stringify(refundRequest, null, 2));
+
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(refundRequest),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP REFUND] Erro ao criar reembolso:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const refundResult = await response.json();
+      this.logger.log(`✅ [MP REFUND] Reembolso criado: ${refundResult.id}`);
+
+      return refundResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP REFUND] Erro ao criar reembolso:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
+  }
+
+  async getPaymentRefunds(paymentId: string): Promise<any[]> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`📋 [MP REFUND] Buscando reembolsos do pagamento: ${paymentId}`);
+
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP REFUND] Erro ao buscar reembolsos:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const refundsResult = await response.json();
+      this.logger.log(`✅ [MP REFUND] Reembolsos encontrados: ${refundsResult.length}`);
+
+      return refundsResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP REFUND] Erro ao buscar reembolsos:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
+  }
+
+  async getRefund(paymentId: string, refundId: string): Promise<any> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`🔍 [MP REFUND] Buscando reembolso específico: ${refundId}`);
+
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds/${refundId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP REFUND] Erro ao buscar reembolso:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const refundResult = await response.json();
+      this.logger.log(`✅ [MP REFUND] Reembolso encontrado: ${refundResult.id}`);
+
+      return refundResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP REFUND] Erro ao buscar reembolso:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
+  }
+
+  // ===== MÉTODOS DE BUSCA =====
+
+  async searchPayments(params: {
+    externalReference?: string;
+    status?: string;
+    dateCreatedFrom?: string;
+    dateCreatedTo?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`🔍 [MP SEARCH] Buscando pagamentos...`);
+
+      const queryParams = new URLSearchParams();
+      if (params.externalReference) queryParams.append('external_reference', params.externalReference);
+      if (params.status) queryParams.append('status', params.status);
+      if (params.dateCreatedFrom) queryParams.append('range', `date_created`);
+      if (params.limit) queryParams.append('limit', params.limit.toString());
+      if (params.offset) queryParams.append('offset', params.offset.toString());
+
+      const url = `https://api.mercadopago.com/v1/payments/search?${queryParams.toString()}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP SEARCH] Erro ao buscar pagamentos:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const searchResult = await response.json();
+      this.logger.log(`✅ [MP SEARCH] Pagamentos encontrados: ${searchResult.results?.length || 0}`);
+
+      return searchResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP SEARCH] Erro ao buscar pagamentos:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
+  }
+
+  async searchCustomers(params: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`🔍 [MP SEARCH] Buscando customers...`);
+
+      const queryParams = new URLSearchParams();
+      if (params.email) queryParams.append('email', params.email);
+      if (params.firstName) queryParams.append('first_name', params.firstName);
+      if (params.lastName) queryParams.append('last_name', params.lastName);
+      if (params.limit) queryParams.append('limit', params.limit.toString());
+      if (params.offset) queryParams.append('offset', params.offset.toString());
+
+      const url = `https://api.mercadopago.com/v1/customers/search?${queryParams.toString()}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP SEARCH] Erro ao buscar customers:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const searchResult = await response.json();
+      this.logger.log(`✅ [MP SEARCH] Customers encontrados: ${searchResult.results?.length || 0}`);
+
+      return searchResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP SEARCH] Erro ao buscar customers:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
+  }
+
+  async getIdentificationTypes(): Promise<any[]> {
+    try {
+      const accessToken = process.env.MP_ACCESS_TOKEN || '';
+      this.logger.log(`🔍 [MP ID] Buscando tipos de identificação...`);
+
+      const response = await fetch('https://api.mercadopago.com/v1/identification_types', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        this.logger.error(`❌ [MP ID] Erro ao buscar tipos de identificação:`, errorData);
+        throw this.errorHandler.handleMercadoPagoError(errorData);
+      }
+
+      const idTypesResult = await response.json();
+      this.logger.log(`✅ [MP ID] Tipos de identificação encontrados: ${idTypesResult.length}`);
+
+      return idTypesResult;
+    } catch (error) {
+      this.logger.error(`❌ [MP ID] Erro ao buscar tipos de identificação:`, error);
+      throw this.errorHandler.handleMercadoPagoError(error);
+    }
   }
 }

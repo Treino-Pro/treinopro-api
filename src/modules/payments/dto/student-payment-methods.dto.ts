@@ -155,6 +155,16 @@ export class ProcessClassPaymentDto {
   @IsString()
   @IsOptional()
   cardNickname?: string; // Apelido para o cartão (se salvar)
+
+  // Dados do pagador (vindos do app)
+  @IsEmail()
+  @IsOptional()
+  payerEmail?: string;
+
+  @IsString()
+  @IsOptional()
+  @Matches(/^\d{11}$/, { message: 'CPF deve conter 11 dígitos numéricos' })
+  payerCpf?: string;
 }
 
 // DTO para resposta do processamento

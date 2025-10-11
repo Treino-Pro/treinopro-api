@@ -310,6 +310,8 @@ export const savedCards = pgTable('saved_cards', {
   
   // Dados do cartão (tokenizados/criptografados)
   mpCardToken: varchar('mp_card_token', { length: 255 }), // Token do MP
+  mpCustomerId: varchar('mp_customer_id', { length: 255 }), // ID do customer no MP
+  mpCardId: varchar('mp_card_id', { length: 255 }), // ID do cartão salvo no MP
   cardBrand: cardBrandEnum('card_brand').notNull(),
   cardType: cardTypeEnum('card_type').notNull(),
   lastFourDigits: varchar('last_four_digits', { length: 4 }).notNull(),

@@ -354,17 +354,22 @@ export class ClassesService {
         studentId: payment?.studentId
       });
 
-      if (payment && payment.status === 'captured') {
-        console.log('✅ [COMPLETE_CLASS] Pagamento capturado - iniciando repasse para o personal');
-        // Aplicar split e atualizar carteira do personal
-        await this.paymentsService.updateWallets(payment);
-        console.log('✅ [COMPLETE_CLASS] Split aplicado e carteira do personal atualizada com sucesso');
+      if (payment) {
+        if (payment.status === 'authorized') {
+          console.log('✅ [COMPLETE_CLASS] Pagamento em custódia - iniciando captura e split');
+          await this.paymentsService.capturePaymentAfterClass(id, 'Aula concluída');
+          console.log('✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService');
+        } else if (payment.status === 'captured') {
+          // Já capturado: split e carteira devem ter sido aplicados no fluxo de pagamentos (webhook/capture)
+          console.log('ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário');
+        } else {
+          console.log('⚠️ [COMPLETE_CLASS] Pagamento com status inesperado para repasse:', {
+            paymentStatus: payment.status,
+            expectedStatuses: ['authorized', 'captured']
+          });
+        }
       } else {
-        console.log('⚠️ [COMPLETE_CLASS] Pagamento não encontrado ou não capturado:', {
-          paymentExists: !!payment,
-          paymentStatus: payment?.status,
-          expectedStatus: 'captured'
-        });
+        console.log('⚠️ [COMPLETE_CLASS] Nenhum pagamento encontrado para esta aula');
       }
       
       console.log('💰 [COMPLETE_CLASS] ===== PROCESSO DE REPASSE FINALIZADO =====');
