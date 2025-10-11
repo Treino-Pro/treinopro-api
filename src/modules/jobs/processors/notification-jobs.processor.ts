@@ -19,6 +19,18 @@ export class NotificationJobsProcessor {
   async handleSendNotification(job: Job<NotificationJobData>): Promise<void> {
     const { userId, type, template, data, priority } = job.data;
     
+    // Validar se userId é um UUID válido
+    if (!userId || userId === '') {
+      this.logger.error(`❌ Job de notificação recebido com userId vazio ou nulo`);
+      return;
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(userId)) {
+      this.logger.error(`❌ Job de notificação recebido com userId inválido: ${userId}`);
+      return;
+    }
+    
     this.logger.log(`📱 Enviando ${type} para usuário ${userId} (${template})`);
 
     try {
@@ -173,6 +185,13 @@ export class NotificationJobsProcessor {
 
       const template = reminderType === 'first' ? 'payment-reminder-first' : 'payment-reminder-final';
       const timeLeft = reminderType === 'first' ? '20 minutos' : '5 minutos';
+
+      // Validar se studentId é um UUID válido
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(proposal.studentId)) {
+        this.logger.error(`❌ Proposta ${proposalId} possui studentId inválido: ${proposal.studentId}`);
+        return;
+      }
 
       await this.notificationsService.sendEmail(proposal.studentId, template, {
         firstName: proposal.firstName,

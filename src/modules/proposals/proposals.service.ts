@@ -1191,7 +1191,7 @@ export class ProposalsService {
     try {
       // Lembrete aos 10 minutos (20 min restantes)
       await this.jobsService.scheduleNotification({
-        userId: '', // Será preenchido no processor
+        userId: null, // Será preenchido no processor
         type: 'push',
         template: 'payment-reminder',
         data: { proposalId, reminderType: 'first' },
@@ -1200,7 +1200,7 @@ export class ProposalsService {
 
       // Lembrete final aos 25 minutos (5 min restantes)
       await this.jobsService.scheduleNotification({
-        userId: '', // Será preenchido no processor
+        userId: null, // Será preenchido no processor
         type: 'push',
         template: 'payment-reminder',
         data: { proposalId, reminderType: 'final' },
