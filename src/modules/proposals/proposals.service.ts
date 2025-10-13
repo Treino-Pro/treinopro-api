@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
-import { proposals, users, classes, payments, ratings } from '../../database/schema';
+import { proposals, users, classes, payments, ratings, files } from '../../database/schema';
 import { eq, and, desc, gte, lte, ilike, count, sql, or, lt } from 'drizzle-orm';
 import { CreateProposalDto, CreateRecontractDto, UpdateProposalDto, ProposalQueryDto, ProposalResponseDto, ProposalListResponseDto, ProposalStatus } from './dto/proposals.dto';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
@@ -268,7 +268,7 @@ export class ProposalsService {
         .limit(1);
 
       // Retornar proposta com dados do pagamento e do usuário
-      const proposalResponse = this.mapToResponseDto(updatedProposal, student);
+      const proposalResponse = await this.mapToResponseDto(updatedProposal, student);
       
       // ===== NOTIFICAR TODOS OS PERSONAIS ONLINE =====
       try {
@@ -445,7 +445,7 @@ export class ProposalsService {
       }
 
       // Retornar proposta com dados do pagamento e do usuário
-      const proposalResponse = this.mapToResponseDto(proposal, user);
+      const proposalResponse = await this.mapToResponseDto(proposal, user);
       
       // ===== NOTIFICAR PERSONAL ESPECÍFICO =====
       try {
@@ -564,6 +564,7 @@ export class ProposalsService {
           studentFirstName: users.firstName,
           studentLastName: users.lastName,
           studentEmail: users.email,
+          studentProfileImageId: users.profileImageId,
         })
         .from(proposals)
         .leftJoin(users, eq(proposals.studentId, users.id))
@@ -582,7 +583,7 @@ export class ProposalsService {
 
 
     return {
-      proposals: proposalsList.map(proposal => this.mapToResponseDto(proposal)),
+      proposals: await Promise.all(proposalsList.map(proposal => this.mapToResponseDto(proposal))),
       total,
       page,
       limit,
@@ -612,7 +613,7 @@ export class ProposalsService {
       .where(eq(users.id, proposal.studentId))
       .limit(1);
 
-    return this.mapToResponseDto(proposal, student);
+    return await this.mapToResponseDto(proposal, student);
   }
 
   async updateProposal(id: string, updateProposalDto: UpdateProposalDto, userId: string, userType: string): Promise<ProposalResponseDto> {
@@ -654,7 +655,7 @@ export class ProposalsService {
       .where(eq(users.id, updatedProposal.studentId))
       .limit(1);
 
-    return this.mapToResponseDto(updatedProposal, student);
+    return await this.mapToResponseDto(updatedProposal, student);
   }
 
   async cancelProposal(id: string, userId: string, userType: string): Promise<ProposalResponseDto> {
@@ -705,7 +706,7 @@ export class ProposalsService {
       // Evento de proposta cancelada
       this.chatGateway.server.emit('proposal_update', {
         action: 'proposal_cancelled',
-        proposal: this.mapToResponseDto(cancelledProposal),
+        proposal: await this.mapToResponseDto(cancelledProposal),
         user: {
           id: user?.id,
           name: user?.name,
@@ -727,7 +728,7 @@ export class ProposalsService {
       .where(eq(users.id, cancelledProposal.studentId))
       .limit(1);
 
-    return this.mapToResponseDto(cancelledProposal, student);
+    return await this.mapToResponseDto(cancelledProposal, student);
   }
 
   async acceptProposal(id: string, personalId: string): Promise<ProposalResponseDto> {
@@ -896,7 +897,7 @@ export class ProposalsService {
         .from(users)
         .where(eq(users.id, acceptedProposal.studentId))
         .limit(1);
-      return this.mapToResponseDto(acceptedProposal, student);
+      return await this.mapToResponseDto(acceptedProposal, student);
     }
     
     let newClass;
@@ -1027,7 +1028,7 @@ export class ProposalsService {
       if (student) {
         this.chatGateway.server.emit('proposal_update', {
           action: 'proposal_accepted',
-          proposal: this.mapToResponseDto(acceptedProposal),
+          proposal: await this.mapToResponseDto(acceptedProposal),
           personal: {
             id: personal?.id,
             name: personal?.name,
@@ -1042,7 +1043,7 @@ export class ProposalsService {
       // Evento de match confirmado para ambos
       const matchData = {
         action: 'match_confirmed',
-        proposal: this.mapToResponseDto(acceptedProposal),
+        proposal: await this.mapToResponseDto(acceptedProposal),
         student: {
           id: student?.id,
           name: student?.name,
@@ -1116,7 +1117,7 @@ export class ProposalsService {
       .where(eq(users.id, acceptedProposal.studentId))
       .limit(1);
 
-    return this.mapToResponseDto(acceptedProposal, student);
+    return await this.mapToResponseDto(acceptedProposal, student);
   }
 
   // ===== MÉTODOS PARA WEBHOOK DE PAGAMENTO =====
@@ -1897,7 +1898,7 @@ export class ProposalsService {
     blockedSlots.add(endTimeString);
   }
 
-  private mapToResponseDto(proposal: any, student?: any): ProposalResponseDto {
+  private async mapToResponseDto(proposal: any, student?: any): Promise<ProposalResponseDto> {
 
     // Usar dados do usuário se fornecidos, senão usar dados da proposta (para compatibilidade)
     const studentFirstName = student?.firstName || proposal.studentFirstName;
@@ -1908,6 +1909,31 @@ export class ProposalsService {
       ? `${studentFirstName} ${studentLastName}`.trim()
       : 'Nome não disponível';
 
+    // Buscar foto do aluno
+    let studentProfilePicture = null;
+    const profileImageId = proposal.studentProfileImageId;
+    
+    if (profileImageId) {
+      try {
+        const file = await this.db.query.files.findFirst({
+          where: eq(files.id, profileImageId),
+        });
+        
+        if (file?.url) {
+          const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+          
+          try {
+            const original = new URL(file.url);
+            const normalizedBase = new URL(baseUrl);
+            studentProfilePicture = `${normalizedBase.origin}${original.pathname}`;
+          } catch (_) {
+            studentProfilePicture = file.url.replace('https://api.treinopro.com', baseUrl);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ Falha ao buscar URL da imagem do aluno:', e);
+      }
+    }
 
     return {
       id: proposal.id,
@@ -1918,6 +1944,7 @@ export class ProposalsService {
         email: studentEmail || '',
         firstName: studentFirstName || '',
         lastName: studentLastName || '',
+        profilePicture: studentProfilePicture,
       },
       locationName: proposal.locationName,
       locationAddress: proposal.locationAddress,

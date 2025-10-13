@@ -1070,6 +1070,8 @@ export class ClassesService {
     console.log('🔍 [FORMAT_CLASS] Personal Time On Platform:', personalStats.timeOnPlatform);
     console.log('🔍 [FORMAT_CLASS] Class ID:', classData.id);
     console.log('🔍 [FORMAT_CLASS] Personal ID:', classData.personalId);
+    console.log('🔍 [FORMAT_CLASS] Student ID:', classData.studentId);
+    console.log('🔍 [FORMAT_CLASS] Student profileImageId:', classData.student?.profileImageId);
     
     // Debug: verificar tipos dos campos
     console.log('🔍 [FORMAT_CLASS] Debug tipos dos campos:');
@@ -1079,6 +1081,7 @@ export class ClassesService {
     
     // Converter profileImageId para profileImageUrl se existir
     let personalProfileImageUrl = null;
+    let studentProfileImageUrl = null;
     
     if (classData.personal?.profileImageId) {
       try {
@@ -1101,6 +1104,31 @@ export class ClassesService {
         console.error('⚠️ Falha ao buscar URL da imagem do personal:', e);
       }
     }
+    
+    // Buscar foto do aluno
+    if (classData.student?.profileImageId) {
+      try {
+        const file = await this.db.query.files.findFirst({
+          where: eq(files.id, classData.student.profileImageId),
+        });
+        
+        if (file?.url) {
+          const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+          
+          try {
+            const original = new URL(file.url);
+            const normalizedBase = new URL(baseUrl);
+            studentProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
+          } catch (_) {
+            studentProfileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ Falha ao buscar URL da imagem do aluno:', e);
+      }
+    }
+    
+    console.log('🔍 [FORMAT_CLASS] Student profileImageUrl:', studentProfileImageUrl);
     
     const response: any = {
       id: classData.id,
@@ -1128,7 +1156,10 @@ export class ClassesService {
       resolvedAt: classData.resolvedAt,
       createdAt: classData.createdAt,
       updatedAt: classData.updatedAt,
-      student: classData.student,
+      student: classData.student ? {
+        ...classData.student,
+        profilePicture: studentProfileImageUrl,
+      } : null,
       personal: classData.personal,
       proposalModality: classData.proposalModality || classData.proposal?.modality || null,
       // Dados reais do personal
@@ -1338,6 +1369,7 @@ export class ClassesService {
             id: student.id,
             firstName: student.firstName,
             lastName: student.lastName,
+            profileImageId: student.profileImageId,
           } : null,
           personal: personal ? {
             id: personal.id,

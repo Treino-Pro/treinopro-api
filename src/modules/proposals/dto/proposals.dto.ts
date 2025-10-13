@@ -236,6 +236,7 @@ export class ProposalResponseDto {
     email: string;
     firstName: string;
     lastName: string;
+    profilePicture?: string;
   };
 
   @ApiProperty({
