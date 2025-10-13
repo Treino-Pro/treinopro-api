@@ -32,4 +32,4 @@ RUN yarn install --production --frozen-lockfile
 EXPOSE 3000
 
 # Comando de inicialização
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]
