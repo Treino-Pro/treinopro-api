@@ -159,6 +159,14 @@ export class GetClassesDto {
   personalId?: string;
 
   @ApiPropertyOptional({
+    description: 'ID da proposta para filtrar',
+    example: '123e4567-e89b-12d3-a456-426614174003'
+  })
+  @IsOptional()
+  @IsUUID()
+  proposalId?: string;
+
+  @ApiPropertyOptional({
     description: 'Data inicial para filtrar',
     example: '2024-01-01T00:00:00.000Z'
   })

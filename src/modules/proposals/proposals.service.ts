@@ -189,7 +189,7 @@ export class ProposalsService {
       })
       .returning();
 
-    // ===== PROCESSAR PAGAMENTO APÓS CRIAR PROPOSTA =====
+      // ===== PROCESSAR PAGAMENTO APÓS CRIAR PROPOSTA =====
     try {
       // Criar preferência de pagamento específica para propostas usando ID real
       const paymentResult = await this.createProposalPaymentPreference(
@@ -205,6 +205,16 @@ export class ProposalsService {
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated = process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
       const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+
+      console.log('🔍 [PROPOSALS] Validação do pagamento:', {
+        success: paymentResult.success,
+        status: paymentResult.status,
+        statusOk,
+        isSimulated,
+        allowSimulated,
+        isTestEnv,
+        message: paymentResult.message
+      });
 
       if (
         !paymentResult.success ||

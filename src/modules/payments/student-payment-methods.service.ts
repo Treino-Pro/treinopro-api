@@ -1124,7 +1124,7 @@ export class StudentPaymentMethodsService {
       success: true,
       paymentId: newPayment.id,
       mpPaymentId: mpPayment.id,
-      status: mpPayment.status,
+      status: 'authorized', // ✅ Usar status correto do banco, não do MP
       statusDetail: mpPayment.status_detail,
       transactionAmount: amount,
       installments: parseInt(processDto.installments || '1'),

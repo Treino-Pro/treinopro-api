@@ -151,10 +151,42 @@ export class GamificationService {
       return this.createInitialProfile(userId);
     }
 
-    const xpToNextLevel = this.calculateXPToNextLevel(profile.level, profile.currentLevelXP);
+    // Buscar tipo de usuário para cálculo de níveis baseado em thresholds
+    const [user] = await this.db
+      .select({ userType: users.userType })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    const userType: 'student' | 'personal' = (user?.userType === 'personal') ? 'personal' : 'student';
+
+    // Recalcular nível e XP atual do nível com base no totalXP e thresholds
+    const recalculatedLevel = this.calculateLevel(profile.totalXP, userType);
+    const recalculatedCurrentLevelXP = this.calculateCurrentLevelXP(profile.totalXP, recalculatedLevel, userType);
+    let finalProfile = profile;
+
+    if (recalculatedLevel !== profile.level || recalculatedCurrentLevelXP !== profile.currentLevelXP) {
+      // Persistir correção para consistência imediata
+      await this.db
+        .update(userProfiles)
+        .set({
+          level: recalculatedLevel,
+          currentLevelXP: recalculatedCurrentLevelXP,
+          updatedAt: new Date(),
+        })
+        .where(eq(userProfiles.userId, userId));
+
+      finalProfile = {
+        ...profile,
+        level: recalculatedLevel,
+        currentLevelXP: recalculatedCurrentLevelXP,
+      } as any;
+    }
+
+    const xpToNextLevel = this.calculateXPToNextLevel(finalProfile.level, finalProfile.currentLevelXP, userType);
 
     return {
-      ...profile,
+      ...finalProfile,
       xpToNextLevel,
     };
   }
@@ -176,9 +208,18 @@ export class GamificationService {
     // Criar missão inicial sem pré-requisitos para novos usuários
     await this.createInitialMissionForUser(userId);
 
+    // Determinar tipo de usuário para cálculo de thresholds
+    const [user] = await this.db
+      .select({ userType: users.userType })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    const userType: 'student' | 'personal' = (user?.userType === 'personal') ? 'personal' : 'student';
+
     return {
       ...newProfile,
-      xpToNextLevel: this.calculateXPToNextLevel(1, 0),
+      xpToNextLevel: this.calculateXPToNextLevel(1, 0, userType),
     };
   }
 
@@ -232,8 +273,17 @@ export class GamificationService {
 
     const previousLevel = profile.level;
     const newTotalXP = profile.totalXP + xpAmount;
-    const newLevel = this.calculateLevel(newTotalXP);
-    const newCurrentLevelXP = this.calculateCurrentLevelXP(newTotalXP, newLevel);
+
+    // Determinar tipo de usuário para aplicar thresholds corretos
+    const [user] = await this.db
+      .select({ userType: users.userType })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const userType: 'student' | 'personal' = (user?.userType === 'personal') ? 'personal' : 'student';
+
+    const newLevel = this.calculateLevel(newTotalXP, userType);
+    const newCurrentLevelXP = this.calculateCurrentLevelXP(newTotalXP, newLevel, userType);
 
     // Atualizar perfil
     await this.db
@@ -306,26 +356,55 @@ export class GamificationService {
     return null;
   }
 
-  private calculateLevel(totalXP: number): number {
-    // Fórmula: nível = floor(sqrt(totalXP / 100)) + 1
-    // Exemplo: 0-99 XP = nível 1, 100-399 XP = nível 2, 400-899 XP = nível 3
-    return Math.floor(Math.sqrt(totalXP / 100)) + 1;
+  private calculateLevel(totalXP: number, userType: 'student' | 'personal'): number {
+    // Cálculo baseado em thresholds específicos por tipo de usuário
+    // Níveis: 1..6 (capado no 6)
+    const thresholds = this.getLevelThresholds(userType);
+    let accumulated = 0;
+    let level = 1;
+    for (let i = 0; i < thresholds.length; i++) {
+      const toNext = thresholds[i];
+      if (totalXP >= accumulated + toNext) {
+        accumulated += toNext;
+        level = i + 2; // após cruzar i, nível é i+2
+      } else {
+        break;
+      }
+    }
+    // Cap no nível 6
+    return Math.min(level, thresholds.length + 1);
   }
 
-  private calculateCurrentLevelXP(totalXP: number, level: number): number {
-    const previousLevelXP = this.getXPRequiredForLevel(level - 1);
-    return totalXP - previousLevelXP;
+  private calculateCurrentLevelXP(totalXP: number, level: number, userType: 'student' | 'personal'): number {
+    const prev = this.getTotalXPRequiredToReachLevel(level, userType);
+    return Math.max(0, totalXP - prev);
   }
 
-  private calculateXPToNextLevel(level: number, currentLevelXP: number): number {
-    const xpForCurrentLevel = this.getXPRequiredForLevel(level);
-    const xpForNextLevel = this.getXPRequiredForLevel(level + 1);
-    return xpForNextLevel - currentLevelXP;
+  private calculateXPToNextLevel(level: number, currentLevelXP: number, userType: 'student' | 'personal'): number {
+    const thresholds = this.getLevelThresholds(userType);
+    // Se já está no nível máximo (6), não há próximo nível
+    if (level >= thresholds.length + 1) return 0;
+    const requiredForThisLevel = thresholds[level - 1]; // delta para próximo nível
+    return Math.max(0, requiredForThisLevel - currentLevelXP);
   }
 
-  private getXPRequiredForLevel(level: number): number {
-    // Fórmula: XP necessário = (nível - 1)² * 100
-    return Math.pow(level - 1, 2) * 100;
+  private getLevelThresholds(userType: 'student' | 'personal'): number[] {
+    // Array de XP necessário para avançar de N para N+1
+    // Aluno: 1->2 100, 2->3 250, 3->4 500, 4->5 1000, 5->6 2000
+    // Personal: 1->2 200, 2->3 500, 3->4 1000, 4->5 2000, 5->6 5000
+    return userType === 'personal'
+      ? [200, 500, 1000, 2000, 5000]
+      : [100, 250, 500, 1000, 2000];
+  }
+
+  private getTotalXPRequiredToReachLevel(level: number, userType: 'student' | 'personal'): number {
+    // XP acumulado necessário para atingir o início do nível informado
+    // Ex.: para nível 1 => 0, nível 2 => t[0], nível 3 => t[0]+t[1] ...
+    const thresholds = this.getLevelThresholds(userType);
+    if (level <= 1) return 0;
+    let sum = 0;
+    for (let i = 0; i < level - 1 && i < thresholds.length; i++) sum += thresholds[i];
+    return sum;
   }
 
   // ===== SISTEMA DE MISSÕES =====
@@ -623,9 +702,10 @@ export class GamificationService {
           .where(eq(userMissions.id, userMission.user_missions.id));
 
         // Dar XP ao usuário
-        this.logger.log(`🎯 [GAMIFICATION] Adicionando XP de recompensa: ${userMission.missions.xpReward}`);
+        const weeklyBonusXP = userMission.missions.type === 'weekly' ? 20 : userMission.missions.xpReward;
+        this.logger.log(`🎯 [GAMIFICATION] Adicionando XP de recompensa: ${weeklyBonusXP}`);
         await this.addXP(userId, {
-          xpAmount: userMission.missions.xpReward,
+          xpAmount: weeklyBonusXP,
           source: XPSource.MISSION,
           sourceId: userMission.missions.id,
           description: `Missão completada: ${userMission.missions.title}`,
@@ -1172,7 +1252,7 @@ export class GamificationService {
     // Dar XP por completar aula
     this.logger.log(`🎯 [GAMIFICATION] Adicionando XP por aula completada...`);
     await this.addXP(userId, {
-      xpAmount: 50, // XP fixo por aula completada
+      xpAmount: 10, // XP fixo por aula completada (ajustado)
       source: XPSource.CLASS_COMPLETION,
       sourceId: classId,
       description: 'Aula completada',
@@ -1211,7 +1291,7 @@ export class GamificationService {
           totalRequired: m.totalRequired,
           status: m.status,
         })),
-        xpGained: 50,
+        xpGained: 10,
         source: 'class_completion',
       },
     }, userId);

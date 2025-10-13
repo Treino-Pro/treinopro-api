@@ -141,9 +141,33 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
+    // Enriquecer com URL da imagem de perfil, se existir
+    if (user.profileImageId) {
+      try {
+        const file = await this.db.query.files.findFirst({
+          where: eq(files.id, user.profileImageId),
+        });
+        if (file?.url) {
+          const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+          // Reescrever a base da URL para garantir que use o BASE_URL atual
+          try {
+            const original = new URL(file.url);
+            const normalizedBase = new URL(baseUrl);
+            const normalizedUrl = `${normalizedBase.origin}${original.pathname}`;
+            (user as any).profileImageUrl = normalizedUrl;
+          } catch (_) {
+            // Se parsing falhar, usar fallback simples
+            (user as any).profileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ Falha ao buscar URL da imagem de perfil:', e);
+      }
+    }
+
     const response = this.mapUserToResponse(user);
     try {
-      console.log('👤 [USERS] getProfile - Response DTO:', {
+      console.log('👤 [USERS] getUserById - Response DTO:', {
         id: response.id,
         email: response.email,
         firstName: response.firstName,

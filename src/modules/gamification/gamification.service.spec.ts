@@ -302,7 +302,7 @@ describe('GamificationService', () => {
 
       expect(service.addXP).toHaveBeenCalledWith({
         userId,
-        xpAmount: 50,
+        xpAmount: 10,
         source: XPSource.CLASS_COMPLETION,
         sourceId: classId,
         description: 'Aula completada',

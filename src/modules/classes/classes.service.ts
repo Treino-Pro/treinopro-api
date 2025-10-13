@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or, inArray } from 'drizzle-orm';
-import { classes, users, proposals, ratings, payments } from '../../database/schema';
+import { classes, users, proposals, ratings, payments, files } from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
@@ -1077,6 +1077,31 @@ export class ClassesService {
     console.log('  - personalRating:', personalStats.rating, 'tipo:', typeof personalStats.rating);
     console.log('  - studentRating:', studentStats.rating, 'tipo:', typeof studentStats.rating);
     
+    // Converter profileImageId para profileImageUrl se existir
+    let personalProfileImageUrl = null;
+    
+    if (classData.personal?.profileImageId) {
+      try {
+        const file = await this.db.query.files.findFirst({
+          where: eq(files.id, classData.personal.profileImageId),
+        });
+        
+        if (file?.url) {
+          const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+          
+          try {
+            const original = new URL(file.url);
+            const normalizedBase = new URL(baseUrl);
+            personalProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
+          } catch (_) {
+            personalProfileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+          }
+        }
+      } catch (e) {
+        console.error('⚠️ Falha ao buscar URL da imagem do personal:', e);
+      }
+    }
+    
     const response: any = {
       id: classData.id,
       proposalId: classData.proposalId,
@@ -1107,7 +1132,7 @@ export class ClassesService {
       personal: classData.personal,
       proposalModality: classData.proposalModality || classData.proposal?.modality || null,
       // Dados reais do personal
-      personalProfileImageUrl: classData.personal?.profileImageUrl || null,
+      personalProfileImageUrl: personalProfileImageUrl,
       personalRating: personalStats.rating ? Number(personalStats.rating) : null,
       personalTimeOnPlatform: personalStats.timeOnPlatform,
       // Dados reais do aluno
@@ -1236,6 +1261,11 @@ export class ClassesService {
       conditions.push(eq(classes.personalId, getClassesDto.personalId));
     }
     
+    // Filtro por proposalId específico
+    if (getClassesDto.proposalId) {
+      conditions.push(eq(classes.proposalId, getClassesDto.proposalId));
+    }
+    
     // Paginação
     const page = getClassesDto.page || 1;
     const limit = getClassesDto.limit || 10;
@@ -1279,6 +1309,7 @@ export class ClassesService {
                 id: true,
                 firstName: true,
                 lastName: true,
+                profileImageId: true,
               },
             });
             
@@ -1312,6 +1343,7 @@ export class ClassesService {
             id: personal.id,
             firstName: personal.firstName,
             lastName: personal.lastName,
+            profileImageId: personal.profileImageId,
           } : null,
           proposal: proposal ? {
             id: proposal.id,
