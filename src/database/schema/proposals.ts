@@ -32,8 +32,8 @@ export const proposals = pgTable('proposals', {
   targetPersonalId: uuid('target_personal_id'), // ID do personal específico para recontratação
   
   // Timestamps
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Relations

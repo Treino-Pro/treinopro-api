@@ -23,6 +23,11 @@ if (useMockDatabase) {
       idle_timeout: 20,
       connect_timeout: 10,
       onnotice: () => {}, // Silenciar notices
+      timezone: 'America/Sao_Paulo', // Forçar timezone
+      onconnect: async (connection) => {
+        // Definir timezone na conexão
+        await connection.query("SET timezone = 'America/Sao_Paulo'");
+      },
     });
   } catch (error) {
     console.error('❌ [DATABASE] Erro ao conectar com o banco de dados:', error.message);
@@ -34,6 +39,11 @@ if (useMockDatabase) {
         idle_timeout: 20,
         connect_timeout: 10,
         onnotice: () => {},
+        timezone: 'America/Sao_Paulo', // Forçar timezone
+        onconnect: async (connection) => {
+          // Definir timezone na conexão
+          await connection.query("SET timezone = 'America/Sao_Paulo'");
+        },
       });
     } catch (fallbackError) {
       console.error('❌ [DATABASE] Erro na conexão de fallback:', fallbackError.message);
