@@ -18,8 +18,27 @@ async function bootstrap() {
 
   // Configuração do CORS
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
+    origin: (origin, callback) => {
+      // Permitir requisições sem origin (apps móveis)
+      if (!origin) return callback(null, true);
+      
+      // Permitir origins configurados (web)
+      const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'];
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      // Permitir qualquer origin em desenvolvimento
+      if (process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      
+      // Bloquear origin não autorizado apenas em produção
+      callback(new Error('Não permitido pelo CORS'), false);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
   });
 
   // Configuração de arquivos estáticos
