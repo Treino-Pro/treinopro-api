@@ -8,16 +8,21 @@ import { CrefCacheService } from '../modules/cref/cref-cache.service';
   imports: [
     CacheModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        store: redisStore as any,
-        host: configService.get('REDIS_HOST', 'localhost'),
-        port: configService.get('REDIS_PORT', 6379),
-        password: configService.get('REDIS_PASSWORD'),
-        db: configService.get('REDIS_DB', 0),
-        ttl: 3600, // 1 hora em segundos
-        max: 1000, // máximo de itens no cache
-      }),
       inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => {
+        const store = await redisStore({
+          socket: {
+            host: configService.get('REDIS_HOST', 'localhost'),
+            port: Number(configService.get('REDIS_PORT', 6379)),
+          },
+          password: configService.get('REDIS_PASSWORD'),
+        });
+
+        return {
+          store: store as unknown as any, // 👈 forçamos o tipo esperado
+          ttl: 3600,
+        };
+      },
     }),
   ],
   providers: [CrefCacheService],

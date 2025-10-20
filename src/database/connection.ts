@@ -1,9 +1,14 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from './schema';
 
-// Create connection
-const connectionString = process.env.DATABASE_URL || 
-  `postgresql://${process.env.DATABASE_USER || 'postgres'}:${process.env.DATABASE_PASSWORD || 'postgres'}@${process.env.DATABASE_HOST || 'localhost'}:${process.env.DATABASE_PORT || '5432'}/${process.env.DATABASE_NAME || 'treinopro'}`;
+// Create connection - SEMPRE usar DATABASE_URL
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error('DATABASE_URL não está definida nas variáveis de ambiente');
+}
+
+console.log('🔗 [DATABASE] Connection string:', connectionString.replace(/:([^@]+)@/, ':***@'));
 
 // Verificar se deve usar mock database
 const useMockDatabase = connectionString.startsWith('mock://') || process.env.NODE_ENV === 'test';
@@ -24,7 +29,7 @@ if (useMockDatabase) {
       connect_timeout: 10,
       onnotice: () => {}, // Silenciar notices
       timezone: 'America/Sao_Paulo', // Forçar timezone
-      onconnect: async (connection) => {
+      onconnect: async (connection: any) => {
         // Definir timezone na conexão
         await connection.query("SET timezone = 'America/Sao_Paulo'");
       },

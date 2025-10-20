@@ -5,6 +5,6 @@ export default defineConfig({
   out: './drizzle',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/treinopro',
+    connectionString: process.env.DATABASE_URL!,
   },
 });
