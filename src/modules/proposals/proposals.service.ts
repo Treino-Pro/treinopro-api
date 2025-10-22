@@ -108,6 +108,7 @@ export class ProposalsService {
 
           const matchedClasses = await this.db.query.classes.findMany({
             where: and(
+              eq(classes.studentId, studentId as any), // FILTRAR POR ALUNO
               sql`DATE(${classes.date}) = ${dateString}`,
               or(
                 eq(classes.status, 'scheduled'),
@@ -1631,9 +1632,10 @@ export class ProposalsService {
 
       console.log(`📋 [CONFLICTS] Propostas existentes encontradas: ${existingProposals.length}`);
 
-      // 2. Buscar aulas em match do personal para o mesmo dia
+      // 2. Buscar aulas em match do ALUNO ESPECÍFICO para o mesmo dia
       const matchedClasses = await this.db.query.classes.findMany({
         where: and(
+          eq(classes.studentId, studentId as any), // FILTRAR POR ALUNO
           sql`DATE(${classes.date}) = ${dateString}`,
           or(
             eq(classes.status, 'scheduled'),
@@ -1648,7 +1650,7 @@ export class ProposalsService {
         }
       });
 
-      console.log(`🏃 [CONFLICTS] Aulas em match encontradas: ${matchedClasses.length}`);
+      console.log(`🏃 [CONFLICTS] Aulas em match do aluno ${studentId} encontradas: ${matchedClasses.length}`);
 
       // 3. Calcular horários bloqueados baseado nos conflitos reais
       const blockedTimeSlots = this.calculateBlockedTimeSlots(existingProposals, matchedClasses);

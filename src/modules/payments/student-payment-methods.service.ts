@@ -336,6 +336,12 @@ export class StudentPaymentMethodsService {
       throw new BadRequestException(`Cartão inválido: ${validation.errors.join(', ')}`);
     }
 
+    // 1. Criar token do cartão IMEDIATAMENTE (minimizar chance de expiração)
+    console.log('🔐 [SAVE_CARD] Criando token do cartão...');
+    const cardToken = await this.tokenizeCard(saveCardDto);
+      console.log('🔑 [SAVE_CARD] Token criado:', cardToken.substring(0, 20) + '...');
+
+    console.log("USUARIO", user)
       // 1. Criar ou buscar customer no Mercado Pago
       const customer = await this.mercadoPagoService.createOrGetCustomer(userId, {
         email: user.email || 'test_user_123456@testuser.com',
@@ -349,12 +355,10 @@ export class StudentPaymentMethodsService {
 
       console.log('👤 [SAVE_CARD] Customer criado/encontrado:', customer.id);
 
-      // 2. Criar token do cartão
-    const cardToken = await this.tokenizeCard(saveCardDto);
-
-      console.log('🔑 [SAVE_CARD] Token criado:', cardToken.substring(0, 20) + '...');
-
-      // 3. Salvar cartão no customer
+      // 3. Salvar cartão no customer IMEDIATAMENTE após criar token
+      console.log('💳 [SAVE_CARD] Salvando cartão no customer...');
+      console.log('🔍 [SAVE_CARD] Customer ID:', customer.id);
+      console.log('🔍 [SAVE_CARD] Token length:', cardToken?.length);
       const savedCard = await this.mercadoPagoService.saveCardToCustomer(customer.id, {
         token: cardToken,
         cardholderName: saveCardDto.cardHolderName,

@@ -852,40 +852,150 @@ export class MercadoPagoService {
     cardholderName: string;
     identificationType: string;
     identificationNumber: string;
-  }): Promise<{ id: string }> {
+  }): Promise<{ 
+    id: string;
+    lastFourDigits?: string;
+    paymentMethodId?: string;
+    expirationMonth?: number;
+    expirationYear?: number;
+  }> {
     try {
-      console.log('💳 [MP CARD] Salvando cartão no customer...');
+      console.log('💳 [MP CARD] ===== SALVANDO CARTÃO NO CUSTOMER =====');
       console.log('🔍 [MP CARD] Customer ID:', customerId);
-      console.log('🔍 [MP CARD] Token length:', cardData.token.length);
-
+      console.log('🔍 [MP CARD] Token:', {
+        length: cardData.token?.length || 0,
+        preview: cardData.token?.substring(0, 20) + '...',
+        isValid: !!cardData.token && cardData.token.length > 10
+      });
+  
+      // ✅ VALIDAÇÃO: Token não pode estar vazio
+      if (!cardData.token || cardData.token.length < 10) {
+        throw new BadRequestException('Token do cartão inválido ou expirado');
+      }
+  
+      // ✅ VALIDAÇÃO: Customer ID não pode estar vazio
+      if (!customerId) {
+        throw new BadRequestException('Customer ID é obrigatório');
+      }
+  
+      // ✅ PAYLOAD SIMPLIFICADO (Mercado Pago detecta automaticamente)
       const cardPayload = {
         token: cardData.token,
-        customer_id: customerId,
-        issuer_id: null, // Deixar MP detectar automaticamente
+        // Opcional: Se souber a bandeira, pode passar payment_method_id
+        // Mas deixar o MP detectar automaticamente é mais seguro
       };
-
-      const response = await fetch(`https://api.mercadopago.com/v1/customers/${customerId}/cards`, {
+  
+      console.log('📤 [MP CARD] Enviando payload:', JSON.stringify(cardPayload, null, 2));
+  
+      const url = `https://api.mercadopago.com/v1/customers/${customerId}/cards`;
+      const accessToken = process.env.MP_ACCESS_TOKEN;
+  
+      if (!accessToken) {
+        throw new BadRequestException('Token de acesso do Mercado Pago não configurado');
+      }
+  
+      console.log('🌐 [MP CARD] URL:', url);
+      console.log('🔑 [MP CARD] Token válido:', accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***');
+  
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          'X-Idempotency-Key': `card_${customerId}_${Date.now()}`, // Evitar duplicação
         },
         body: JSON.stringify(cardPayload),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ [MP CARD] Erro ao salvar cartão:', errorData);
-        throw new BadRequestException('Erro ao salvar cartão no Mercado Pago');
-      }
-
-      const savedCard = await response.json();
-      console.log('✅ [MP CARD] Cartão salvo:', savedCard.id);
+  
+      const responseText = await response.text();
       
-      return { id: savedCard.id };
+      console.log('📥 [MP CARD] Response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        bodyPreview: responseText.substring(0, 200)
+      });
+  
+      // ===== TRATAMENTO DE ERROS DETALHADO =====
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = { message: responseText, raw: true };
+        }
+        
+        console.error('❌ [MP CARD] Erro ao salvar cartão:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+          cause: errorData.cause || []
+        });
+  
+        // Mapear erros comuns do Mercado Pago
+        let errorMessage = 'Erro ao salvar cartão no Mercado Pago';
+        
+        if (response.status === 400) {
+          if (errorData.message?.includes('token')) {
+            errorMessage = 'Token do cartão expirado. Por favor, tente novamente.';
+          } else if (errorData.message?.includes('customer')) {
+            errorMessage = 'Customer inválido. Por favor, recadastre.';
+          } else {
+            errorMessage = `Dados inválidos: ${errorData.message || 'Verifique os dados do cartão'}`;
+          }
+        } else if (response.status === 401) {
+          errorMessage = 'Credenciais do Mercado Pago inválidas. Contate o suporte.';
+        } else if (response.status === 404) {
+          errorMessage = 'Customer não encontrado no Mercado Pago. Por favor, recadastre.';
+        } else if (response.status === 500) {
+          // Erro 500 é comum quando o token expira
+          errorMessage = 'Token do cartão expirou. Por favor, insira os dados do cartão novamente.';
+        } else if (response.status === 429) {
+          errorMessage = 'Muitas tentativas. Aguarde alguns instantes e tente novamente.';
+        }
+        
+        throw new BadRequestException(errorMessage);
+      }
+  
+      // ===== SUCESSO =====
+      const savedCard = JSON.parse(responseText);
+      
+      console.log('✅ [MP CARD] Cartão salvo com sucesso:', {
+        id: savedCard.id,
+        last_four_digits: savedCard.last_four_digits,
+        payment_method_id: savedCard.payment_method?.id || 'não informado',
+        expiration_month: savedCard.expiration_month,
+        expiration_year: savedCard.expiration_year,
+        first_six_digits: savedCard.first_six_digits,
+        cardholder_name: savedCard.cardholder?.name
+      });
+      
+      console.log('🏁 [MP CARD] ===== CARTÃO SALVO =====');
+      
+      return { 
+        id: savedCard.id,
+        // Dados extras úteis para referência
+        lastFourDigits: savedCard.last_four_digits,
+        paymentMethodId: savedCard.payment_method?.id,
+        expirationMonth: savedCard.expiration_month,
+        expirationYear: savedCard.expiration_year,
+      };
     } catch (error) {
-      console.error('❌ [MP CARD] Erro:', error);
-      throw new BadRequestException('Erro ao salvar cartão');
+      console.error('❌ [MP CARD] Exceção capturada:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack?.split('\n').slice(0, 3)
+      });
+      
+      // Se for BadRequestException, propagar
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      // Para outros erros (network, etc)
+      throw new BadRequestException(
+        `Erro ao comunicar com Mercado Pago: ${error.message}`
+      );
     }
   }
 

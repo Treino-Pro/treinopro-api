@@ -12,7 +12,8 @@ export class CrefService {
   
   private tokenCache: { token: string; expires: number } | null = null;
   private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 minutos - aumentar cache
-  private readonly REQUEST_TIMEOUT = 8000; // 8 segundos
+  private readonly REQUEST_TIMEOUT = 15000; // 15 segundos
+  private readonly MAX_RETRIES = 3; // Número máximo de tentativas
 
   constructor(
     private configService: ConfigService,
@@ -130,7 +131,7 @@ export class CrefService {
     }
   }
 
-  private async makeConfefRequest(token: string, crefNumber: string) {
+  private async makeConfefRequest(token: string, crefNumber: string, retryCount = 0) {
     const url = new URL(this.API_URL);
     url.searchParams.set('draw', '1');
     url.searchParams.set('start', '0');
@@ -167,8 +168,18 @@ export class CrefService {
       return { data, status: response.status };
     } catch (error) {
       clearTimeout(timeoutId);
+      
+      // Retry com backoff exponencial em caso de timeout ou erro de rede
+      if ((error.name === 'AbortError' || error.message.includes('fetch')) && retryCount < this.MAX_RETRIES) {
+        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        this.logger.warn(`⚠️ [CREF] Timeout/erro na tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`);
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.makeConfefRequest(token, crefNumber, retryCount + 1);
+      }
+      
       if (error.name === 'AbortError') {
-        throw new Error('Request timeout');
+        throw new Error('Request timeout após múltiplas tentativas');
       }
       throw error;
     }
@@ -205,7 +216,7 @@ export class CrefService {
     return null;
   }
 
-  private async getToken(): Promise<string> {
+  private async getToken(retryCount = 0): Promise<string> {
     // Verificar cache
     if (this.tokenCache && Date.now() < this.tokenCache.expires) {
       this.logger.log(`🔄 [CREF] Usando token em cache`);
@@ -261,8 +272,18 @@ export class CrefService {
       return token;
     } catch (error) {
       clearTimeout(timeoutId);
+      
+      // Retry com backoff exponencial
+      if ((error.name === 'AbortError' || error.message.includes('fetch')) && retryCount < this.MAX_RETRIES) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        this.logger.warn(`⚠️ [CREF] Timeout/erro ao obter token. Tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`);
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.getToken(retryCount + 1);
+      }
+      
       if (error.name === 'AbortError') {
-        this.logger.error(`💥 [CREF] Timeout ao obter token`);
+        this.logger.error(`💥 [CREF] Timeout ao obter token após múltiplas tentativas`);
         throw new Error('Timeout ao obter token de acesso');
       }
       this.logger.error(`💥 [CREF] Erro ao obter token: ${error.message}`);
