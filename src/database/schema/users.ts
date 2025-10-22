@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, pgEnum, json } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, pgEnum, json, decimal, integer } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
@@ -43,6 +43,10 @@ export const users = pgTable('users', {
   termsAccepted: boolean('terms_accepted').default(false).notNull(),
   privacyPolicyAccepted: boolean('privacy_policy_accepted').default(false).notNull(),
   termsAcceptedDate: timestamp('terms_accepted_date'),
+  
+  // Rating do usuário (como Uber - todos começam com 5.0)
+  rating: decimal('rating', { precision: 3, scale: 2 }).default('5.00'),
+  totalRatings: integer('total_ratings').default(0),
   
   // Outros campos
   profileImageId: uuid('profile_image_id').references(() => files.id),

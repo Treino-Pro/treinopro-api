@@ -101,6 +101,9 @@ export class RatingsService {
       })
       .returning();
 
+    // ===== ATUALIZAR RATING DO USUÁRIO AVALIADO =====
+    await this.updateUserRating(ratedUserId);
+
     // ===== EMITIR EVENTO WEBSOCKET =====
     try {
       const eventData = {
@@ -567,6 +570,48 @@ export class RatingsService {
     } catch (error) {
       console.error('❌ [RATINGS] Erro ao buscar usuário:', error);
       return null;
+    }
+  }
+
+  // Atualizar rating médio do usuário
+  private async updateUserRating(userId: string): Promise<void> {
+    try {
+      // Buscar todas as avaliações recebidas pelo usuário que estão completas
+      const userRatings = await this.db.query.ratings.findMany({
+        where: and(
+          eq(ratings.ratedId, userId),
+          eq(ratings.status, RatingStatus.COMPLETED)
+        ),
+        columns: {
+          rating: true,
+        },
+      });
+
+      if (userRatings.length === 0) {
+        // Se não há avaliações, manter o rating inicial de 5.0
+        console.log(`⭐ [RATINGS] Usuário ${userId} não tem avaliações, mantendo rating inicial 5.0`);
+        return;
+      }
+
+      // Calcular média das avaliações
+      const totalRating = userRatings.reduce((sum, r) => sum + r.rating, 0);
+      const averageRating = totalRating / userRatings.length;
+      const roundedRating = Math.round(averageRating * 100) / 100; // Arredondar para 2 casas decimais
+
+      // Atualizar o campo rating na tabela users
+      await this.db
+        .update(users)
+        .set({
+          rating: roundedRating.toFixed(2),
+          totalRatings: userRatings.length,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId));
+
+      console.log(`⭐ [RATINGS] Rating do usuário ${userId} atualizado: ${roundedRating.toFixed(2)} (${userRatings.length} avaliações)`);
+    } catch (error) {
+      console.error('❌ [RATINGS] Erro ao atualizar rating do usuário:', error);
+      throw error;
     }
   }
 }

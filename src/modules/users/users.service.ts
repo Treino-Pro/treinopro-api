@@ -490,6 +490,9 @@ export class UsersService {
       isMinor: user.isMinor,
       guardianName: user.guardianName,
       guardianEmail: user.guardianEmail,
+      // Rating do usuário (todos começam com 5.0)
+      rating: user.rating ? parseFloat(user.rating) : 5.0,
+      totalRatings: user.totalRatings || 0,
     };
   }
 

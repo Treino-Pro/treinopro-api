@@ -316,6 +316,12 @@ export class UserResponseDto {
 
   @ApiPropertyOptional({ example: 'maria@email.com', description: 'Email do responsável' })
   guardianEmail?: string;
+
+  @ApiPropertyOptional({ example: 5.0, description: 'Rating médio do usuário (1-5). Todos começam com 5.0' })
+  rating?: number;
+
+  @ApiPropertyOptional({ example: 0, description: 'Total de avaliações recebidas' })
+  totalRatings?: number;
 }
 
 export class UserListResponseDto {
