@@ -271,20 +271,59 @@ export class ProposalsService {
       // Retornar proposta com dados do pagamento e do usuário
       const proposalResponse = await this.mapToResponseDto(updatedProposal, student);
       
-      // ===== NOTIFICAR TODOS OS PERSONAIS ONLINE =====
+      // ===== NOTIFICAR PERSONALS ONLINE (COM FILTRO DE CONFLITO) =====
       try {
+        // Buscar personals conectados
+        const connectedPersonals = this.chatGateway.getConnectedPersonals();
+        console.log(`📢 [PROPOSALS] Enviando proposta para ${connectedPersonals.length} personals online`);
 
-        // Emitir evento para todos os personais online
-        this.chatGateway.server.emit('new_proposal', {
-          action: 'proposal_created',
-          proposal: proposalResponse,
-          student: {
-            id: student?.id,
-            name: student?.name,
-            profileImageUrl: student?.profileImageUrl,
-          },
-          timestamp: new Date(),
-        });
+        // Filtrar personals que NÃO têm conflito de horário
+        console.log(`🔍 [PROPOSALS] Proposta: data=${proposalResponse.trainingDate}, hora=${proposalResponse.trainingTime}, duração=${proposalResponse.durationMinutes}min`);
+        
+        for (const { userId: personalId, socketId } of connectedPersonals) {
+          try {
+            console.log(`🔍 [PROPOSALS] Verificando conflito para personal ${personalId}...`);
+            
+            // Verificar se o personal tem conflito de horário
+            const hasConflict = await this.checkPersonalScheduleConflict(
+              personalId,
+              proposalResponse.trainingDate,
+              proposalResponse.trainingTime,
+              proposalResponse.durationMinutes,
+            );
+
+            if (hasConflict) {
+              console.log(`⏰ [PROPOSALS] Personal ${personalId} tem conflito de horário, NÃO enviando proposta`);
+              continue; // Pular este personal
+            }
+
+            // Enviar proposta apenas para personals sem conflito
+            console.log(`✅ [PROPOSALS] Personal ${personalId} SEM conflito, enviando proposta`);
+            this.chatGateway.server.to(socketId).emit('new_proposal', {
+              action: 'proposal_created',
+              proposal: proposalResponse,
+              student: {
+                id: student?.id,
+                name: student?.name,
+                profileImageUrl: student?.profileImageUrl,
+              },
+              timestamp: new Date(),
+            });
+          } catch (error) {
+            console.error(`❌ [PROPOSALS] Erro ao verificar conflito para personal ${personalId}:`, error);
+            // Em caso de erro, enviar a proposta (fail-safe)
+            this.chatGateway.server.to(socketId).emit('new_proposal', {
+              action: 'proposal_created',
+              proposal: proposalResponse,
+              student: {
+                id: student?.id,
+                name: student?.name,
+                profileImageUrl: student?.profileImageUrl,
+              },
+              timestamp: new Date(),
+            });
+          }
+        }
         
       } catch (error) {
         console.error('❌ [PROPOSALS] Erro ao emitir evento new_proposal:', error);
@@ -2203,6 +2242,89 @@ export class ProposalsService {
 
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro na limpeza em tempo real:', error);
+    }
+  }
+
+  /**
+   * Verifica se um personal tem conflito de horário com uma proposta
+   */
+  private async checkPersonalScheduleConflict(
+    personalId: string,
+    proposalDate: Date,
+    proposalTime: string,
+    proposalDuration: number,
+  ): Promise<boolean> {
+    try {
+      console.log(`  🔍 [CONFLICT_CHECK] Personal ${personalId}: Verificando conflito para ${proposalTime} (${proposalDuration}min)`);
+      
+      const dateObj = new Date(proposalDate);
+      const startOfDay = new Date(dateObj);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(dateObj);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Buscar aulas do personal no mesmo dia
+      const existingClasses = await this.db
+        .select()
+        .from(classes)
+        .where(
+          and(
+            eq(classes.personalId, personalId),
+            gte(classes.date, startOfDay),
+            lte(classes.date, endOfDay),
+            or(
+              eq(classes.status, 'scheduled'),
+              eq(classes.status, 'pending_confirmation'),
+              eq(classes.status, 'active')
+            )
+          )
+        );
+
+      console.log(`  📚 [CONFLICT_CHECK] Personal ${personalId}: ${existingClasses.length} aulas encontradas`);
+
+      if (existingClasses.length === 0) {
+        console.log(`  ✅ [CONFLICT_CHECK] Personal ${personalId}: SEM aulas, sem conflito`);
+        return false; // Sem conflito
+      }
+
+      // Calcular janela de tempo da proposta
+      const [hours, minutes] = proposalTime.split(':').map(Number);
+      const proposalStart = new Date(dateObj);
+      proposalStart.setHours(hours, minutes, 0, 0);
+      const proposalEnd = new Date(proposalStart.getTime() + (proposalDuration || 60) * 60 * 1000);
+
+      console.log(`  ⏰ [CONFLICT_CHECK] Proposta: ${proposalStart.toISOString()} até ${proposalEnd.toISOString()}`);
+
+      // Verificar sobreposição com aulas existentes
+      for (const cls of existingClasses) {
+        const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
+        const classStart = new Date(cls.date);
+        classStart.setHours(clsHours, clsMinutes, 0, 0);
+        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+
+        console.log(`  📅 [CONFLICT_CHECK] Aula: ${cls.time} (${classStart.toISOString()} até ${classEnd.toISOString()}), status: ${cls.status}`);
+
+        // Verificar se a aula já expirou
+        const now = new Date();
+        if (classEnd < now) {
+          console.log(`    ⏭️  Aula expirada, ignorando`);
+          continue; // Ignorar aulas expiradas
+        }
+
+        // Verificar sobreposição
+        const overlaps = !(proposalEnd <= classStart || proposalStart >= classEnd);
+        console.log(`    ${overlaps ? '❌ CONFLITO!' : '✅ Sem conflito'}`);
+        
+        if (overlaps) {
+          return true; // Conflito encontrado
+        }
+      }
+
+      console.log(`  ✅ [CONFLICT_CHECK] Personal ${personalId}: Sem conflito após verificar todas as aulas`);
+      return false; // Sem conflito
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao verificar conflito de horário:', error);
+      return false; // Em caso de erro, não bloquear (fail-safe)
     }
   }
 }

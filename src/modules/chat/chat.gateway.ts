@@ -37,7 +37,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   server: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
-  private connectedUsers = new Map<string, string>(); // userId -> socketId
+  private connectedUsers = new Map<string, { socketId: string; userType: 'student' | 'personal' }>(); // userId -> {socketId, userType}
 
   constructor(
     private readonly jwtService: JwtService,
@@ -73,7 +73,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       console.log('🔌 [CHAT_GATEWAY] Usuário autenticado:', { userId: client.userId, userType: client.userType });
 
       // Armazenar conexão do usuário
-      this.connectedUsers.set(client.userId, client.id);
+      this.connectedUsers.set(client.userId, { socketId: client.id, userType: client.userType });
 
       // Notificar que o usuário está online
       this.server.emit('user_online', {
@@ -132,9 +132,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       client.emit('message_sent', wsMessage);
 
       // Enviar para o destinatário se estiver conectado
-      const receiverSocketId = this.connectedUsers.get(sendMessageDto.receiverId);
-      if (receiverSocketId) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverSocketId);
+      const receiverData = this.connectedUsers.get(sendMessageDto.receiverId);
+      if (receiverData) {
+        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
         if (receiverSocket) {
           receiverSocket.emit('message_received', {
             ...wsMessage,
@@ -228,9 +228,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       }
 
       // Notificar o destinatário que o usuário está digitando
-      const receiverSocketId = this.connectedUsers.get(data.receiverId);
-      if (receiverSocketId) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverSocketId);
+      const receiverData = this.connectedUsers.get(data.receiverId);
+      if (receiverData) {
+        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
         if (receiverSocket) {
           receiverSocket.emit('typing_start', {
             classId: data.classId,
@@ -258,9 +258,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       }
 
       // Notificar o destinatário que o usuário parou de digitar
-      const receiverSocketId = this.connectedUsers.get(data.receiverId);
-      if (receiverSocketId) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverSocketId);
+      const receiverData = this.connectedUsers.get(data.receiverId);
+      if (receiverData) {
+        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
         if (receiverSocket) {
           receiverSocket.emit('typing_stop', {
             classId: data.classId,
@@ -366,9 +366,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
   // Método para obter socket de um usuário
   getUserSocket(userId: string): Socket | undefined {
-    const socketId = this.connectedUsers.get(userId);
-    if (socketId) {
-      return this.server.sockets.sockets.get(socketId);
+    const userData = this.connectedUsers.get(userId);
+    if (userData) {
+      return this.server.sockets.sockets.get(userData.socketId);
     }
     return undefined;
   }
@@ -393,5 +393,20 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
 
     return null;
+  }
+
+  /**
+   * Retorna lista de personals conectados
+   */
+  getConnectedPersonals(): Array<{ userId: string; socketId: string }> {
+    const personals: Array<{ userId: string; socketId: string }> = [];
+    
+    for (const [userId, userData] of this.connectedUsers.entries()) {
+      if (userData.userType === 'personal') {
+        personals.push({ userId, socketId: userData.socketId });
+      }
+    }
+    
+    return personals;
   }
 }

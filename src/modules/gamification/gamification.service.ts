@@ -140,14 +140,24 @@ export class GamificationService {
   // ===== SISTEMA DE XP E NÍVEIS =====
 
   async getUserProfile(userId: string): Promise<UserProfileResponseDto> {
+    this.logger.log(`🔍 [GAMIFICATION_SERVICE] getUserProfile chamado com userId: ${userId}`);
+    
     const [profile] = await this.db
       .select()
       .from(userProfiles)
       .where(eq(userProfiles.userId, userId))
       .limit(1);
 
+    this.logger.log(`🔍 [GAMIFICATION_SERVICE] Profile encontrado: ${profile ? 'SIM' : 'NÃO'}`);
+    if (profile) {
+      this.logger.log(`🔍 [GAMIFICATION_SERVICE] Profile.userId: ${profile.userId}`);
+      this.logger.log(`🔍 [GAMIFICATION_SERVICE] Profile.level: ${profile.level}`);
+      this.logger.log(`🔍 [GAMIFICATION_SERVICE] Profile.totalXP: ${profile.totalXP}`);
+    }
+
     if (!profile) {
       // Criar perfil inicial se não existir
+      this.logger.log(`🆕 [GAMIFICATION_SERVICE] Criando perfil inicial para userId: ${userId}`);
       return this.createInitialProfile(userId);
     }
 
@@ -1039,7 +1049,10 @@ export class GamificationService {
   // ===== ESTATÍSTICAS =====
 
   async getGamificationStats(userId: string): Promise<GamificationStatsResponseDto> {
+    this.logger.log(`📊 [GAMIFICATION_SERVICE] getGamificationStats chamado com userId: ${userId}`);
+    
     const profile = await this.getUserProfile(userId);
+    this.logger.log(`📊 [GAMIFICATION_SERVICE] Profile retornado - userId: ${profile.userId}, level: ${profile.level}, totalXP: ${profile.totalXP}`);
     
     // Buscar conquistas do usuário
     const userAchievements = await this.getUserAchievements(userId);
