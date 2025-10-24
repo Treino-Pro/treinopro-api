@@ -816,36 +816,52 @@ export class ProposalsService {
       }
 
       // Calcular janela de tempo da proposta aceita
+      // Combinar data com horário (formato HH:MM)
+      const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
       const proposedStart = new Date(proposedTrainingDate);
+      proposedStart.setHours(hours, minutes, 0, 0);
       const proposedEnd = new Date(proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000);
 
-      console.log(`  - Proposta: ${proposedStart.toISOString()} até ${proposedEnd.toISOString()}`);
+      console.log(`  - Proposta: ${proposal.trainingTime} (${proposedStart.toISOString()}) até ${proposedEnd.toISOString()}`);
+      console.log(`  - Duração: ${proposal.durationMinutes || 60} minutos`);
 
       // Verificar conflitos com aulas do personal
       const hasClassConflict = existingClasses.some((cls: any) => {
+        // Combinar data da aula com horário
+        const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
         const classStart = new Date(cls.date);
+        classStart.setHours(clsHours, clsMinutes, 0, 0);
         const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+
+        console.log(`    - Aula existente: ${cls.time} (${classStart.toISOString()}) até ${classEnd.toISOString()}, status: ${cls.status}`);
 
         // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
         const now = new Date();
         const isClassExpired = classEnd < now;
         
         if (isClassExpired) {
+          console.log(`      ✓ Aula expirada, ignorando`);
           return false; // Não há conflito com aulas expiradas
         }
 
         // Verificar sobreposição
         const overlaps = !(proposedEnd <= classStart || proposedStart >= classEnd);
+        console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'} (proposta: ${proposedStart.toISOString()} - ${proposedEnd.toISOString()}, aula: ${classStart.toISOString()} - ${classEnd.toISOString()})`);
         return overlaps;
       });
 
       // Verificar conflitos com propostas do aluno
       const hasProposalConflict = existingProposals.some((prop: any) => {
+        const [propHours, propMinutes] = prop.trainingTime.split(':').map(Number);
         const propStart = new Date(prop.trainingDate);
+        propStart.setHours(propHours, propMinutes, 0, 0);
         const propEnd = new Date(propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000);
+
+        console.log(`    - Proposta existente: ${prop.trainingTime} (${propStart.toISOString()}) até ${propEnd.toISOString()}, status: ${prop.status}`);
 
         // Verificar sobreposição
         const overlaps = !(proposedEnd <= propStart || proposedStart >= propEnd);
+        console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'}`);
         return overlaps;
       });
 
