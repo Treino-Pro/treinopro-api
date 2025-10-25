@@ -7,6 +7,7 @@ import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dt
 import { PaymentsService } from '../payments/payments.service';
 import { JobsService } from '../jobs/jobs.service';
 import { ChatGateway } from '../chat/chat.gateway';
+import { ProposalsGateway } from './proposals.gateway';
 import { randomUUID } from 'crypto';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
@@ -18,6 +19,7 @@ export class ProposalsService {
     private readonly paymentsService: PaymentsService,
     private readonly jobsService: JobsService,
     private readonly chatGateway: ChatGateway,
+    private readonly proposalsGateway: ProposalsGateway,
   ) {}
 
   async createProposal(createProposalDto: CreateProposalDto, studentId: string): Promise<ProposalResponseDto> {
@@ -280,6 +282,8 @@ export class ProposalsService {
         // Filtrar personals que NÃO têm conflito de horário
         console.log(`🔍 [PROPOSALS] Proposta: data=${proposalResponse.trainingDate}, hora=${proposalResponse.trainingTime}, duração=${proposalResponse.durationMinutes}min`);
         
+        const nearbyPersonals: string[] = [];
+        
         for (const { userId: personalId, socketId } of connectedPersonals) {
           try {
             console.log(`🔍 [PROPOSALS] Verificando conflito para personal ${personalId}...`);
@@ -309,6 +313,8 @@ export class ProposalsService {
               },
               timestamp: new Date(),
             });
+            
+            nearbyPersonals.push(personalId);
           } catch (error) {
             console.error(`❌ [PROPOSALS] Erro ao verificar conflito para personal ${personalId}:`, error);
             // Em caso de erro, enviar a proposta (fail-safe)
@@ -322,7 +328,24 @@ export class ProposalsService {
               },
               timestamp: new Date(),
             });
+            
+            nearbyPersonals.push(personalId);
           }
+        }
+        
+        // Enviar notificações Firebase para personals próximos
+        if (nearbyPersonals.length > 0) {
+          await this.proposalsGateway.sendProposalCreated({
+            proposal: proposalResponse,
+            student: {
+              id: student?.id,
+              name: student?.name,
+              firstName: student?.firstName,
+              lastName: student?.lastName,
+              profileImageUrl: student?.profileImageUrl,
+            },
+            nearbyPersonals,
+          });
         }
         
       } catch (error) {

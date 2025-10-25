@@ -327,4 +327,54 @@ export class UsersController {
     const exists = await this.usersService.userExists(id);
     return { exists };
   }
+
+  @Delete('account/me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ 
+    summary: 'Excluir conta permanentemente',
+    description: 'Exclui a conta do usuário autenticado permanentemente. ' +
+                 'Não é permitido se houver aulas agendadas. ' +
+                 'O histórico de aulas e propostas será mantido.'
+  })
+  @ApiResponse({ 
+    status: 204, 
+    description: 'Conta excluída com sucesso'
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Não é possível excluir - usuário possui aulas agendadas'
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Usuário não encontrado'
+  })
+  async deleteAccount(@Request() req: any): Promise<void> {
+    const userId = req.user?.id ?? req.user?.sub;
+    console.log('🗑️ [USERS][Controller] Solicitação de exclusão de conta:', userId);
+    return this.usersService.deleteAccount(userId);
+  }
+
+  // ===== ENDPOINT PARA TOKEN FCM =====
+
+  @Post(':id/fcm-token')
+  @ApiOperation({ 
+    summary: 'Salvar token FCM do usuário',
+    description: 'Salva o token Firebase Cloud Messaging do usuário para receber notificações push'
+  })
+  @ApiParam({ name: 'id', description: 'ID do usuário' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Token FCM salvo com sucesso'
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Usuário não encontrado'
+  })
+  @HttpCode(HttpStatus.OK)
+  async saveFcmToken(
+    @Param('id') userId: string,
+    @Body() body: { token: string }
+  ) {
+    return this.usersService.saveFcmToken(userId, body.token);
+  }
 }

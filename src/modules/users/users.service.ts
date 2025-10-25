@@ -282,6 +282,59 @@ export class UsersService {
     console.log('✅ [USERS] Usuário desativado com sucesso:', id);
   }
 
+  /**
+   * Deletar conta permanentemente (hard delete)
+   * Apenas permitido se não houver aulas agendadas
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    console.log('🗑️ [USERS] Iniciando exclusão permanente da conta:', userId);
+
+    // 1. Verificar se usuário existe
+    const existingUser = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!existingUser) {
+      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // 2. Verificar se há aulas agendadas (como aluno ou personal)
+    const { classes } = await import('../../database/schema');
+    
+    const scheduledClasses = await this.db.query.classes.findMany({
+      where: and(
+        or(
+          eq(classes.studentId, userId),
+          eq(classes.personalId, userId)
+        ),
+        or(
+          eq(classes.status, 'scheduled'),
+          eq(classes.status, 'pending_confirmation'),
+          eq(classes.status, 'active')
+        )
+      ),
+    });
+
+    if (scheduledClasses && scheduledClasses.length > 0) {
+      console.log('❌ [USERS] Usuário tem aulas agendadas:', scheduledClasses.length);
+      throw new BadRequestException(
+        'Não é possível excluir a conta. Você possui aulas agendadas. ' +
+        'Cancele ou complete todas as aulas antes de excluir sua conta.'
+      );
+    }
+
+    // 3. Deletar usuário permanentemente
+    // O histórico de aulas, propostas, avaliações, etc. será mantido
+    // pois as foreign keys permitem NULL ou não têm CASCADE DELETE
+    await this.db
+      .delete(users)
+      .where(eq(users.id, userId));
+
+    console.log('✅ [USERS] Conta excluída permanentemente:', userId);
+    console.log('ℹ️ [USERS] Histórico de aulas e propostas foi mantido');
+  }
+
   // ===== GERENCIAMENTO DE PERFIL =====
 
   /**
@@ -519,5 +572,37 @@ export class UsersService {
     }
 
     return this.mapUserToResponse(user);
+  }
+
+  /**
+   * Salvar token FCM do usuário
+   */
+  async saveFcmToken(userId: string, fcmToken: string): Promise<{ success: boolean; message: string }> {
+    console.log('🔥 [USERS] Salvando token FCM para usuário:', userId);
+
+    // Verificar se usuário existe
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // Atualizar token FCM
+    await this.db
+      .update(users)
+      .set({
+        fcmToken: fcmToken,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+
+    console.log('✅ [USERS] Token FCM salvo com sucesso para usuário:', userId);
+    return {
+      success: true,
+      message: 'Token FCM salvo com sucesso',
+    };
   }
 }

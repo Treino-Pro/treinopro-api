@@ -1384,67 +1384,140 @@ export class ClassesService {
       
       console.log(`✅ [CLASSES] Encontradas ${classesData.length} aulas de ${total} total`);
       
-      // Buscar dados dos personais únicos
+      // Buscar dados dos personais únicos (OTIMIZADO - 1 query em vez de N)
       const personalIds = [...new Set(classesData.map((row: any) => row.classes.personalId))];
       
       let personalMap: Record<string, any> = {};
       if (personalIds.length > 0) {
-        // Buscar dados de cada personal trainer
-        for (const personalId of personalIds) {
-          try {
-            const personalData = await this.db.query.users.findFirst({
-              where: eq(users.id, personalId as string),
-              columns: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                profileImageId: true,
-              },
-            });
-            
-            if (personalData) {
-              personalMap[personalId as string] = personalData;
-            }
-          } catch (error) {
-            console.error(`Erro ao buscar personal ${personalId}:`, error);
-          }
+        try {
+          // Buscar TODOS os personals de uma vez usando inArray
+          const personalsData = await this.db
+            .select({
+              id: users.id,
+              firstName: users.firstName,
+              lastName: users.lastName,
+              profileImageId: users.profileImageId,
+            })
+            .from(users)
+            .where(inArray(users.id, personalIds as string[]));
+          
+          // Criar mapa para acesso rápido
+          personalsData.forEach((personal: any) => {
+            personalMap[personal.id] = personal;
+          });
+          
+          console.log(`✅ [CLASSES] Carregados ${personalsData.length} personals em 1 query`);
+        } catch (error) {
+          console.error('❌ [CLASSES] Erro ao buscar personals:', error);
         }
       }
       
-      // Formatar resposta usando formatClassResponse
-      const formattedClasses = await Promise.all(classesData.map(async (row: any) => {
+      // OTIMIZAÇÃO: Buscar stats e imagens em batch antes do loop
+      const uniquePersonalIds = [...new Set(classesData.map((row: any) => row.classes.personalId))];
+      const uniqueStudentIds = [...new Set(classesData.map((row: any) => row.classes.studentId))];
+      
+      // Buscar ratings em batch
+      const personalRatingsMap: Record<string, any> = {};
+      const studentRatingsMap: Record<string, any> = {};
+      
+      try {
+        // Buscar ratings dos personals (onde eles são avaliados - ratedId)
+        const personalRatings = await this.db
+          .select({
+            personalId: ratings.ratedId,
+            avgRating: sql<number>`AVG(${ratings.rating})`,
+          })
+          .from(ratings)
+          .where(and(
+            inArray(ratings.ratedId, uniquePersonalIds as string[]),
+            eq(ratings.type, 'student_to_personal')
+          ))
+          .groupBy(ratings.ratedId);
+        
+        personalRatings.forEach((r: any) => {
+          personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
+        });
+        
+        // Buscar ratings dos alunos (onde eles são avaliados - ratedId)
+        const studentRatings = await this.db
+          .select({
+            studentId: ratings.ratedId,
+            avgRating: sql<number>`AVG(${ratings.rating})`,
+          })
+          .from(ratings)
+          .where(and(
+            inArray(ratings.ratedId, uniqueStudentIds as string[]),
+            eq(ratings.type, 'personal_to_student')
+          ))
+          .groupBy(ratings.ratedId);
+        
+        studentRatings.forEach((r: any) => {
+          studentRatingsMap[r.studentId] = parseFloat(r.avgRating) || 0;
+        });
+        
+        console.log(`✅ [CLASSES] Carregados ratings em batch`);
+      } catch (error) {
+        console.error('❌ [CLASSES] Erro ao buscar ratings:', error);
+      }
+      
+      // Formatar resposta SEM chamar formatClassResponse (evita N queries)
+      const formattedClasses = classesData.map((row: any) => {
         const classData = row.classes;
         const student = row.users;
         const proposal = row.proposals;
         const personal = personalMap[classData.personalId];
         
-        // Debug: verificar status de cada aula
-        
-        // Preparar dados para formatClassResponse
-        const classWithRelations = {
-          ...classData,
+        // Montar resposta diretamente (otimizado)
+        return {
+          id: classData.id,
+          proposalId: classData.proposalId,
+          studentId: classData.studentId,
+          personalId: classData.personalId,
+          location: classData.location,
+          date: classData.date,
+          time: classData.time,
+          duration: classData.duration,
+          status: classData.status,
+          startedAt: classData.startedAt,
+          endTime: classData.endTime,
+          completedAt: classData.completedAt,
+          pendingConfirmationAt: classData.pendingConfirmationAt,
+          confirmedAt: classData.confirmedAt,
+          noShowReportedAt: classData.noShowReportedAt,
+          noShowReportedBy: classData.noShowReportedBy,
+          disputeStatus: classData.disputeStatus,
+          custodyExpiresAt: classData.custodyExpiresAt,
+          evidenceDeadline: classData.evidenceDeadline,
+          studentEvidence: classData.studentEvidence,
+          personalEvidence: classData.personalEvidence,
+          resolution: classData.resolution,
+          resolvedAt: classData.resolvedAt,
+          createdAt: classData.createdAt,
+          updatedAt: classData.updatedAt,
           student: student ? {
             id: student.id,
             firstName: student.firstName,
             lastName: student.lastName,
-            profileImageId: student.profileImageId,
+            profilePicture: null, // Simplificado por performance
           } : null,
           personal: personal ? {
             id: personal.id,
             firstName: personal.firstName,
             lastName: personal.lastName,
-            profileImageId: personal.profileImageId,
+            profilePicture: null, // Simplificado por performance
           } : null,
+          proposalModality: proposal?.modalityName || null,
+          personalProfileImageUrl: null, // Simplificado por performance
+          personalRating: personalRatingsMap[classData.personalId] || 0,
+          personalTimeOnPlatform: '0 dias', // Simplificado por performance
+          studentRating: studentRatingsMap[classData.studentId] || 0,
           proposal: proposal ? {
             id: proposal.id,
             modality: proposal.modalityName,
-            value: proposal.price, // Corrigir: usar 'price' em vez de 'value'
+            value: proposal.price,
           } : null,
-          proposalModality: proposal?.modalityName || null,
         };
-        
-        return await this.formatClassResponse(classWithRelations);
-      }));
+      });
       
       return {
         classes: formattedClasses,

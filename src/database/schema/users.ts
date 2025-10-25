@@ -53,6 +53,9 @@ export const users = pgTable('users', {
   isVerified: boolean('is_verified').default(false),
   status: userStatusEnum('status').default('active'),
   
+  // Firebase Cloud Messaging
+  fcmToken: text('fcm_token'),
+  
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
