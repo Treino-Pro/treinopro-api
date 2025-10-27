@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ClassesController } from './classes.controller';
 import { ClassesService } from './classes.service';
 import { ClassesCleanupService } from './classes-cleanup.service';
@@ -8,9 +8,10 @@ import { GamificationModule } from '../gamification/gamification.module';
 import { ChatModule } from '../chat/chat.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RatingsModule } from '../ratings/ratings.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, GamificationModule, ChatModule, PaymentsModule, RatingsModule],
+  imports: [DatabaseModule, AuthModule, GamificationModule, ChatModule, PaymentsModule, RatingsModule, forwardRef(() => NotificationsModule)],
   controllers: [ClassesController],
   providers: [ClassesService, ClassesCleanupService],
   exports: [ClassesService, ClassesCleanupService],

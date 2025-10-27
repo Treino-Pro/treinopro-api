@@ -1,19 +1,47 @@
 import { Injectable, Logger } from '@nestjs/common';
-// import * as admin from 'firebase-admin'; // Comentado temporariamente
+import * as admin from 'firebase-admin';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PushNotificationService {
   private readonly logger = new Logger(PushNotificationService.name);
+  private readonly configService: ConfigService;
   private isFirebaseInitialized = false;
 
-  constructor() {
+  constructor(configService: ConfigService) {
+    this.configService = configService;
     this.initializeFirebase();
   }
 
   private initializeFirebase(): void {
-    // Firebase temporariamente desabilitado para desenvolvimento
-    this.logger.warn('⚠️ Firebase Admin SDK desabilitado temporariamente');
-    this.isFirebaseInitialized = false;
+    try {
+      if (admin.apps.length === 0) {
+        const firebaseConfig = {
+          projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
+          privateKey: this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
+          clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
+        };
+
+        if (!firebaseConfig.projectId || !firebaseConfig.privateKey || !firebaseConfig.clientEmail) {
+          this.logger.warn('❌ Firebase Admin não configurado - variáveis de ambiente ausentes no PushNotificationService');
+          return;
+        }
+
+        admin.initializeApp({
+          credential: admin.credential.cert(firebaseConfig),
+          projectId: firebaseConfig.projectId,
+        });
+
+        this.logger.log('🔥 PushNotificationService: Firebase Admin inicializado com sucesso');
+        this.isFirebaseInitialized = true;
+      } else {
+        this.logger.log('🔥 PushNotificationService: Firebase Admin já estava inicializado');
+        this.isFirebaseInitialized = true;
+      }
+    } catch (error) {
+      this.logger.error('❌ Erro ao inicializar Firebase Admin no PushNotificationService:', error);
+      this.isFirebaseInitialized = false;
+    }
   }
 
   async sendToToken(token: string, template: string, data: Record<string, any>): Promise<void> {
@@ -53,8 +81,7 @@ export class PushNotificationService {
         },
       };
 
-      // const response = await admin.messaging().send(message);
-      const response = { messageId: 'mock-message-id' };
+      const response = await admin.messaging().send(message);
       this.logger.log(`📱 Push notification enviado com sucesso: ${response}`);
 
     } catch (error) {
@@ -105,8 +132,7 @@ export class PushNotificationService {
         },
       };
 
-      // const response = await admin.messaging().sendEachForMulticast(message);
-      const response = { successCount: tokens.length, failureCount: 0, responses: [] };
+      const response = await admin.messaging().sendEachForMulticast(message);
       
       this.logger.log(`📱 Push notifications enviados: ${response.successCount}/${tokens.length} com sucesso`);
       
@@ -145,8 +171,7 @@ export class PushNotificationService {
         },
       };
 
-      // const response = await admin.messaging().send(message);
-      const response = { messageId: 'mock-message-id' };
+      const response = await admin.messaging().send(message);
       this.logger.log(`📱 Push notification enviado para tópico ${topic}: ${response}`);
 
     } catch (error) {
@@ -254,7 +279,7 @@ export class PushNotificationService {
     }
 
     try {
-      // await admin.messaging().subscribeToTopic([token], topic);
+      await admin.messaging().subscribeToTopic([token], topic);
       this.logger.log(`📱 Token inscrito no tópico ${topic}`);
     } catch (error) {
       this.logger.error(`❌ Erro ao inscrever token no tópico ${topic}:`, error);
@@ -269,7 +294,7 @@ export class PushNotificationService {
     }
 
     try {
-      // await admin.messaging().unsubscribeFromTopic([token], topic);
+      await admin.messaging().unsubscribeFromTopic([token], topic);
       this.logger.log(`📱 Token desinscrito do tópico ${topic}`);
     } catch (error) {
       this.logger.error(`❌ Erro ao desinscrever token do tópico ${topic}:`, error);

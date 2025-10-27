@@ -2,11 +2,13 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { messages, users, classes } from '../../database/schema';
 import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
 import { SendMessageDto, GetMessagesDto, MarkAsReadDto, MessageResponseDto, ChatStatsDto } from './dto/chat.dto';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 
 @Injectable()
 export class ChatService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
   async sendMessage(userId: string, sendMessageDto: SendMessageDto): Promise<MessageResponseDto> {
@@ -80,7 +82,31 @@ export class ChatService {
       .where(eq(messages.id, newMessage.id))
       .limit(1);
 
-    return messageWithUsers[0] as MessageResponseDto;
+    const messageResponse = messageWithUsers[0] as MessageResponseDto;
+
+    // Enviar notificação push para destinatário
+    try {
+      const senderName = (messageResponse.sender as any)?.name || 'Alguém';
+      const messagePreview = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
+      
+      await this.firebaseNotificationService.sendToUser(receiverId, {
+        title: `💬 ${senderName}`,
+        body: messagePreview,
+        data: {
+          type: 'new_message',
+          classId,
+          senderId: userId,
+          senderName: senderName,
+          messageId: newMessage.id,
+          messagePreview,
+        }
+      });
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação push de mensagem:', error);
+      // Não bloquear o envio da mensagem se push falhar
+    }
+
+    return messageResponse;
   }
 
   async getMessages(userId: string, getMessagesDto: GetMessagesDto): Promise<{

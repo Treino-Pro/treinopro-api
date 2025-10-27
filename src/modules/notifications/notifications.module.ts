@@ -7,9 +7,10 @@ import { PushNotificationService } from './services/push-notification.service';
 import { FirebaseNotificationService } from './services/firebase-notification.service';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  imports: [DatabaseModule, forwardRef(() => AuthModule)],
+  imports: [DatabaseModule, forwardRef(() => AuthModule), ConfigModule],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,

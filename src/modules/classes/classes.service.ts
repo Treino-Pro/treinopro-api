@@ -6,6 +6,7 @@ import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
 import { RatingsService } from '../ratings/ratings.service';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 import { 
   CreateClassDto, 
   UpdateClassDto, 
@@ -31,6 +32,7 @@ export class ClassesService {
     private readonly chatGateway: ChatGateway,
     private readonly paymentsService: PaymentsService,
     private readonly ratingsService: RatingsService,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
   async createClass(createClassDto: CreateClassDto, userId: string): Promise<ClassResponseDto> {
@@ -371,6 +373,24 @@ export class ClassesService {
           console.log('✅ [COMPLETE_CLASS] Pagamento em custódia - iniciando captura e split');
           await this.paymentsService.capturePaymentAfterClass(id, 'Aula concluída');
           console.log('✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService');
+          
+          // Enviar notificação push para personal sobre repasse
+          try {
+            const personalAmount = payment.personalAmount || 0;
+            await this.firebaseNotificationService.sendToUser(userId, {
+              title: '💰 Repasse Realizado',
+              body: `R$ ${personalAmount.toFixed(2)} foi transferido para sua carteira`,
+              data: {
+                type: 'payment_received',
+                classId: id,
+                amount: personalAmount.toString(),
+                description: `Repasse da aula ${classData.date}`,
+              }
+            });
+            console.log('✅ [COMPLETE_CLASS] Notificação de repasse enviada');
+          } catch (error) {
+            console.error('❌ [COMPLETE_CLASS] Erro ao enviar notificação de repasse:', error);
+          }
         } else if (payment.status === 'captured') {
           // Já capturado: split e carteira devem ter sido aplicados no fluxo de pagamentos (webhook/capture)
           console.log('ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário');
@@ -750,20 +770,40 @@ export class ClassesService {
       .where(eq(classes.id, classId))
       .returning();
 
-    // ===== EMITIR EVENTOS WEBSOCKET =====
+    // ===== EMITIR EVENTOS WEBSOCKET E PUSH =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
+      const studentId = classData.studentId;
+      
+      // Buscar dados do personal para notificação
+      const personalData = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
       
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_started',
         class: classResponse,
         personalId: userId,
-        studentId: classData.studentId,
+        studentId: studentId,
         timestamp: new Date(),
       });
       
-      console.log('✅ [CLASSES] Evento WebSocket emitido: class_started');
+      // Enviar notificação push para aluno
+      await this.firebaseNotificationService.sendToUser(studentId, {
+        title: '▶️ Aula Iniciada',
+        body: `${personalData?.name || 'Personal'} iniciou a aula. Confirme sua presença!`,
+        data: {
+          type: 'class_started',
+          classId,
+          partnerName: personalData?.name || 'Personal',
+          partnerId: userId,
+          time: classData.time,
+          location: classData.location?.name || classData.locationName || 'Local a definir',
+        }
+      });
+      
+      console.log('✅ [CLASSES] Evento WebSocket e push emitidos: class_started');
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
