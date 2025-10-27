@@ -799,7 +799,7 @@ export class ClassesService {
           partnerName: personalData?.name || 'Personal',
           partnerId: userId,
           time: classData.time,
-          location: classData.location?.name || classData.locationName || 'Local a definir',
+          location: classData.location || 'Local a definir',
         }
       });
       
