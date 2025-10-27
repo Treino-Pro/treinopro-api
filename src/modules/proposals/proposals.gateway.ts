@@ -242,3 +242,4 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     return this.connectedUsers.has(userId);
   }
 }
+

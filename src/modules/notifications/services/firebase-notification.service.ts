@@ -28,9 +28,14 @@ export class FirebaseNotificationService {
           clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
         };
 
+        this.logger.log('🔥 Tentando inicializar Firebase Admin...');
+        this.logger.log(`🔥 Project ID: ${firebaseConfig.projectId ? '✅' : '❌'}`);
+        this.logger.log(`🔥 Client Email: ${firebaseConfig.clientEmail ? '✅' : '❌'}`);
+        this.logger.log(`🔥 Private Key: ${firebaseConfig.privateKey ? '✅' : '❌'}`);
+
         // Validar configurações
         if (!firebaseConfig.projectId || !firebaseConfig.privateKey || !firebaseConfig.clientEmail) {
-          this.logger.warn('Firebase Admin não configurado - variáveis de ambiente ausentes');
+          this.logger.warn('❌ Firebase Admin não configurado - variáveis de ambiente ausentes');
           return;
         }
 
@@ -39,7 +44,7 @@ export class FirebaseNotificationService {
           projectId: firebaseConfig.projectId,
         });
 
-        this.logger.log('Firebase Admin inicializado com sucesso');
+        this.logger.log('🔥 Firebase Admin inicializado com sucesso');
       } else {
         this.app = admin.app();
         this.logger.log('Firebase Admin já estava inicializado');
@@ -76,7 +81,10 @@ export class FirebaseNotificationService {
           title: notification.title,
           body: notification.body,
         },
-        data: notification.data || {},
+        data: {
+          ...notification.data,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
