@@ -1162,7 +1162,7 @@ export class ClassesService {
   private async formatClassResponse(classData: any): Promise<ClassResponseDto> {
     // Calcular dados reais do personal e aluno
     const personalStats = await this.getPersonalStats(classData.personalId);
-    const studentStats = await this.getStudentStats(classData.studentId, classData.id);
+    const studentStats = await this.getStudentStats(classData.studentId, classData.personalId, classData.id);
     
     console.log('🔍 [FORMAT_CLASS] Personal Stats:', personalStats);
     console.log('🔍 [FORMAT_CLASS] Personal Time On Platform:', personalStats.timeOnPlatform);
@@ -1455,10 +1455,12 @@ export class ClassesService {
       // OTIMIZAÇÃO: Buscar stats e imagens em batch antes do loop
       const uniquePersonalIds = [...new Set(classesData.map((row: any) => row.classes.personalId))];
       const uniqueStudentIds = [...new Set(classesData.map((row: any) => row.classes.studentId))];
+      const classIds = [...new Set(classesData.map((row: any) => row.classes.id))];
       
       // Buscar ratings em batch
       const personalRatingsMap: Record<string, any> = {};
-      const studentRatingsMap: Record<string, any> = {};
+      // Nota do aluno específica por aula
+      const studentRatingByClassId: Record<string, number> = {};
       
       try {
         // Buscar ratings dos personals (onde eles são avaliados - ratedId)
@@ -1478,22 +1480,25 @@ export class ClassesService {
           personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
         });
         
-        // Buscar ratings dos alunos (onde eles são avaliados - ratedId)
-        const studentRatings = await this.db
-          .select({
-            studentId: ratings.ratedId,
-            avgRating: sql<number>`AVG(${ratings.rating})`,
-          })
-          .from(ratings)
-          .where(and(
-            inArray(ratings.ratedId, uniqueStudentIds as string[]),
-            eq(ratings.type, 'personal_to_student')
-          ))
-          .groupBy(ratings.ratedId);
-        
-        studentRatings.forEach((r: any) => {
-          studentRatingsMap[r.studentId] = parseFloat(r.avgRating) || 0;
-        });
+        // Buscar rating ESPECÍFICO por aula para alunos (personal -> student)
+        if (classIds.length > 0) {
+          const studentClassRatings = await this.db
+            .select({
+              classId: ratings.classId,
+              rating: ratings.rating,
+            })
+            .from(ratings)
+            .where(and(
+              inArray(ratings.classId, classIds as string[]),
+              eq(ratings.type, 'personal_to_student'),
+              eq(ratings.status, 'completed')
+            ));
+
+          studentClassRatings.forEach((r: any) => {
+            // Em caso de múltiplas avaliações (não esperado), ficará a última lida
+            studentRatingByClassId[r.classId] = Number(r.rating) || 0;
+          });
+        }
         
         console.log(`✅ [CLASSES] Carregados ratings em batch`);
       } catch (error) {
@@ -1550,7 +1555,7 @@ export class ClassesService {
           personalProfileImageUrl: null, // Simplificado por performance
           personalRating: personalRatingsMap[classData.personalId] || 0,
           personalTimeOnPlatform: '0 dias', // Simplificado por performance
-          studentRating: studentRatingsMap[classData.studentId] || 0,
+          studentRating: studentRatingByClassId[classData.id] ?? null,
           proposal: proposal ? {
             id: proposal.id,
             modality: proposal.modalityName,
@@ -1706,59 +1711,34 @@ export class ClassesService {
    * Calcula dados reais do aluno (rating)
    * Sistema de rating como Uber: começa com 5.0, varia baseado nas avaliações
    */
-  private async getStudentStats(studentId: string, classId?: string): Promise<{
+  private async getStudentStats(studentId: string, personalId: string, classId?: string): Promise<{
     rating: number | null;
   }> {
     try {
-      // Buscar rating médio do aluno (sistema como Uber)
-      let rating = null; // Não há rating até ser avaliado
-      
-      try {
-        // Buscar avaliações feitas pelo aluno (para personais)
-        // Se classId for fornecido, buscar apenas avaliações dessa aula específica
-        const whereConditions = [
-          eq(ratings.raterId, studentId),
-          eq(ratings.type, 'student_to_personal'),
-          eq(ratings.status, 'completed')
-        ];
-        
-        if (classId) {
-          whereConditions.push(eq(ratings.classId, classId));
-        }
-        
-        const studentRatings = await this.db
-          .select({ rating: ratings.rating })
-          .from(ratings)
-          .where(and(...whereConditions));
-
-        console.log('🔍 [GET_STUDENT_STATS] StudentId:', studentId);
-        console.log('🔍 [GET_STUDENT_STATS] ClassId:', classId);
-        console.log('🔍 [GET_STUDENT_STATS] WhereConditions:', whereConditions);
-        console.log('🔍 [GET_STUDENT_STATS] StudentRatings encontradas:', studentRatings.length);
-        console.log('🔍 [GET_STUDENT_STATS] StudentRatings:', studentRatings);
-
-        if (studentRatings.length > 0) {
-          // Calcular média das avaliações recebidas
-          const totalRating = studentRatings.reduce((sum, r) => sum + r.rating, 0);
-          rating = totalRating / studentRatings.length;
-          
-          // Garantir que o rating fique entre 1.0 e 5.0
-          rating = Math.max(1.0, Math.min(5.0, rating));
-          console.log('🔍 [GET_STUDENT_STATS] Rating calculado:', rating);
-        } else {
-          console.log('🔍 [GET_STUDENT_STATS] Nenhuma avaliação encontrada, rating = null');
-        }
-        // Se não há avaliações, mantém null (não avaliado)
-        
-      } catch (error) {
-        console.warn('⚠️ [CLASSES] Erro ao buscar rating do aluno:', error);
-        // Em caso de erro, mantém null (não avaliado)
-        rating = null;
+      // Rating específico da aula: personal -> student
+      if (!classId) {
+        return { rating: null };
       }
 
-      return {
-        rating: rating ? Math.round(rating * 10) / 10 : null, // Arredondar para 1 casa decimal ou null
-      };
+      try {
+        const specific = await this.db
+          .select({ rating: ratings.rating })
+          .from(ratings)
+          .where(and(
+            eq(ratings.classId, classId),
+            eq(ratings.type, 'personal_to_student'),
+            eq(ratings.raterId, personalId),
+            eq(ratings.ratedId, studentId),
+            eq(ratings.status, 'completed')
+          ))
+          .limit(1);
+
+        const value = specific[0]?.rating ?? null;
+        return { rating: value !== null ? Number(value) : null };
+      } catch (error) {
+        console.warn('⚠️ [CLASSES] Erro ao buscar rating específico da aula para aluno:', error);
+        return { rating: null };
+      }
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao calcular stats do aluno:', error);
       return { rating: null }; // null em caso de erro
