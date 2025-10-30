@@ -1163,6 +1163,25 @@ export class ClassesService {
     // Calcular dados reais do personal e aluno
     const personalStats = await this.getPersonalStats(classData.personalId);
     const studentStats = await this.getStudentStats(classData.studentId, classData.personalId, classData.id);
+
+    // Buscar rating específico desta aula para o personal (aluno -> personal)
+    let personalClassRating: number | null = null;
+    try {
+      const specificPersonal = await this.db
+        .select({ rating: ratings.rating })
+        .from(ratings)
+        .where(and(
+          eq(ratings.classId, classData.id),
+          eq(ratings.type, 'student_to_personal'),
+          eq(ratings.raterId, classData.studentId),
+          eq(ratings.ratedId, classData.personalId),
+          eq(ratings.status, 'completed')
+        ))
+        .limit(1);
+      personalClassRating = specificPersonal[0]?.rating ?? null;
+    } catch (_) {
+      personalClassRating = null;
+    }
     
     console.log('🔍 [FORMAT_CLASS] Personal Stats:', personalStats);
     console.log('🔍 [FORMAT_CLASS] Personal Time On Platform:', personalStats.timeOnPlatform);
@@ -1262,7 +1281,7 @@ export class ClassesService {
       proposalModality: classData.proposalModality || classData.proposal?.modality || null,
       // Dados reais do personal
       personalProfileImageUrl: personalProfileImageUrl,
-      personalRating: personalStats.rating ? Number(personalStats.rating) : null,
+      personalRating: personalClassRating !== null ? Number(personalClassRating) : null,
       personalTimeOnPlatform: personalStats.timeOnPlatform,
       // Dados reais do aluno
       studentRating: studentStats.rating ? Number(studentStats.rating) : null,
@@ -1459,6 +1478,8 @@ export class ClassesService {
       
       // Buscar ratings em batch
       const personalRatingsMap: Record<string, any> = {};
+      // Nota do personal específica por aula (aluno -> personal)
+      const personalRatingByClassId: Record<string, number> = {};
       // Nota do aluno específica por aula
       const studentRatingByClassId: Record<string, number> = {};
       
@@ -1479,6 +1500,25 @@ export class ClassesService {
         personalRatings.forEach((r: any) => {
           personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
         });
+
+        // Buscar rating ESPECÍFICO por aula para personal (student -> personal)
+        if (classIds.length > 0) {
+          const personalClassRatings = await this.db
+            .select({
+              classId: ratings.classId,
+              rating: ratings.rating,
+            })
+            .from(ratings)
+            .where(and(
+              inArray(ratings.classId, classIds as string[]),
+              eq(ratings.type, 'student_to_personal'),
+              eq(ratings.status, 'completed')
+            ));
+
+          personalClassRatings.forEach((r: any) => {
+            personalRatingByClassId[r.classId] = Number(r.rating) || 0;
+          });
+        }
         
         // Buscar rating ESPECÍFICO por aula para alunos (personal -> student)
         if (classIds.length > 0) {
@@ -1553,7 +1593,7 @@ export class ClassesService {
           } : null,
           proposalModality: proposal?.modalityName || null,
           personalProfileImageUrl: null, // Simplificado por performance
-          personalRating: personalRatingsMap[classData.personalId] || 0,
+          personalRating: personalRatingByClassId[classData.id] ?? null,
           personalTimeOnPlatform: '0 dias', // Simplificado por performance
           studentRating: studentRatingByClassId[classData.id] ?? null,
           proposal: proposal ? {
