@@ -33,6 +33,7 @@ import {
   UserListResponseDto,
 } from './dto/users.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Usuários')
 @Controller('users')
@@ -410,6 +411,7 @@ export class UsersController {
   // ===== ENDPOINT PARA TOKEN FCM =====
 
   @Post(':id/fcm-token')
+  @Public() // Endpoint público para permitir envio de token FCM sem autenticação
   @ApiOperation({
     summary: 'Salvar token FCM do usuário',
     description:
