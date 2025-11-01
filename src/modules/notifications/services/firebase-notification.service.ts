@@ -92,6 +92,16 @@ export class FirebaseNotificationService {
         return null;
       }
 
+      // Sanitizar dados: garantir que todos os valores sejam strings
+      // Firebase Admin SDK requer que todos os valores em 'data' sejam strings
+      const sanitizedData: Record<string, string> = {};
+      if (notification.data) {
+        for (const [key, value] of Object.entries(notification.data)) {
+          // Converter qualquer valor para string ou string vazia
+          sanitizedData[key] = value != null ? String(value) : '';
+        }
+      }
+
       // Preparar mensagem com configurações para Doze mode
       const message = {
         notification: {
@@ -99,7 +109,7 @@ export class FirebaseNotificationService {
           body: notification.body,
         },
         data: {
-          ...notification.data,
+          ...sanitizedData,
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,

@@ -128,6 +128,14 @@ export class ProposalsGateway
 
       // Enviar notificação push sempre (mesmo se não estiver conectado)
       if (this.firebaseNotificationService.isConfigured()) {
+        // Converter trainingDate de Date para string ISO se necessário
+        const trainingDateStr =
+          proposalData.proposal.trainingDate instanceof Date
+            ? proposalData.proposal.trainingDate.toISOString()
+            : typeof proposalData.proposal.trainingDate === 'string'
+              ? proposalData.proposal.trainingDate
+              : '';
+
         await this.firebaseNotificationService.sendProposalNotification(
           personalId,
           {
@@ -135,10 +143,10 @@ export class ProposalsGateway
             studentName:
               proposalData.student.name ||
               `${proposalData.student.firstName} ${proposalData.student.lastName}`,
-            location: proposalData.proposal.locationName,
-            time: proposalData.proposal.trainingTime,
-            date: proposalData.proposal.trainingDate,
-            modality: proposalData.proposal.modalityName,
+            location: proposalData.proposal.locationName || '',
+            time: proposalData.proposal.trainingTime || '',
+            date: trainingDateStr,
+            modality: proposalData.proposal.modalityName || '',
             price: proposalData.proposal.price || 0,
             expiresIn: 30,
           },
