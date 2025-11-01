@@ -138,7 +138,7 @@ export class ProposalsGateway
             location: proposalData.proposal.locationName,
             time: proposalData.proposal.trainingTime,
             date: proposalData.proposal.trainingDate,
-            modality: proposalData.proposal.modality,
+            modality: proposalData.proposal.modalityName,
             price: proposalData.proposal.price || 0,
             expiresIn: 30,
           },
