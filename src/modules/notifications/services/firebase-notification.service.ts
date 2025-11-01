@@ -92,7 +92,7 @@ export class FirebaseNotificationService {
         return null;
       }
 
-      // Preparar mensagem
+      // Preparar mensagem com configurações para Doze mode
       const message = {
         notification: {
           title: notification.title,
@@ -103,12 +103,24 @@ export class FirebaseNotificationService {
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
+        // TTL de 4 horas - garante entrega mesmo em Doze mode
+        ttl: 60 * 60 * 4, // 4 horas em segundos
+        // Evita duplicação de notificações
+        collapseKey: notification.data?.type || 'default',
         android: {
           priority: 'high' as const,
+          // Garante que notificação aparece mesmo após reinicialização
+          directBootOk: true,
           notification: {
             sound: 'alert_proposal',
             channelId: 'proposals_urgent',
             clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+            // Prioridade máxima para aparecer em hibernação
+            priority: 'high' as const,
+            // Força notificação a aparecer mesmo em modo silencioso
+            visibility: 'public' as const,
+            // Vibração para despertar
+            vibrateTimingsMillis: [0, 250, 250, 250],
           },
         },
         apns: {
@@ -116,6 +128,8 @@ export class FirebaseNotificationService {
             aps: {
               sound: 'alert_proposal.mp3',
               contentAvailable: true,
+              // Para iOS, garantir que notificação aparece mesmo em hibernação
+              interruptionLevel: 'timeSensitive' as const,
               badge: 1,
             },
           },

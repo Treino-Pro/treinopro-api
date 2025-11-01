@@ -1323,6 +1323,28 @@ export class ProposalsService {
         });
       }
 
+      // Enviar notificação push para o aluno (proposta aceita)
+      if (student && personal) {
+        try {
+          await this.proposalsGateway.sendProposalAccepted({
+            proposal: await this.mapToResponseDto(acceptedProposal),
+            personal: {
+              id: personal.id,
+              name: personal.name || `${personal.firstName} ${personal.lastName}`,
+              firstName: personal.firstName,
+              lastName: personal.lastName,
+              photo: personal.profileImageUrl,
+              profileImageUrl: personal.profileImageUrl,
+            },
+            studentId: student.id,
+          });
+          console.log('✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita');
+        } catch (error) {
+          console.error('❌ [PROPOSALS] Erro ao enviar notificação push:', error);
+          // Não falhar a operação por causa de problemas de notificação
+        }
+      }
+
       // Evento de match confirmado para ambos
       const matchData = {
         action: 'match_confirmed',
