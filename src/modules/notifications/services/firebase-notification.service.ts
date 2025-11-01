@@ -102,14 +102,16 @@ export class FirebaseNotificationService {
         }
       }
 
-      // Preparar mensagem com configurações para Doze mode
+      // SOLUÇÃO: Enviar apenas DATA, sem 'notification' no payload
+      // Isso evita conflito entre notificação automática do Firebase e manual do app
+      // O app vai criar a notificação localmente com controle total (canal, importância, etc)
       const message = {
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
+        // ❌ REMOVIDO: notification - causa conflito com notificação local manual
+        // ✅ SOLUÇÃO: Enviar title e body dentro de data
         data: {
           ...sanitizedData,
+          title: notification.title, // Título nos dados para mostrar localmente
+          body: notification.body,   // Corpo nos dados para mostrar localmente
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -117,17 +119,8 @@ export class FirebaseNotificationService {
           priority: 'high' as const,
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
-          notification: {
-            sound: 'alert_proposal',
-            channelId: 'proposals_urgent',
-            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-            // Prioridade máxima para aparecer em hibernação
-            priority: 'high' as const,
-            // Força notificação a aparecer mesmo em modo silencioso
-            visibility: 'public' as const,
-            // Vibração para despertar
-            vibrateTimingsMillis: [0, 250, 250, 250],
-          },
+          // ❌ REMOVIDO: notification aqui também - não é mais necessário
+          // O app vai criar notificação localmente com configurações corretas
         },
         apns: {
           payload: {
@@ -137,6 +130,7 @@ export class FirebaseNotificationService {
               // Para iOS, garantir que notificação aparece mesmo em hibernação
               interruptionLevel: 'timeSensitive' as const,
               badge: 1,
+              // Para iOS, também enviar alert nos dados (app vai mostrar localmente)
             },
           },
         },
