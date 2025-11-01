@@ -24,17 +24,21 @@ export class CrefCacheService {
   async get(crefNumber: string): Promise<CrefValidationResult | null> {
     try {
       const cacheKey = this.getCacheKey(crefNumber);
-      const cached = await this.cacheManager.get<CrefValidationResult>(cacheKey);
-      
+      const cached =
+        await this.cacheManager.get<CrefValidationResult>(cacheKey);
+
       if (cached) {
         this.logger.log(`🎯 [CACHE] Hit para CREF: ${crefNumber}`);
         return cached;
       }
-      
+
       this.logger.log(`❌ [CACHE] Miss para CREF: ${crefNumber}`);
       return null;
     } catch (error) {
-      this.logger.error(`💥 [CACHE] Erro ao buscar CREF ${crefNumber}:`, error.message);
+      this.logger.error(
+        `💥 [CACHE] Erro ao buscar CREF ${crefNumber}:`,
+        error.message,
+      );
       return null;
     }
   }
@@ -42,13 +46,21 @@ export class CrefCacheService {
   /**
    * Armazena uma validação no cache
    */
-  async set(crefNumber: string, validation: CrefValidationResult): Promise<void> {
+  async set(
+    crefNumber: string,
+    validation: CrefValidationResult,
+  ): Promise<void> {
     try {
       const cacheKey = this.getCacheKey(crefNumber);
       await this.cacheManager.set(cacheKey, validation, this.CACHE_TTL * 1000);
-      this.logger.log(`💾 [CACHE] Armazenado CREF: ${crefNumber} (TTL: ${this.CACHE_TTL}s)`);
+      this.logger.log(
+        `💾 [CACHE] Armazenado CREF: ${crefNumber} (TTL: ${this.CACHE_TTL}s)`,
+      );
     } catch (error) {
-      this.logger.error(`💥 [CACHE] Erro ao armazenar CREF ${crefNumber}:`, error.message);
+      this.logger.error(
+        `💥 [CACHE] Erro ao armazenar CREF ${crefNumber}:`,
+        error.message,
+      );
     }
   }
 
@@ -61,7 +73,10 @@ export class CrefCacheService {
       await this.cacheManager.del(cacheKey);
       this.logger.log(`🗑️ [CACHE] Removido CREF: ${crefNumber}`);
     } catch (error) {
-      this.logger.error(`💥 [CACHE] Erro ao remover CREF ${crefNumber}:`, error.message);
+      this.logger.error(
+        `💥 [CACHE] Erro ao remover CREF ${crefNumber}:`,
+        error.message,
+      );
     }
   }
 
@@ -85,11 +100,11 @@ export class CrefCacheService {
     try {
       const testKey = 'cref:health-check';
       const testValue = { test: true, timestamp: new Date() };
-      
+
       await this.cacheManager.set(testKey, testValue, 1000);
       const retrieved = await this.cacheManager.get(testKey);
       await this.cacheManager.del(testKey);
-      
+
       return (retrieved as any)?.test === true;
     } catch (error) {
       this.logger.error(`💥 [CACHE] Health check falhou:`, error.message);
@@ -106,10 +121,13 @@ export class CrefCacheService {
       return {
         hits: 0,
         misses: 0,
-        keys: 0
+        keys: 0,
       };
     } catch (error) {
-      this.logger.error(`💥 [CACHE] Erro ao obter estatísticas:`, error.message);
+      this.logger.error(
+        `💥 [CACHE] Erro ao obter estatísticas:`,
+        error.message,
+      );
       return { hits: 0, misses: 0, keys: 0 };
     }
   }

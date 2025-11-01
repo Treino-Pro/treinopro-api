@@ -183,9 +183,18 @@ describe('ChatGateway', () => {
 
       await gateway.handleSendMessage(mockSocket, sendMessageDto);
 
-      expect(chatService.sendMessage).toHaveBeenCalledWith('user-1', sendMessageDto);
-      expect(mockSocket.emit).toHaveBeenCalledWith('message_sent', expect.any(Object));
-      expect(receiverSocket.emit).toHaveBeenCalledWith('message_received', expect.any(Object));
+      expect(chatService.sendMessage).toHaveBeenCalledWith(
+        'user-1',
+        sendMessageDto,
+      );
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'message_sent',
+        expect.any(Object),
+      );
+      expect(receiverSocket.emit).toHaveBeenCalledWith(
+        'message_received',
+        expect.any(Object),
+      );
     });
 
     it('should emit error when user is not authenticated', async () => {
@@ -212,7 +221,9 @@ describe('ChatGateway', () => {
       };
 
       mockSocket.userId = 'user-1';
-      jest.spyOn(chatService, 'sendMessage').mockRejectedValue(new Error('Service error'));
+      jest
+        .spyOn(chatService, 'sendMessage')
+        .mockRejectedValue(new Error('Service error'));
 
       await gateway.handleSendMessage(mockSocket, sendMessageDto);
 
@@ -321,7 +332,9 @@ describe('ChatGateway', () => {
     it('should mark message as read successfully', async () => {
       const data = { classId: 'class-1', messageId: 'message-1' };
       mockSocket.userId = 'user-1';
-      jest.spyOn(chatService, 'markAsRead').mockResolvedValue({ success: true });
+      jest
+        .spyOn(chatService, 'markAsRead')
+        .mockResolvedValue({ success: true });
 
       await gateway.handleMarkAsRead(mockSocket, data);
 

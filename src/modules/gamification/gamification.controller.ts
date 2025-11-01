@@ -1,18 +1,25 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Put, 
-  Delete, 
-  Body, 
-  Param, 
-  Query, 
-  UseGuards, 
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
   Request,
   HttpCode,
-  HttpStatus
+  HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -34,7 +41,7 @@ import {
   AchievementResponseDto,
   UserAchievementResponseDto,
   XPHistoryResponseDto,
-  GamificationStatsResponseDto
+  GamificationStatsResponseDto,
 } from './dto/gamification.dto';
 
 @ApiTags('Gamification')
@@ -48,33 +55,56 @@ export class GamificationController {
 
   @Get('profile')
   @ApiOperation({ summary: 'Obter perfil de gamificação do usuário' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Perfil de gamificação retornado com sucesso',
     schema: {
       type: 'object',
       properties: {
         id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' },
-        userId: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174001' },
-        level: { type: 'number', example: 5, description: 'Nível atual do usuário' },
-        totalXP: { type: 'number', example: 1250, description: 'XP total acumulado' },
-        currentLevelXP: { type: 'number', example: 250, description: 'XP do nível atual' },
-        nextLevelXP: { type: 'number', example: 500, description: 'XP necessário para próximo nível' },
-        badges: { 
-          type: 'array', 
+        userId: {
+          type: 'string',
+          example: '123e4567-e89b-12d3-a456-426614174001',
+        },
+        level: {
+          type: 'number',
+          example: 5,
+          description: 'Nível atual do usuário',
+        },
+        totalXP: {
+          type: 'number',
+          example: 1250,
+          description: 'XP total acumulado',
+        },
+        currentLevelXP: {
+          type: 'number',
+          example: 250,
+          description: 'XP do nível atual',
+        },
+        nextLevelXP: {
+          type: 'number',
+          example: 500,
+          description: 'XP necessário para próximo nível',
+        },
+        badges: {
+          type: 'array',
           items: { type: 'string' },
           example: ['first_class', 'week_streak', 'monthly_goal'],
-          description: 'Badges conquistados'
+          description: 'Badges conquistados',
         },
-        achievements: { 
-          type: 'array', 
+        achievements: {
+          type: 'array',
           items: { type: 'string' },
           example: ['achievement_1', 'achievement_2'],
-          description: 'Conquistas desbloqueadas'
+          description: 'Conquistas desbloqueadas',
         },
-        rank: { type: 'number', example: 15, description: 'Posição no ranking' },
+        rank: {
+          type: 'number',
+          example: 15,
+          description: 'Posição no ranking',
+        },
         createdAt: { type: 'string', example: '2024-01-01T00:00:00.000Z' },
-        updatedAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' }
+        updatedAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' },
       },
       example: {
         id: '123e4567-e89b-12d3-a456-426614174000',
@@ -87,13 +117,13 @@ export class GamificationController {
         achievements: ['achievement_1', 'achievement_2'],
         rank: 15,
         createdAt: '2024-01-01T00:00:00.000Z',
-        updatedAt: '2024-01-15T10:00:00.000Z'
-      }
-    }
+        updatedAt: '2024-01-15T10:00:00.000Z',
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getUserProfile(@Request() req): Promise<UserProfileResponseDto> {
     return this.gamificationService.getUserProfile(req.user.sub);
@@ -101,44 +131,63 @@ export class GamificationController {
 
   @Get('stats')
   @ApiOperation({ summary: 'Obter estatísticas de gamificação' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Estatísticas de gamificação retornadas com sucesso',
     schema: {
       type: 'object',
       properties: {
-        totalUsers: { type: 'number', example: 150, description: 'Total de usuários na plataforma' },
-        activeUsers: { type: 'number', example: 120, description: 'Usuários ativos' },
-        totalXP: { type: 'number', example: 50000, description: 'XP total da plataforma' },
-        averageLevel: { type: 'number', example: 3.5, description: 'Nível médio dos usuários' },
+        totalUsers: {
+          type: 'number',
+          example: 150,
+          description: 'Total de usuários na plataforma',
+        },
+        activeUsers: {
+          type: 'number',
+          example: 120,
+          description: 'Usuários ativos',
+        },
+        totalXP: {
+          type: 'number',
+          example: 50000,
+          description: 'XP total da plataforma',
+        },
+        averageLevel: {
+          type: 'number',
+          example: 3.5,
+          description: 'Nível médio dos usuários',
+        },
         topUsers: {
           type: 'array',
           items: {
             type: 'object',
             properties: {
-              userId: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174001' },
+              userId: {
+                type: 'string',
+                example: '123e4567-e89b-12d3-a456-426614174001',
+              },
               username: { type: 'string', example: 'João Silva' },
               level: { type: 'number', example: 8 },
-              totalXP: { type: 'number', example: 2500 }
-            }
-          }
+              totalXP: { type: 'number', example: 2500 },
+            },
+          },
         },
         missionStats: {
           type: 'object',
           properties: {
             totalMissions: { type: 'number', example: 25 },
             completedMissions: { type: 'number', example: 150 },
-            averageCompletionRate: { type: 'number', example: 0.75 }
-          }
+            averageCompletionRate: { type: 'number', example: 0.75 },
+          },
         },
         achievementStats: {
           type: 'object',
           properties: {
             totalAchievements: { type: 'number', example: 15 },
             unlockedAchievements: { type: 'number', example: 300 },
-            averageUnlockRate: { type: 'number', example: 0.6 }
-          }
-        }
+            averageUnlockRate: { type: 'number', example: 0.6 },
+          },
+        },
       },
       example: {
         totalUsers: 150,
@@ -146,27 +195,39 @@ export class GamificationController {
         totalXP: 50000,
         averageLevel: 3.5,
         topUsers: [
-          { userId: '123e4567-e89b-12d3-a456-426614174001', username: 'João Silva', level: 8, totalXP: 2500 },
-          { userId: '123e4567-e89b-12d3-a456-426614174002', username: 'Maria Santos', level: 7, totalXP: 2200 }
+          {
+            userId: '123e4567-e89b-12d3-a456-426614174001',
+            username: 'João Silva',
+            level: 8,
+            totalXP: 2500,
+          },
+          {
+            userId: '123e4567-e89b-12d3-a456-426614174002',
+            username: 'Maria Santos',
+            level: 7,
+            totalXP: 2200,
+          },
         ],
         missionStats: {
           totalMissions: 25,
           completedMissions: 150,
-          averageCompletionRate: 0.75
+          averageCompletionRate: 0.75,
         },
         achievementStats: {
           totalAchievements: 15,
           unlockedAchievements: 300,
-          averageUnlockRate: 0.6
-        }
-      }
-    }
+          averageUnlockRate: 0.6,
+        },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
-  async getGamificationStats(@Request() req): Promise<GamificationStatsResponseDto> {
+  async getGamificationStats(
+    @Request() req,
+  ): Promise<GamificationStatsResponseDto> {
     return this.gamificationService.getGamificationStats(req.user.sub);
   }
 
@@ -175,34 +236,50 @@ export class GamificationController {
   @Post('xp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Adicionar XP ao usuário' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'XP adicionado com sucesso',
     schema: {
       type: 'object',
       properties: {
         message: { type: 'string', example: 'XP adicionado com sucesso' },
-        newTotalXP: { type: 'number', example: 1350, description: 'Novo total de XP' },
-        levelUp: { type: 'boolean', example: true, description: 'Se o usuário subiu de nível' },
-        newLevel: { type: 'number', example: 6, description: 'Novo nível (se subiu)' },
-        xpAdded: { type: 'number', example: 100, description: 'XP adicionado nesta operação' }
+        newTotalXP: {
+          type: 'number',
+          example: 1350,
+          description: 'Novo total de XP',
+        },
+        levelUp: {
+          type: 'boolean',
+          example: true,
+          description: 'Se o usuário subiu de nível',
+        },
+        newLevel: {
+          type: 'number',
+          example: 6,
+          description: 'Novo nível (se subiu)',
+        },
+        xpAdded: {
+          type: 'number',
+          example: 100,
+          description: 'XP adicionado nesta operação',
+        },
       },
       example: {
         message: 'XP adicionado com sucesso',
         newTotalXP: 1350,
         levelUp: true,
         newLevel: 6,
-        xpAdded: 100
-      }
-    }
+        xpAdded: 100,
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dados inválidos' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async addXP(@Request() req, @Body() addXPDto: AddXPDto) {
     // Extrair userId do token JWT
@@ -212,22 +289,40 @@ export class GamificationController {
 
   @Get('xp/history')
   @ApiOperation({ summary: 'Obter histórico de XP do usuário' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Histórico de XP retornado com sucesso',
     schema: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' },
-          userId: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174001' },
-          xpAmount: { type: 'number', example: 100, description: 'Quantidade de XP' },
-          source: { type: 'string', example: 'class_completion', description: 'Fonte do XP' },
-          description: { type: 'string', example: 'Conclusão de aula de musculação', description: 'Descrição da ação' },
-          createdAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' }
-        }
-      }
+          id: {
+            type: 'string',
+            example: '123e4567-e89b-12d3-a456-426614174000',
+          },
+          userId: {
+            type: 'string',
+            example: '123e4567-e89b-12d3-a456-426614174001',
+          },
+          xpAmount: {
+            type: 'number',
+            example: 100,
+            description: 'Quantidade de XP',
+          },
+          source: {
+            type: 'string',
+            example: 'class_completion',
+            description: 'Fonte do XP',
+          },
+          description: {
+            type: 'string',
+            example: 'Conclusão de aula de musculação',
+            description: 'Descrição da ação',
+          },
+          createdAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' },
+        },
+      },
     },
     example: [
       {
@@ -236,7 +331,7 @@ export class GamificationController {
         xpAmount: 100,
         source: 'class_completion',
         description: 'Conclusão de aula de musculação',
-        createdAt: '2024-01-15T10:00:00.000Z'
+        createdAt: '2024-01-15T10:00:00.000Z',
       },
       {
         id: '123e4567-e89b-12d3-a456-426614174001',
@@ -244,13 +339,13 @@ export class GamificationController {
         xpAmount: 50,
         source: 'daily_login',
         description: 'Login diário',
-        createdAt: '2024-01-14T09:00:00.000Z'
-      }
-    ]
+        createdAt: '2024-01-14T09:00:00.000Z',
+      },
+    ],
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getXPHistory(@Request() req, @Query() query: XPHistoryQueryDto) {
     return this.gamificationService.getXPHistory(req.user.sub, query);
@@ -261,27 +356,52 @@ export class GamificationController {
   @Post('missions')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Criar nova missão (APENAS ADMIN)',
-    description: 'Apenas administradores podem criar missões. As missões criadas aparecerão para todos os usuários elegíveis.'
+    description:
+      'Apenas administradores podem criar missões. As missões criadas aparecerão para todos os usuários elegíveis.',
   })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'Missão criada com sucesso',
     schema: {
       type: 'object',
       properties: {
         id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' },
-        title: { type: 'string', example: 'Complete 5 aulas esta semana', description: 'Título da missão' },
-        description: { type: 'string', example: 'Participe de 5 aulas de treino para ganhar XP extra', description: 'Descrição da missão' },
-        type: { type: 'string', example: 'weekly', description: 'Tipo da missão' },
-        xpReward: { type: 'number', example: 200, description: 'XP de recompensa' },
+        title: {
+          type: 'string',
+          example: 'Complete 5 aulas esta semana',
+          description: 'Título da missão',
+        },
+        description: {
+          type: 'string',
+          example: 'Participe de 5 aulas de treino para ganhar XP extra',
+          description: 'Descrição da missão',
+        },
+        type: {
+          type: 'string',
+          example: 'weekly',
+          description: 'Tipo da missão',
+        },
+        xpReward: {
+          type: 'number',
+          example: 200,
+          description: 'XP de recompensa',
+        },
         target: { type: 'number', example: 5, description: 'Meta da missão' },
-        currentProgress: { type: 'number', example: 0, description: 'Progresso atual' },
-        isActive: { type: 'boolean', example: true, description: 'Se a missão está ativa' },
+        currentProgress: {
+          type: 'number',
+          example: 0,
+          description: 'Progresso atual',
+        },
+        isActive: {
+          type: 'boolean',
+          example: true,
+          description: 'Se a missão está ativa',
+        },
         startDate: { type: 'string', example: '2024-01-15T00:00:00.000Z' },
         endDate: { type: 'string', example: '2024-01-21T23:59:59.000Z' },
-        createdAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' }
+        createdAt: { type: 'string', example: '2024-01-15T10:00:00.000Z' },
       },
       example: {
         id: '123e4567-e89b-12d3-a456-426614174000',
@@ -294,49 +414,58 @@ export class GamificationController {
         isActive: true,
         startDate: '2024-01-15T00:00:00.000Z',
         endDate: '2024-01-21T23:59:59.000Z',
-        createdAt: '2024-01-15T10:00:00.000Z'
-      }
-    }
+        createdAt: '2024-01-15T10:00:00.000Z',
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dados inválidos' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
-  @ApiResponse({ 
-    status: 403, 
-    description: 'Acesso negado - Apenas administradores podem criar missões' 
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - Apenas administradores podem criar missões',
   })
-  async createMission(@Request() req, @Body() createMissionDto: CreateMissionDto): Promise<MissionResponseDto> {
+  async createMission(
+    @Request() req,
+    @Body() createMissionDto: CreateMissionDto,
+  ): Promise<MissionResponseDto> {
     const userId = req.user.sub;
     return this.gamificationService.createMission(createMissionDto, userId);
   }
 
   @Get('missions')
   @ApiOperation({ summary: 'Listar missões com filtros' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Lista de missões retornada com sucesso',
     schema: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' },
+          id: {
+            type: 'string',
+            example: '123e4567-e89b-12d3-a456-426614174000',
+          },
           title: { type: 'string', example: 'Complete 5 aulas esta semana' },
-          description: { type: 'string', example: 'Participe de 5 aulas de treino para ganhar XP extra' },
+          description: {
+            type: 'string',
+            example: 'Participe de 5 aulas de treino para ganhar XP extra',
+          },
           type: { type: 'string', example: 'weekly' },
           xpReward: { type: 'number', example: 200 },
           target: { type: 'number', example: 5 },
           currentProgress: { type: 'number', example: 0 },
           isActive: { type: 'boolean', example: true },
           startDate: { type: 'string', example: '2024-01-15T00:00:00.000Z' },
-          endDate: { type: 'string', example: '2024-01-21T23:59:59.000Z' }
-        }
-      }
+          endDate: { type: 'string', example: '2024-01-21T23:59:59.000Z' },
+        },
+      },
     },
     example: [
       {
@@ -349,7 +478,7 @@ export class GamificationController {
         currentProgress: 0,
         isActive: true,
         startDate: '2024-01-15T00:00:00.000Z',
-        endDate: '2024-01-21T23:59:59.000Z'
+        endDate: '2024-01-21T23:59:59.000Z',
       },
       {
         id: '123e4567-e89b-12d3-a456-426614174001',
@@ -361,13 +490,13 @@ export class GamificationController {
         currentProgress: 3,
         isActive: true,
         startDate: '2024-01-15T00:00:00.000Z',
-        endDate: '2024-01-22T23:59:59.000Z'
-      }
-    ]
+        endDate: '2024-01-22T23:59:59.000Z',
+      },
+    ],
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getMissions(@Query() query: MissionQueryDto) {
     return this.gamificationService.getMissions(query);
@@ -376,18 +505,18 @@ export class GamificationController {
   @Get('missions/:id')
   @ApiOperation({ summary: 'Obter missão por ID' })
   @ApiParam({ name: 'id', description: 'ID da missão' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Missão encontrada com sucesso',
-    type: MissionResponseDto 
+    type: MissionResponseDto,
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Missão não encontrada' 
+  @ApiResponse({
+    status: 404,
+    description: 'Missão não encontrada',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getMissionById(@Param('id') id: string): Promise<MissionResponseDto> {
     return this.gamificationService.getMissionById(id);
@@ -396,21 +525,22 @@ export class GamificationController {
   @Put('missions/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Atualizar missão (APENAS ADMIN)',
-    description: 'Apenas administradores podem atualizar missões existentes.'
+    description: 'Apenas administradores podem atualizar missões existentes.',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Missão atualizada com sucesso' 
+  @ApiResponse({
+    status: 200,
+    description: 'Missão atualizada com sucesso',
   })
-  @ApiResponse({ 
-    status: 403, 
-    description: 'Acesso negado - Apenas administradores podem atualizar missões' 
+  @ApiResponse({
+    status: 403,
+    description:
+      'Acesso negado - Apenas administradores podem atualizar missões',
   })
   async updateMission(
     @Param('id') id: string,
-    @Body() updateMissionDto: UpdateMissionDto
+    @Body() updateMissionDto: UpdateMissionDto,
   ): Promise<MissionResponseDto> {
     return this.gamificationService.updateMission(id, updateMissionDto);
   }
@@ -419,17 +549,17 @@ export class GamificationController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Excluir missão (APENAS ADMIN)',
-    description: 'Apenas administradores podem excluir missões.'
+    description: 'Apenas administradores podem excluir missões.',
   })
-  @ApiResponse({ 
-    status: 204, 
-    description: 'Missão excluída com sucesso' 
+  @ApiResponse({
+    status: 204,
+    description: 'Missão excluída com sucesso',
   })
-  @ApiResponse({ 
-    status: 403, 
-    description: 'Acesso negado - Apenas administradores podem excluir missões' 
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - Apenas administradores podem excluir missões',
   })
   async deleteMission(@Param('id') id: string): Promise<void> {
     return this.gamificationService.deleteMission(id);
@@ -438,24 +568,30 @@ export class GamificationController {
   @Post('missions/:id/assign')
   async assignMissionToUser(
     @Request() req,
-    @Param('id') missionId: string
+    @Param('id') missionId: string,
   ): Promise<UserMissionResponseDto> {
-return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
+    return this.gamificationService.assignMissionToUser(
+      req.user.sub,
+      missionId,
+    );
   }
 
   @Get('missions/user/my-missions')
   async getUserMissions(
     @Request() req,
-    @Query('status') status?: string
+    @Query('status') status?: string,
   ): Promise<UserMissionResponseDto[]> {
-    return this.gamificationService.getUserMissions(req.user.sub, status as any);
+    return this.gamificationService.getUserMissions(
+      req.user.sub,
+      status as any,
+    );
   }
 
   @Post('missions/progress')
   @HttpCode(200)
   async updateMissionProgress(
     @Request() req,
-    @Body() progressDto: MissionProgressDto
+    @Body() progressDto: MissionProgressDto,
   ): Promise<UserMissionResponseDto[]> {
     // Garantir que o userId seja o do usuário autenticado
     progressDto.userId = req.user.sub;
@@ -465,7 +601,9 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   // ===== CONQUISTAS =====
 
   @Post('achievements')
-  async createAchievement(@Body() createAchievementDto: CreateAchievementDto): Promise<AchievementResponseDto> {
+  async createAchievement(
+    @Body() createAchievementDto: CreateAchievementDto,
+  ): Promise<AchievementResponseDto> {
     return this.gamificationService.createAchievement(createAchievementDto);
   }
 
@@ -475,14 +613,16 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   }
 
   @Get('achievements/:id')
-  async getAchievementById(@Param('id') id: string): Promise<AchievementResponseDto> {
+  async getAchievementById(
+    @Param('id') id: string,
+  ): Promise<AchievementResponseDto> {
     return this.gamificationService.getAchievementById(id);
   }
 
   @Put('achievements/:id')
   async updateAchievement(
     @Param('id') id: string,
-    @Body() updateAchievementDto: UpdateAchievementDto
+    @Body() updateAchievementDto: UpdateAchievementDto,
   ): Promise<AchievementResponseDto> {
     return this.gamificationService.updateAchievement(id, updateAchievementDto);
   }
@@ -494,14 +634,16 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   }
 
   @Get('achievements/user/my-achievements')
-  async getUserAchievements(@Request() req): Promise<UserAchievementResponseDto[]> {
+  async getUserAchievements(
+    @Request() req,
+  ): Promise<UserAchievementResponseDto[]> {
     return this.gamificationService.getUserAchievements(req.user.sub);
   }
 
   @Post('achievements/progress')
   async updateAchievementProgress(
     @Request() req,
-    @Body() progressDto: AchievementProgressDto
+    @Body() progressDto: AchievementProgressDto,
   ): Promise<UserAchievementResponseDto[]> {
     // Garantir que o userId seja o do usuário autenticado
     progressDto.userId = req.user.sub;
@@ -513,66 +655,100 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   @Post('actions/class-completion')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Processar conclusão de aula para gamificação' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'XP e progresso atualizados com sucesso',
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'XP e progresso atualizados com sucesso' },
-        xpEarned: { type: 'number', example: 100, description: 'XP ganho com a aula' },
-        missionsUpdated: { type: 'number', example: 2, description: 'Número de missões atualizadas' },
-        achievementsUnlocked: { type: 'array', items: { type: 'string' }, example: ['first_class'], description: 'Conquistas desbloqueadas' }
+        message: {
+          type: 'string',
+          example: 'XP e progresso atualizados com sucesso',
+        },
+        xpEarned: {
+          type: 'number',
+          example: 100,
+          description: 'XP ganho com a aula',
+        },
+        missionsUpdated: {
+          type: 'number',
+          example: 2,
+          description: 'Número de missões atualizadas',
+        },
+        achievementsUnlocked: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['first_class'],
+          description: 'Conquistas desbloqueadas',
+        },
       },
       example: {
         message: 'XP e progresso atualizados com sucesso',
         xpEarned: 100,
         missionsUpdated: 2,
-        achievementsUnlocked: ['first_class']
-      }
-    }
+        achievementsUnlocked: ['first_class'],
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dados inválidos' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async processClassCompletion(
     @Request() req,
-    @Body() body: { classId: string }
+    @Body() body: { classId: string },
   ): Promise<{ message: string }> {
-    await this.gamificationService.processClassCompletion(req.user.sub, body.classId);
+    await this.gamificationService.processClassCompletion(
+      req.user.sub,
+      body.classId,
+    );
     return { message: 'XP e progresso atualizados com sucesso' };
   }
 
   @Post('actions/daily-login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Processar login diário para gamificação' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Progresso de login diário atualizado',
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Progresso de login diário atualizado' },
-        xpEarned: { type: 'number', example: 50, description: 'XP ganho com o login' },
-        streakDays: { type: 'number', example: 5, description: 'Dias consecutivos de login' },
-        missionsUpdated: { type: 'number', example: 1, description: 'Número de missões atualizadas' }
+        message: {
+          type: 'string',
+          example: 'Progresso de login diário atualizado',
+        },
+        xpEarned: {
+          type: 'number',
+          example: 50,
+          description: 'XP ganho com o login',
+        },
+        streakDays: {
+          type: 'number',
+          example: 5,
+          description: 'Dias consecutivos de login',
+        },
+        missionsUpdated: {
+          type: 'number',
+          example: 1,
+          description: 'Número de missões atualizadas',
+        },
       },
       example: {
         message: 'Progresso de login diário atualizado',
         xpEarned: 50,
         streakDays: 5,
-        missionsUpdated: 1
-      }
-    }
+        missionsUpdated: 1,
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async processDailyLogin(@Request() req): Promise<{ message: string }> {
     await this.gamificationService.processDailyLogin(req.user.sub);
@@ -582,56 +758,66 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
   @Post('missions/auto-assign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Atribuir próxima missão automaticamente' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Próxima missão atribuída com sucesso',
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Próxima missão atribuída com sucesso' },
+        message: {
+          type: 'string',
+          example: 'Próxima missão atribuída com sucesso',
+        },
         mission: {
           type: 'object',
           properties: {
             id: { type: 'string' },
             title: { type: 'string' },
             description: { type: 'string' },
-            xpReward: { type: 'number' }
-          }
-        }
-      }
-    }
+            xpReward: { type: 'number' },
+          },
+        },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Nenhuma missão disponível para atribuição' 
+  @ApiResponse({
+    status: 404,
+    description: 'Nenhuma missão disponível para atribuição',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
-  async autoAssignNextMission(@Request() req): Promise<{ message: string; mission?: any }> {
-    const assignedMission = await this.gamificationService.assignNextMission(req.user.sub);
-    
+  async autoAssignNextMission(
+    @Request() req,
+  ): Promise<{ message: string; mission?: any }> {
+    const assignedMission = await this.gamificationService.assignNextMission(
+      req.user.sub,
+    );
+
     if (!assignedMission) {
       return { message: 'Nenhuma missão disponível para atribuição' };
     }
-    
-    return { 
+
+    return {
       message: 'Próxima missão atribuída com sucesso',
       mission: {
         id: assignedMission.mission.id,
         title: assignedMission.mission.title,
         description: assignedMission.mission.description,
-        xpReward: assignedMission.mission.xpReward
-      }
+        xpReward: assignedMission.mission.xpReward,
+      },
     };
   }
 
   @Post('migration/assign-missions-to-existing-users')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Atribuir missões para usuários existentes sem perfil de gamificação' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiOperation({
+    summary:
+      'Atribuir missões para usuários existentes sem perfil de gamificação',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Migração concluída com sucesso',
     schema: {
       type: 'object',
@@ -639,21 +825,20 @@ return this.gamificationService.assignMissionToUser(req.user.sub, missionId);
         message: { type: 'string' },
         usersProcessed: { type: 'number' },
         missionsAssigned: { type: 'number' },
-        errors: { type: 'array', items: { type: 'string' } }
-      }
-    }
+        errors: { type: 'array', items: { type: 'string' } },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
-  async migrateExistingUsers(): Promise<{ 
-    message: string; 
-    usersProcessed: number; 
-    missionsAssigned: number; 
-    errors: string[] 
+  async migrateExistingUsers(): Promise<{
+    message: string;
+    usersProcessed: number;
+    missionsAssigned: number;
+    errors: string[];
   }> {
     return this.gamificationService.migrateExistingUsers();
   }
 }
-

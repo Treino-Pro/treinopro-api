@@ -6,7 +6,7 @@ export class ReportProblemDto {
     description: 'Título do problema',
     example: 'Problema com o pagamento',
     minLength: 5,
-    maxLength: 100
+    maxLength: 100,
   })
   @IsString()
   @IsNotEmpty()
@@ -16,9 +16,10 @@ export class ReportProblemDto {
 
   @ApiProperty({
     description: 'Descrição detalhada do problema',
-    example: 'Estou enfrentando dificuldades para realizar o pagamento da aula. O sistema não está processando minha transação.',
+    example:
+      'Estou enfrentando dificuldades para realizar o pagamento da aula. O sistema não está processando minha transação.',
     minLength: 10,
-    maxLength: 1000
+    maxLength: 1000,
   })
   @IsString()
   @IsNotEmpty()

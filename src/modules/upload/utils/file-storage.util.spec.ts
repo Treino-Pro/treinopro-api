@@ -16,7 +16,7 @@ describe('FileStorageUtil', () => {
     }).compile();
 
     service = module.get<FileStorageUtil>(FileStorageUtil);
-    
+
     // Mock console methods
     jest.spyOn(console, 'log').mockImplementation();
     jest.spyOn(console, 'error').mockImplementation();
@@ -30,15 +30,19 @@ describe('FileStorageUtil', () => {
     it('should generate unique filename with original extension', () => {
       const originalName = 'test-image.jpg';
       const result = service.generateUniqueFileName(originalName);
-      
-      expect(result).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/);
+
+      expect(result).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/,
+      );
     });
 
     it('should handle files without extension', () => {
       const originalName = 'test-file';
       const result = service.generateUniqueFileName(originalName);
-      
-      expect(result).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+
+      expect(result).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
     });
   });
 
@@ -62,12 +66,16 @@ describe('FileStorageUtil', () => {
   describe('getPublicUrl', () => {
     it('should return correct URL for profile category', () => {
       const result = service.getPublicUrl('profile', 'test.jpg');
-      expect(result).toBe('https://api.treinopro.com/static/images/profiles/test.jpg');
+      expect(result).toBe(
+        'https://api.treinopro.com/static/images/profiles/test.jpg',
+      );
     });
 
     it('should return correct URL for document category', () => {
       const result = service.getPublicUrl('document', 'test.pdf');
-      expect(result).toBe('https://api.treinopro.com/static/images/documents/test.pdf');
+      expect(result).toBe(
+        'https://api.treinopro.com/static/images/documents/test.pdf',
+      );
     });
   });
 
@@ -80,7 +88,12 @@ describe('FileStorageUtil', () => {
 
       mockedFs.writeFile.mockResolvedValue(undefined);
 
-      const result = await service.saveFile(buffer, originalName, category, mimeType);
+      const result = await service.saveFile(
+        buffer,
+        originalName,
+        category,
+        mimeType,
+      );
 
       expect(result).toHaveProperty('storedName');
       expect(result).toHaveProperty('path');
@@ -88,7 +101,7 @@ describe('FileStorageUtil', () => {
       expect(result.storedName).toMatch(/^[0-9a-f-]+\.jpg$/);
       expect(mockedFs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('images/profiles'),
-        buffer
+        buffer,
       );
     });
 
@@ -100,8 +113,9 @@ describe('FileStorageUtil', () => {
 
       mockedFs.writeFile.mockRejectedValue(new Error('Write failed'));
 
-      await expect(service.saveFile(buffer, originalName, category, mimeType))
-        .rejects.toThrow('Falha ao salvar arquivo');
+      await expect(
+        service.saveFile(buffer, originalName, category, mimeType),
+      ).rejects.toThrow('Falha ao salvar arquivo');
     });
   });
 
@@ -119,8 +133,9 @@ describe('FileStorageUtil', () => {
       const filePath = '/path/to/file.jpg';
       mockedFs.unlink.mockRejectedValue(new Error('Delete failed'));
 
-      await expect(service.deleteFile(filePath))
-        .rejects.toThrow('Falha ao deletar arquivo');
+      await expect(service.deleteFile(filePath)).rejects.toThrow(
+        'Falha ao deletar arquivo',
+      );
     });
   });
 
@@ -131,10 +146,12 @@ describe('FileStorageUtil', () => {
       const options = {
         maxSize: 5 * 1024 * 1024, // 5MB
         allowedMimeTypes: ['image/jpeg', 'image/png'],
-        category: 'profile'
+        category: 'profile',
       };
 
-      expect(() => service.validateFile(buffer, mimeType, options)).not.toThrow();
+      expect(() =>
+        service.validateFile(buffer, mimeType, options),
+      ).not.toThrow();
     });
 
     it('should throw error for file too large', () => {
@@ -143,11 +160,12 @@ describe('FileStorageUtil', () => {
       const options = {
         maxSize: 5 * 1024 * 1024, // 5MB
         allowedMimeTypes: ['image/jpeg', 'image/png'],
-        category: 'profile'
+        category: 'profile',
       };
 
-      expect(() => service.validateFile(buffer, mimeType, options))
-        .toThrow('Arquivo muito grande');
+      expect(() => service.validateFile(buffer, mimeType, options)).toThrow(
+        'Arquivo muito grande',
+      );
     });
 
     it('should throw error for invalid MIME type', () => {
@@ -156,11 +174,12 @@ describe('FileStorageUtil', () => {
       const options = {
         maxSize: 5 * 1024 * 1024,
         allowedMimeTypes: ['image/jpeg', 'image/png'],
-        category: 'profile'
+        category: 'profile',
       };
 
-      expect(() => service.validateFile(buffer, mimeType, options))
-        .toThrow('Tipo de arquivo não permitido');
+      expect(() => service.validateFile(buffer, mimeType, options)).toThrow(
+        'Tipo de arquivo não permitido',
+      );
     });
   });
 

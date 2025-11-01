@@ -20,26 +20,26 @@ import { FileValidationGuard } from './guards/file-validation.guard';
         // Validação básica de tipo de arquivo
         const allowedMimes = [
           'image/jpeg',
-          'image/png', 
+          'image/png',
           'image/webp',
-          'application/pdf'
+          'application/pdf',
         ];
-        
+
         if (allowedMimes.includes(file.mimetype)) {
           cb(null, true);
         } else {
           cb(new Error('Tipo de arquivo não permitido'), false);
         }
-      }
-    })
+      },
+    }),
   ],
   controllers: [UploadController],
   providers: [
     UploadService,
     FileStorageUtil,
     ImageProcessingUtil,
-    FileValidationGuard
+    FileValidationGuard,
   ],
-  exports: [UploadService, FileStorageUtil]
+  exports: [UploadService, FileStorageUtil],
 })
 export class UploadModule {}

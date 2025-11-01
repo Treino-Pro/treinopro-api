@@ -11,19 +11,22 @@ export const healthQuestionnaires = pgTable('health_questionnaires', {
   trainingGoal: text('training_goal'),
   dietaryRestrictions: text('dietary_restrictions'),
   completedAt: timestamp('completed_at'),
-  
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Relations
-export const healthQuestionnairesRelations = relations(healthQuestionnaires, ({ one }) => ({
-  user: one(users, {
-    fields: [healthQuestionnaires.userId],
-    references: [users.id],
+export const healthQuestionnairesRelations = relations(
+  healthQuestionnaires,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [healthQuestionnaires.userId],
+      references: [users.id],
+    }),
   }),
-}));
+);
 
 // Import users table for relations
 import { users } from './users';

@@ -16,10 +16,10 @@ export class PaymentsHealthController {
     try {
       // Verificar conectividade com Mercado Pago
       const mpHealth = await this.checkMercadoPagoHealth();
-      
+
       // Verificar webhooks
       const webhookHealth = await this.webhooksService.getWebhookHealth();
-      
+
       // Verificar error handling
       const errorStats = this.errorHandler.getErrorStats();
 
@@ -69,14 +69,14 @@ export class PaymentsHealthController {
     lastCheck: string;
   }> {
     const startTime = Date.now();
-    
+
     try {
       // Testar conectividade com uma chamada simples
       // se disponível, teste de chamada simples; caso não exista, apenas retornar healthy
       await this.mercadoPagoService.getIdentificationTypes();
-      
+
       const responseTime = Date.now() - startTime;
-      
+
       return {
         status: 'healthy',
         responseTime,

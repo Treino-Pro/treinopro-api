@@ -149,7 +149,9 @@ describe('ProposalsService', () => {
       }));
 
       // Act + Assert
-      await expect(service.acceptProposal(proposalId, personalId)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.acceptProposal(proposalId, personalId),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('deve aceitar proposta quando não houver conflito de horário', async () => {
@@ -204,7 +206,8 @@ describe('ProposalsService', () => {
       mockDb.update.mockImplementation(() => ({
         set: (data: any) => ({
           where: () => ({
-            returning: () => Promise.resolve([{ ...pendingProposal, status: 'matched' }]),
+            returning: () =>
+              Promise.resolve([{ ...pendingProposal, status: 'matched' }]),
           }),
         }),
       }));

@@ -24,18 +24,32 @@ export class FirebaseNotificationService {
         // Configuração do Firebase Admin
         const firebaseConfig = {
           projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
-          privateKey: this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
+          privateKey: this.configService
+            .get<string>('FIREBASE_PRIVATE_KEY')
+            ?.replace(/\\n/g, '\n'),
           clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
         };
 
         this.logger.log('🔥 Tentando inicializar Firebase Admin...');
-        this.logger.log(`🔥 Project ID: ${firebaseConfig.projectId ? '✅' : '❌'}`);
-        this.logger.log(`🔥 Client Email: ${firebaseConfig.clientEmail ? '✅' : '❌'}`);
-        this.logger.log(`🔥 Private Key: ${firebaseConfig.privateKey ? '✅' : '❌'}`);
+        this.logger.log(
+          `🔥 Project ID: ${firebaseConfig.projectId ? '✅' : '❌'}`,
+        );
+        this.logger.log(
+          `🔥 Client Email: ${firebaseConfig.clientEmail ? '✅' : '❌'}`,
+        );
+        this.logger.log(
+          `🔥 Private Key: ${firebaseConfig.privateKey ? '✅' : '❌'}`,
+        );
 
         // Validar configurações
-        if (!firebaseConfig.projectId || !firebaseConfig.privateKey || !firebaseConfig.clientEmail) {
-          this.logger.warn('❌ Firebase Admin não configurado - variáveis de ambiente ausentes');
+        if (
+          !firebaseConfig.projectId ||
+          !firebaseConfig.privateKey ||
+          !firebaseConfig.clientEmail
+        ) {
+          this.logger.warn(
+            '❌ Firebase Admin não configurado - variáveis de ambiente ausentes',
+          );
           return;
         }
 
@@ -57,11 +71,14 @@ export class FirebaseNotificationService {
   /**
    * Enviar notificação push para um usuário específico
    */
-  async sendToUser(userId: string, notification: {
-    title: string;
-    body: string;
-    data?: Record<string, string>;
-  }): Promise<string | null> {
+  async sendToUser(
+    userId: string,
+    notification: {
+      title: string;
+      body: string;
+      data?: Record<string, string>;
+    },
+  ): Promise<string | null> {
     try {
       if (!this.app) {
         this.logger.warn('Firebase Admin não inicializado');
@@ -118,16 +135,19 @@ export class FirebaseNotificationService {
   /**
    * Enviar notificação de nova proposta para personal
    */
-  async sendProposalNotification(personalId: string, proposal: {
-    id: string;
-    studentName: string;
-    location: string;
-    time: string;
-    date?: string;
-    modality: string;
-    price: number;
-    expiresIn: number;
-  }): Promise<string | null> {
+  async sendProposalNotification(
+    personalId: string,
+    proposal: {
+      id: string;
+      studentName: string;
+      location: string;
+      time: string;
+      date?: string;
+      modality: string;
+      price: number;
+      expiresIn: number;
+    },
+  ): Promise<string | null> {
     return this.sendToUser(personalId, {
       title: '🎯 Nova Proposta de Treino!',
       body: `${proposal.studentName} em ${proposal.location}`,
@@ -148,13 +168,16 @@ export class FirebaseNotificationService {
   /**
    * Enviar notificação de proposta aceita para aluno
    */
-  async sendProposalAcceptedNotification(studentId: string, proposal: {
-    id: string;
-    personalName: string;
-    personalPhoto?: string;
-    location: string;
-    classId?: string;
-  }): Promise<string | null> {
+  async sendProposalAcceptedNotification(
+    studentId: string,
+    proposal: {
+      id: string;
+      personalName: string;
+      personalPhoto?: string;
+      location: string;
+      classId?: string;
+    },
+  ): Promise<string | null> {
     return this.sendToUser(studentId, {
       title: '✅ Proposta Aceita!',
       body: `${proposal.personalName} aceitou sua proposta em ${proposal.location}`,
@@ -172,11 +195,14 @@ export class FirebaseNotificationService {
   /**
    * Enviar notificação de atualização financeira
    */
-  async sendFinancialUpdateNotification(userId: string, update: {
-    type: 'payment_received' | 'refund_processed' | 'balance_updated';
-    amount: number;
-    description: string;
-  }): Promise<string | null> {
+  async sendFinancialUpdateNotification(
+    userId: string,
+    update: {
+      type: 'payment_received' | 'refund_processed' | 'balance_updated';
+      amount: number;
+      description: string;
+    },
+  ): Promise<string | null> {
     const titles = {
       payment_received: '💰 Pagamento Recebido!',
       refund_processed: '🔄 Reembolso Processado',
@@ -198,7 +224,9 @@ export class FirebaseNotificationService {
   /**
    * Buscar token FCM do usuário no banco de dados
    */
-  private async getUserFcmToken(userId: string): Promise<{ fcmToken: string } | null> {
+  private async getUserFcmToken(
+    userId: string,
+  ): Promise<{ fcmToken: string } | null> {
     try {
       const user = await this.db.query.users.findFirst({
         where: eq(users.id, userId),
@@ -214,7 +242,10 @@ export class FirebaseNotificationService {
 
       return { fcmToken: user.fcmToken };
     } catch (error) {
-      this.logger.error(`Erro ao buscar token FCM para usuário ${userId}:`, error);
+      this.logger.error(
+        `Erro ao buscar token FCM para usuário ${userId}:`,
+        error,
+      );
       return null;
     }
   }

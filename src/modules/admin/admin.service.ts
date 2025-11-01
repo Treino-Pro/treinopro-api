@@ -8,27 +8,34 @@ export class AdminService {
   constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
   async getDashboardSummary() {
-    const [userCount, proposalStats, classStats, paymentStats] = await Promise.all([
-      this.db.select({ total: count() }).from(users),
-      this.db.select({
-        total: count(),
-        pending: sql<number>`count(case when ${proposals.status} = 'pending' then 1 end)`,
-        matched: sql<number>`count(case when ${proposals.status} = 'matched' then 1 end)`,
-        completed: sql<number>`count(case when ${proposals.status} = 'completed' then 1 end)`,
-        cancelled: sql<number>`count(case when ${proposals.status} = 'cancelled' then 1 end)`,
-      }).from(proposals),
-      this.db.select({
-        total: count(),
-        scheduled: sql<number>`count(case when ${classes.status} = 'scheduled' then 1 end)`,
-        active: sql<number>`count(case when ${classes.status} = 'active' then 1 end)`,
-        completed: sql<number>`count(case when ${classes.status} = 'completed' then 1 end)`,
-        cancelled: sql<number>`count(case when ${classes.status} = 'cancelled' then 1 end)`,
-      }).from(classes),
-      this.db.query.payments?.findMany ? this.db.query.payments.findMany({
-        orderBy: [desc(payments.createdAt)],
-        limit: 5,
-      }) : Promise.resolve([]),
-    ]);
+    const [userCount, proposalStats, classStats, paymentStats] =
+      await Promise.all([
+        this.db.select({ total: count() }).from(users),
+        this.db
+          .select({
+            total: count(),
+            pending: sql<number>`count(case when ${proposals.status} = 'pending' then 1 end)`,
+            matched: sql<number>`count(case when ${proposals.status} = 'matched' then 1 end)`,
+            completed: sql<number>`count(case when ${proposals.status} = 'completed' then 1 end)`,
+            cancelled: sql<number>`count(case when ${proposals.status} = 'cancelled' then 1 end)`,
+          })
+          .from(proposals),
+        this.db
+          .select({
+            total: count(),
+            scheduled: sql<number>`count(case when ${classes.status} = 'scheduled' then 1 end)`,
+            active: sql<number>`count(case when ${classes.status} = 'active' then 1 end)`,
+            completed: sql<number>`count(case when ${classes.status} = 'completed' then 1 end)`,
+            cancelled: sql<number>`count(case when ${classes.status} = 'cancelled' then 1 end)`,
+          })
+          .from(classes),
+        this.db.query.payments?.findMany
+          ? this.db.query.payments.findMany({
+              orderBy: [desc(payments.createdAt)],
+              limit: 5,
+            })
+          : Promise.resolve([]),
+      ]);
 
     return {
       users: userCount[0]?.total ?? 0,
@@ -39,14 +46,18 @@ export class AdminService {
   }
 
   async listUsers() {
-    const list = await this.db.select({
-      id: users.id,
-      email: users.email,
-      firstName: users.firstName,
-      lastName: users.lastName,
-      userType: users.userType,
-      createdAt: users.createdAt,
-    }).from(users).orderBy(desc(users.createdAt)).limit(50);
+    const list = await this.db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        userType: users.userType,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .orderBy(desc(users.createdAt))
+      .limit(50);
     return list;
   }
 
@@ -57,7 +68,8 @@ export class AdminService {
       userType: body.userType, // cuidado: requer políticas adequadas
     } as any;
 
-    const [updated] = await this.db.update(users)
+    const [updated] = await this.db
+      .update(users)
       .set({ ...allowed, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
@@ -75,10 +87,12 @@ export class AdminService {
         })
         .from(payments);
 
-      const latest = this.db.query.payments?.findMany ? await this.db.query.payments.findMany({
-        orderBy: [desc(payments.createdAt)],
-        limit: 20,
-      }) : [];
+      const latest = this.db.query.payments?.findMany
+        ? await this.db.query.payments.findMany({
+            orderBy: [desc(payments.createdAt)],
+            limit: 20,
+          })
+        : [];
 
       return { summary, latest };
     } catch (e) {
@@ -167,5 +181,3 @@ export class AdminService {
     };
   }
 }
-
-

@@ -1,21 +1,40 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+  BadRequestException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClassesService } from './classes.service';
 import { ClassesCleanupService } from './classes-cleanup.service';
-import { 
-  CreateClassDto, 
-  UpdateClassDto, 
-  GetClassesDto, 
-  ClassResponseDto, 
-  ClassStatsDto, 
-  StartClassDto, 
+import {
+  CreateClassDto,
+  UpdateClassDto,
+  GetClassesDto,
+  ClassResponseDto,
+  ClassStatsDto,
+  StartClassDto,
   CompleteClassDto,
   ConfirmClassStartDto,
   ReportNoShowDto,
   ResolveNoShowDisputeDto,
   ClassTimelineDto,
-  ClassDisputeDto
+  ClassDisputeDto,
 } from './dto/classes.dto';
 
 @ApiTags('Classes')
@@ -30,18 +49,18 @@ export class ClassesController {
 
   @Post()
   @ApiOperation({ summary: 'Criar nova aula' })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'Aula criada com sucesso',
-    type: ClassResponseDto 
+    type: ClassResponseDto,
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dados inválidos' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async createClass(
     @Body() createClassDto: CreateClassDto,
@@ -52,40 +71,48 @@ export class ClassesController {
 
   @Get()
   @ApiOperation({ summary: 'Listar aulas com filtros' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Lista de aulas retornada com sucesso',
     schema: {
       type: 'object',
       properties: {
-        classes: { type: 'array', items: { $ref: '#/components/schemas/ClassResponseDto' } },
+        classes: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/ClassResponseDto' },
+        },
         total: { type: 'number' },
         page: { type: 'number' },
-        limit: { type: 'number' }
-      }
-    }
+        limit: { type: 'number' },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getClasses(
     @Query() getClassesDto: GetClassesDto,
     @Request() req: any,
-  ): Promise<{ classes: ClassResponseDto[]; total: number; page: number; limit: number }> {
+  ): Promise<{
+    classes: ClassResponseDto[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     return this.classesService.getClasses(getClassesDto, req.user.sub);
   }
 
   @Get('stats')
   @ApiOperation({ summary: 'Obter estatísticas das aulas' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Estatísticas retornadas com sucesso',
-    type: ClassStatsDto 
+    type: ClassStatsDto,
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getClassStats(@Request() req: any): Promise<ClassStatsDto> {
     return this.classesService.getClassStats(req.user.sub);
@@ -93,10 +120,10 @@ export class ClassesController {
 
   @Get('disputes')
   @ApiOperation({ summary: 'Listar disputas do usuário' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Disputas listadas com sucesso',
-    type: [ClassDisputeDto]
+    type: [ClassDisputeDto],
   })
   async getClassDisputes(@Request() req: any): Promise<any[]> {
     return this.classesService.getClassDisputes(req.user.sub);
@@ -105,18 +132,18 @@ export class ClassesController {
   @Get(':id')
   @ApiOperation({ summary: 'Obter aula por ID' })
   @ApiParam({ name: 'id', description: 'ID da aula' })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Aula encontrada com sucesso',
-    type: ClassResponseDto 
+    type: ClassResponseDto,
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Aula não encontrada' 
+  @ApiResponse({
+    status: 404,
+    description: 'Aula não encontrada',
   })
-  @ApiResponse({ 
-    status: 401, 
-    description: 'Token JWT inválido' 
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido',
   })
   async getClassById(
     @Param('id') id: string,
@@ -149,25 +176,32 @@ export class ClassesController {
     @Body() completeClassDto: CompleteClassDto,
     @Request() req: any,
   ): Promise<ClassResponseDto> {
-    return this.classesService.completeClass(id, completeClassDto, req.user.sub);
+    return this.classesService.completeClass(
+      id,
+      completeClassDto,
+      req.user.sub,
+    );
   }
 
   @Post(':id/test-completion')
   @UseGuards(JwtAuthGuard)
-  async testClassCompletion(
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  async testClassCompletion(@Param('id') id: string, @Request() req: any) {
     const userId = req.user.sub;
-    console.log(`🧪 [TEST_COMPLETION] Testando finalização completa para aula ${id}`);
-    
+    console.log(
+      `🧪 [TEST_COMPLETION] Testando finalização completa para aula ${id}`,
+    );
+
     try {
       const completeClassDto = {
         notes: 'Teste de finalização completa',
       };
-      
-      const result = await this.classesService.completeClass(id, completeClassDto, userId);
-      
+
+      const result = await this.classesService.completeClass(
+        id,
+        completeClassDto,
+        userId,
+      );
+
       return {
         success: true,
         message: 'Aula finalizada com sucesso - XP e repasse processados',
@@ -229,7 +263,11 @@ export class ClassesController {
     @Body() reportDto: ReportNoShowDto,
     @Request() req: any,
   ): Promise<ClassResponseDto> {
-    return this.classesService.reportPersonalNoShow(id, reportDto, req.user.sub);
+    return this.classesService.reportPersonalNoShow(
+      id,
+      reportDto,
+      req.user.sub,
+    );
   }
 
   @Post(':id/resolve-dispute')
@@ -238,24 +276,27 @@ export class ClassesController {
     @Body() resolveDto: ResolveNoShowDisputeDto,
     @Request() req: any,
   ): Promise<ClassResponseDto> {
-    return this.classesService.resolveNoShowDispute(id, resolveDto, req.user.sub);
+    return this.classesService.resolveNoShowDispute(
+      id,
+      resolveDto,
+      req.user.sub,
+    );
   }
-
 
   @Post(':id/cleanup')
   @ApiOperation({ summary: 'Limpar aula expirada manualmente' })
   @ApiParam({ name: 'id', description: 'ID da aula' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Aula limpa com sucesso' 
+  @ApiResponse({
+    status: 200,
+    description: 'Aula limpa com sucesso',
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Aula não encontrada' 
+  @ApiResponse({
+    status: 404,
+    description: 'Aula não encontrada',
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Aula ainda não expirou' 
+  @ApiResponse({
+    status: 400,
+    description: 'Aula ainda não expirou',
   })
   async cleanupExpiredClass(
     @Param('id') id: string,
@@ -264,20 +305,20 @@ export class ClassesController {
     await this.classesCleanupService.cleanupSpecificClass(id);
     return {
       message: 'Aula expirada limpa com sucesso',
-      classId: id
+      classId: id,
     };
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Deletar aula (temporário para limpeza)' })
   @ApiParam({ name: 'id', description: 'ID da aula' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Aula deletada com sucesso' 
+  @ApiResponse({
+    status: 200,
+    description: 'Aula deletada com sucesso',
   })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Aula não encontrada' 
+  @ApiResponse({
+    status: 404,
+    description: 'Aula não encontrada',
   })
   async deleteClass(
     @Param('id') id: string,
@@ -286,7 +327,7 @@ export class ClassesController {
     await this.classesService.deleteClass(id, req.user.sub);
     return {
       message: 'Aula deletada com sucesso',
-      classId: id
+      classId: id,
     };
   }
 }

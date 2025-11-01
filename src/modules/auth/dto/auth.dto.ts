@@ -1,4 +1,16 @@
-import { IsEmail, IsString, MinLength, IsEnum, IsOptional, IsBoolean, IsDateString, IsArray, ValidateIf, IsNotEmpty, IsUUID } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  IsEnum,
+  IsOptional,
+  IsBoolean,
+  IsDateString,
+  IsArray,
+  ValidateIf,
+  IsNotEmpty,
+  IsUUID,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum UserType {
@@ -51,28 +63,28 @@ export class RegisterDto {
   @IsNotEmpty()
   documentNumber: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    description: 'ID do arquivo de documento (obtido via upload)'
+    description: 'ID do arquivo de documento (obtido via upload)',
   })
   @IsUUID()
   @IsNotEmpty()
   documentImageId: string;
 
   // Campos específicos para Personal Trainers
-  @ApiProperty({ 
-    example: 'SP-106227', 
+  @ApiProperty({
+    example: 'SP-106227',
     description: 'CREF no formato UF-NÚMERO (ex: SP-106227)',
-    required: false 
+    required: false,
   })
   @IsString()
   @IsOptional()
   cref?: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     example: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
     description: 'ID do arquivo CREF (obtido via upload)',
-    required: false 
+    required: false,
   })
   @IsUUID()
   @IsOptional()
@@ -90,13 +102,13 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'Maria Silva', required: false })
   @IsString()
-  @ValidateIf(o => o.isMinor === true)
+  @ValidateIf((o) => o.isMinor === true)
   @IsNotEmpty()
   guardianName?: string;
 
   @ApiProperty({ example: 'maria@email.com', required: false })
   @IsEmail()
-  @ValidateIf(o => o.isMinor === true)
+  @ValidateIf((o) => o.isMinor === true)
   @IsNotEmpty()
   guardianEmail?: string;
 

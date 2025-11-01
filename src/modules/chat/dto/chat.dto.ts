@@ -1,26 +1,34 @@
-import { IsString, IsUUID, IsOptional, IsBoolean, IsDateString, MinLength, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsUUID,
+  IsOptional,
+  IsBoolean,
+  IsDateString,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SendMessageDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da classe/treino',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   classId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID do destinatário',
-    example: '123e4567-e89b-12d3-a456-426614174001'
+    example: '123e4567-e89b-12d3-a456-426614174001',
   })
   @IsUUID()
   receiverId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Texto da mensagem',
     example: 'Olá! Estou animado para nosso treino hoje!',
     minLength: 1,
-    maxLength: 1000
+    maxLength: 1000,
   })
   @IsString()
   @MinLength(1)
@@ -29,98 +37,101 @@ export class SendMessageDto {
 }
 
 export class GetMessagesDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da classe/treino',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   classId: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Número da página para paginação',
     example: 1,
-    default: 1
+    default: 1,
   })
   @IsOptional()
   page?: number = 1;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Número de mensagens por página',
     example: 50,
-    default: 50
+    default: 50,
   })
   @IsOptional()
   limit?: number = 50;
 }
 
 export class MarkAsReadDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da classe/treino',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   classId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da mensagem',
-    example: '123e4567-e89b-12d3-a456-426614174002'
+    example: '123e4567-e89b-12d3-a456-426614174002',
   })
   @IsUUID()
   messageId: string;
 }
 
 export class MessageResponseDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da mensagem',
-    example: '123e4567-e89b-12d3-a456-426614174002'
+    example: '123e4567-e89b-12d3-a456-426614174002',
   })
   id: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID da classe/treino',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   classId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID do remetente',
-    example: '123e4567-e89b-12d3-a456-426614174001'
+    example: '123e4567-e89b-12d3-a456-426614174001',
   })
   senderId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID do destinatário',
-    example: '123e4567-e89b-12d3-a456-426614174003'
+    example: '123e4567-e89b-12d3-a456-426614174003',
   })
   receiverId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Texto da mensagem',
-    example: 'Olá! Estou animado para nosso treino hoje!'
+    example: 'Olá! Estou animado para nosso treino hoje!',
   })
   messageText: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Data de envio',
-    example: '2024-01-15T10:30:00Z'
+    example: '2024-01-15T10:30:00Z',
   })
   sentAt: Date;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Se a mensagem foi lida',
-    example: false
+    example: false,
   })
   isRead: boolean;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Data de criação',
-    example: '2024-01-15T10:30:00Z'
+    example: '2024-01-15T10:30:00Z',
   })
   createdAt: Date;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Dados do remetente',
-    example: { name: 'João Silva', profilePicture: 'https://example.com/photo.jpg' }
+    example: {
+      name: 'João Silva',
+      profilePicture: 'https://example.com/photo.jpg',
+    },
   })
   sender?: {
     id: string;
@@ -128,9 +139,12 @@ export class MessageResponseDto {
     profilePicture?: string;
   };
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'Dados do destinatário',
-    example: { name: 'Maria Santos', profilePicture: 'https://example.com/photo2.jpg' }
+    example: {
+      name: 'Maria Santos',
+      profilePicture: 'https://example.com/photo2.jpg',
+    },
   })
   receiver?: {
     id: string;
@@ -140,53 +154,62 @@ export class MessageResponseDto {
 }
 
 export class ChatStatsDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Total de mensagens',
-    example: 150
+    example: 150,
   })
   totalMessages: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Mensagens não lidas',
-    example: 5
+    example: 5,
   })
   unreadMessages: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Total de conversas',
-    example: 12
+    example: 12,
   })
   totalConversations: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Conversas ativas (com mensagens recentes)',
-    example: 3
+    example: 3,
   })
   activeConversations: number;
 }
 
 export class WebSocketMessageDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Tipo da mensagem WebSocket',
-    example: 'message_sent'
+    example: 'message_sent',
   })
-  type: 'message_sent' | 'message_received' | 'typing_start' | 'typing_stop' | 'user_online' | 'user_offline';
+  type:
+    | 'message_sent'
+    | 'message_received'
+    | 'typing_start'
+    | 'typing_stop'
+    | 'user_online'
+    | 'user_offline';
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Dados da mensagem',
-    example: { classId: '123e4567-e89b-12d3-a456-426614174000', messageText: 'Olá!' }
+    example: {
+      classId: '123e4567-e89b-12d3-a456-426614174000',
+      messageText: 'Olá!',
+    },
   })
   data: any;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID do usuário',
-    example: '123e4567-e89b-12d3-a456-426614174001'
+    example: '123e4567-e89b-12d3-a456-426614174001',
   })
   userId: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Timestamp da mensagem',
-    example: '2024-01-15T10:30:00Z'
+    example: '2024-01-15T10:30:00Z',
   })
   timestamp: Date;
 }

@@ -17,9 +17,11 @@ export class ProposalJobsProcessor {
   ) {}
 
   @Process('expire-proposal')
-  async handleProposalExpiration(job: Job<ProposalExpirationJobData>): Promise<void> {
+  async handleProposalExpiration(
+    job: Job<ProposalExpirationJobData>,
+  ): Promise<void> {
     const { proposalId, studentId, createdAt, expirationTime } = job.data;
-    
+
     this.logger.log(`⏰ Processando expiração da proposta: ${proposalId}`);
 
     try {
@@ -37,13 +39,17 @@ export class ProposalJobsProcessor {
 
       // Verificar se ainda está pendente
       if (proposal.status !== 'pending') {
-        this.logger.log(`✅ Proposta ${proposalId} já foi processada (status: ${proposal.status})`);
+        this.logger.log(
+          `✅ Proposta ${proposalId} já foi processada (status: ${proposal.status})`,
+        );
         return;
       }
 
       // Verificar se o pagamento ainda está pendente
       if (proposal.paymentStatus !== 'pending') {
-        this.logger.log(`💳 Proposta ${proposalId} pagamento já processado (status: ${proposal.paymentStatus})`);
+        this.logger.log(
+          `💳 Proposta ${proposalId} pagamento já processado (status: ${proposal.paymentStatus})`,
+        );
         return;
       }
 
@@ -62,10 +68,14 @@ export class ProposalJobsProcessor {
         await this.processRefundForExpiredProposal(proposal);
       }
 
-      this.logger.log(`✅ Proposta ${proposalId} expirada e processada com sucesso`);
-
+      this.logger.log(
+        `✅ Proposta ${proposalId} expirada e processada com sucesso`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao processar expiração da proposta ${proposalId}:`, error);
+      this.logger.error(
+        `❌ Erro ao processar expiração da proposta ${proposalId}:`,
+        error,
+      );
       throw error; // Re-throw para que o Bull tente novamente
     }
   }
@@ -86,14 +96,18 @@ export class ProposalJobsProcessor {
             eq(proposals.status, 'pending'),
             lt(
               proposals.trainingDate,
-              new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-            )
-          )
+              new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+            ),
+          ),
         );
 
-      const expiredProposals = candidates.filter((p: any) => isProposalExpired(now, p));
+      const expiredProposals = candidates.filter((p: any) =>
+        isProposalExpired(now, p),
+      );
 
-      this.logger.log(`📋 Encontradas ${expiredProposals.length} propostas expiradas para limpeza`);
+      this.logger.log(
+        `📋 Encontradas ${expiredProposals.length} propostas expiradas para limpeza`,
+      );
 
       for (const proposal of expiredProposals) {
         try {
@@ -113,10 +127,12 @@ export class ProposalJobsProcessor {
           }
 
           this.logger.log(`✅ Proposta ${proposal.id} limpa com sucesso`);
-
         } catch (error) {
-          this.logger.error(`❌ Erro ao limpar proposta ${proposal.id}:`, error);
-          
+          this.logger.error(
+            `❌ Erro ao limpar proposta ${proposal.id}:`,
+            error,
+          );
+
           // Marcar como erro para análise manual
           await this.db
             .update(proposals)
@@ -128,8 +144,9 @@ export class ProposalJobsProcessor {
         }
       }
 
-      this.logger.log(`🧹 Limpeza concluída: ${expiredProposals.length} propostas processadas`);
-
+      this.logger.log(
+        `🧹 Limpeza concluída: ${expiredProposals.length} propostas processadas`,
+      );
     } catch (error) {
       this.logger.error('❌ Erro na limpeza de propostas expiradas:', error);
       throw error;
@@ -138,28 +155,41 @@ export class ProposalJobsProcessor {
 
   private async processRefundForExpiredProposal(proposal: any): Promise<void> {
     try {
-      this.logger.log(`💸 Processando reembolso para proposta expirada: ${proposal.id}`);
+      this.logger.log(
+        `💸 Processando reembolso para proposta expirada: ${proposal.id}`,
+      );
 
       // Verificar se é pagamento real ou simulado
       if (proposal.paymentId.startsWith('proposal_')) {
         // Pagamento real via Mercado Pago
-        this.logger.log(`💳 Processando reembolso real via MP: ${proposal.paymentId}`);
-        
+        this.logger.log(
+          `💳 Processando reembolso real via MP: ${proposal.paymentId}`,
+        );
+
         try {
           // Buscar pagamento no sistema
-          const payment = await this.findPaymentByExternalReference(proposal.paymentId);
-          
+          const payment = await this.findPaymentByExternalReference(
+            proposal.paymentId,
+          );
+
           if (payment) {
-            await this.paymentsService.refundPayment(payment.id, 'Proposta expirada automaticamente');
+            await this.paymentsService.refundPayment(
+              payment.id,
+              'Proposta expirada automaticamente',
+            );
           } else {
-            this.logger.warn(`⚠️ Pagamento não encontrado no sistema: ${proposal.paymentId}`);
+            this.logger.warn(
+              `⚠️ Pagamento não encontrado no sistema: ${proposal.paymentId}`,
+            );
           }
         } catch (error) {
           this.logger.error(`❌ Erro no reembolso MP: ${error.message}`);
         }
       } else {
         // Pagamento simulado - apenas log
-        this.logger.log(`🎭 Simulando reembolso para pagamento mock: ${proposal.paymentId}`);
+        this.logger.log(
+          `🎭 Simulando reembolso para pagamento mock: ${proposal.paymentId}`,
+        );
       }
 
       // Atualizar status do pagamento
@@ -172,10 +202,12 @@ export class ProposalJobsProcessor {
         .where(eq(proposals.id, proposal.id));
 
       this.logger.log(`✅ Reembolso processado para proposta: ${proposal.id}`);
-
     } catch (error) {
-      this.logger.error(`❌ Erro no reembolso da proposta ${proposal.id}:`, error);
-      
+      this.logger.error(
+        `❌ Erro no reembolso da proposta ${proposal.id}:`,
+        error,
+      );
+
       // Marcar como erro de reembolso
       await this.db
         .update(proposals)
@@ -187,12 +219,15 @@ export class ProposalJobsProcessor {
     }
   }
 
-  private async findPaymentByExternalReference(externalReference: string): Promise<any> {
+  private async findPaymentByExternalReference(
+    externalReference: string,
+  ): Promise<any> {
     try {
       const payment = await this.db.query.payments?.findFirst({
-        where: (payments: any) => eq(payments.externalReference, externalReference),
+        where: (payments: any) =>
+          eq(payments.externalReference, externalReference),
       });
-      
+
       return payment;
     } catch (error) {
       this.logger.warn(`⚠️ Erro ao buscar pagamento: ${error.message}`);

@@ -8,7 +8,8 @@ import { FileValidationOptions } from '../interfaces/file.interface';
 export class FileStorageUtil {
   private readonly logger = new Logger(FileStorageUtil.name);
   private readonly storageBasePath = process.env.STORAGE_PATH || './storage';
-  private readonly baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+  private readonly baseUrl =
+    process.env.BASE_URL || 'https://api.treinopro.com';
 
   constructor() {
     this.ensureStorageDirectories();
@@ -67,7 +68,7 @@ export class FileStorageUtil {
     buffer: Buffer,
     originalName: string,
     category: string,
-    mimeType: string
+    mimeType: string,
   ): Promise<{ storedName: string; path: string; url: string }> {
     const storedName = this.generateUniqueFileName(originalName);
     const filePath = this.getStoragePath(category, storedName);
@@ -76,7 +77,7 @@ export class FileStorageUtil {
     try {
       await fs.writeFile(filePath, buffer);
       this.logger.log(`💾 Arquivo salvo: ${filePath}`);
-      
+
       return {
         storedName,
         path: filePath,
@@ -98,7 +99,11 @@ export class FileStorageUtil {
     }
   }
 
-  validateFile(buffer: Buffer, mimeType: string, options: FileValidationOptions): void {
+  validateFile(
+    buffer: Buffer,
+    mimeType: string,
+    options: FileValidationOptions,
+  ): void {
     // Validar tamanho
     if (buffer.length > options.maxSize) {
       throw new Error(`Arquivo muito grande. Máximo: ${options.maxSize} bytes`);

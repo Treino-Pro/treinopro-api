@@ -12,9 +12,26 @@ import { ChatModule } from '../chat/chat.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, PaymentsModule, JobsModule, ChatModule, NotificationsModule],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    PaymentsModule,
+    JobsModule,
+    ChatModule,
+    NotificationsModule,
+  ],
   controllers: [ProposalsController],
-  providers: [ProposalsService, ProposalCleanupService, ProposalBackgroundService, ProposalsGateway],
-  exports: [ProposalsService, ProposalCleanupService, ProposalBackgroundService, ProposalsGateway],
+  providers: [
+    ProposalsService,
+    ProposalCleanupService,
+    ProposalBackgroundService,
+    ProposalsGateway,
+  ],
+  exports: [
+    ProposalsService,
+    ProposalCleanupService,
+    ProposalBackgroundService,
+    ProposalsGateway,
+  ],
 })
 export class ProposalsModule {}

@@ -14,7 +14,7 @@ describe('UploadController', () => {
       getFileById: jest.fn(),
       getFilesByUserId: jest.fn(),
       deleteFile: jest.fn(),
-      cleanupTempFiles: jest.fn()
+      cleanupTempFiles: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -22,13 +22,13 @@ describe('UploadController', () => {
       providers: [
         {
           provide: UploadService,
-          useValue: mockUploadServiceValue
-        }
+          useValue: mockUploadServiceValue,
+        },
       ],
     })
-    .overrideGuard(JwtAuthGuard)
-    .useValue({ canActivate: () => true })
-    .compile();
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<UploadController>(UploadController);
     mockUploadService = module.get(UploadService);
@@ -44,16 +44,16 @@ describe('UploadController', () => {
         originalname: 'profile.jpg',
         mimetype: 'image/jpeg',
         size: 1024,
-        buffer: Buffer.from('test image')
+        buffer: Buffer.from('test image'),
       } as Express.Multer.File;
 
       const uploadDto = {
         category: FileCategory.PROFILE,
-        metadata: '{"description": "Profile photo"}'
+        metadata: '{"description": "Profile photo"}',
       };
 
       const req = {
-        user: { id: 'user-id' }
+        user: { id: 'user-id' },
       };
 
       const expectedResult = {
@@ -66,7 +66,7 @@ describe('UploadController', () => {
         category: 'profile',
         isProcessed: true,
         metadata: { description: 'Profile photo' },
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       mockUploadService.uploadFile.mockResolvedValue(expectedResult);
@@ -77,7 +77,7 @@ describe('UploadController', () => {
       expect(mockUploadService.uploadFile).toHaveBeenCalledWith(
         file,
         { ...uploadDto, category: FileCategory.PROFILE },
-        'user-id'
+        'user-id',
       );
     });
   });
@@ -88,16 +88,16 @@ describe('UploadController', () => {
         originalname: 'document.pdf',
         mimetype: 'application/pdf',
         size: 2048,
-        buffer: Buffer.from('test pdf')
+        buffer: Buffer.from('test pdf'),
       } as Express.Multer.File;
 
       const uploadDto = {
         category: FileCategory.DOCUMENT,
-        metadata: '{"documentType": "RG"}'
+        metadata: '{"documentType": "RG"}',
       };
 
       const req = {
-        user: { id: 'user-id' }
+        user: { id: 'user-id' },
       };
 
       const expectedResult = {
@@ -110,7 +110,7 @@ describe('UploadController', () => {
         category: 'document',
         isProcessed: true,
         metadata: { documentType: 'RG' },
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       mockUploadService.uploadFile.mockResolvedValue(expectedResult);
@@ -121,7 +121,7 @@ describe('UploadController', () => {
       expect(mockUploadService.uploadFile).toHaveBeenCalledWith(
         file,
         { ...uploadDto, category: FileCategory.DOCUMENT },
-        'user-id'
+        'user-id',
       );
     });
   });
@@ -132,15 +132,15 @@ describe('UploadController', () => {
         originalname: 'temp.jpg',
         mimetype: 'image/jpeg',
         size: 512,
-        buffer: Buffer.from('test image')
+        buffer: Buffer.from('test image'),
       } as Express.Multer.File;
 
       const uploadDto = {
-        category: FileCategory.TEMP
+        category: FileCategory.TEMP,
       };
 
       const req = {
-        user: { id: 'user-id' }
+        user: { id: 'user-id' },
       };
 
       const expectedResult = {
@@ -153,7 +153,7 @@ describe('UploadController', () => {
         category: 'temp',
         isProcessed: false,
         metadata: null,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       mockUploadService.uploadFile.mockResolvedValue(expectedResult);
@@ -164,7 +164,7 @@ describe('UploadController', () => {
       expect(mockUploadService.uploadFile).toHaveBeenCalledWith(
         file,
         { ...uploadDto, category: FileCategory.TEMP },
-        'user-id'
+        'user-id',
       );
     });
   });
@@ -182,7 +182,7 @@ describe('UploadController', () => {
         category: 'profile',
         isProcessed: true,
         metadata: null,
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       mockUploadService.getFileById.mockResolvedValue(expectedResult);
@@ -209,7 +209,7 @@ describe('UploadController', () => {
           category: 'profile',
           isProcessed: true,
           metadata: null,
-          createdAt: new Date()
+          createdAt: new Date(),
         },
         {
           id: 'file2',
@@ -221,8 +221,8 @@ describe('UploadController', () => {
           category: 'profile',
           isProcessed: true,
           metadata: null,
-          createdAt: new Date()
-        }
+          createdAt: new Date(),
+        },
       ];
 
       mockUploadService.getFilesByUserId.mockResolvedValue(expectedResult);
@@ -230,7 +230,10 @@ describe('UploadController', () => {
       const result = await controller.getUserFiles(userId, body);
 
       expect(result).toEqual(expectedResult);
-      expect(mockUploadService.getFilesByUserId).toHaveBeenCalledWith(userId, 'profile');
+      expect(mockUploadService.getFilesByUserId).toHaveBeenCalledWith(
+        userId,
+        'profile',
+      );
     });
 
     it('should return all user files when no category specified', async () => {
@@ -247,7 +250,7 @@ describe('UploadController', () => {
           category: 'profile',
           isProcessed: true,
           metadata: null,
-          createdAt: new Date()
+          createdAt: new Date(),
         },
         {
           id: 'file2',
@@ -259,8 +262,8 @@ describe('UploadController', () => {
           category: 'document',
           isProcessed: true,
           metadata: null,
-          createdAt: new Date()
-        }
+          createdAt: new Date(),
+        },
       ];
 
       mockUploadService.getFilesByUserId.mockResolvedValue(expectedResult);
@@ -268,7 +271,10 @@ describe('UploadController', () => {
       const result = await controller.getUserFiles(userId, body);
 
       expect(result).toEqual(expectedResult);
-      expect(mockUploadService.getFilesByUserId).toHaveBeenCalledWith(userId, undefined);
+      expect(mockUploadService.getFilesByUserId).toHaveBeenCalledWith(
+        userId,
+        undefined,
+      );
     });
   });
 
@@ -276,14 +282,17 @@ describe('UploadController', () => {
     it('should delete file successfully', async () => {
       const fileId = 'file-id';
       const req = {
-        user: { id: 'user-id' }
+        user: { id: 'user-id' },
       };
 
       mockUploadService.deleteFile.mockResolvedValue(undefined);
 
       await controller.deleteFile(fileId, req);
 
-      expect(mockUploadService.deleteFile).toHaveBeenCalledWith(fileId, 'user-id');
+      expect(mockUploadService.deleteFile).toHaveBeenCalledWith(
+        fileId,
+        'user-id',
+      );
     });
   });
 

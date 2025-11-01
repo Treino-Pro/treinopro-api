@@ -25,11 +25,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
       useFactory: async (configService: ConfigService) => {
         const secret = configService.get('JWT_SECRET') || 'fallback-secret';
         const expiresIn = configService.get('JWT_EXPIRES_IN') || '24h';
-        
+
         return {
           secret,
           signOptions: {
-            expiresIn: typeof expiresIn === 'string' && expiresIn.length > 0 ? expiresIn : '24h',
+            expiresIn:
+              typeof expiresIn === 'string' && expiresIn.length > 0
+                ? expiresIn
+                : '24h',
           },
         };
       },

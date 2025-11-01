@@ -1,7 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ClassesService } from './classes.service';
-import { CreateClassDto, ClassStatus, StartClassDto, CompleteClassDto } from './dto/classes.dto';
+import {
+  CreateClassDto,
+  ClassStatus,
+  StartClassDto,
+  CompleteClassDto,
+} from './dto/classes.dto';
 import { GamificationService } from '../gamification/gamification.service';
 
 // Mock do banco de dados
@@ -85,7 +94,7 @@ describe('ClassesService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(null);
       // Sem conflito de horário no dia (select classes retorna lista vazia)
       mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([]) })
+        from: () => ({ where: () => Promise.resolve([]) }),
       }));
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
@@ -97,14 +106,16 @@ describe('ClassesService', () => {
       const result = await service.createClass(createClassDto, userId);
 
       // Assert
-      expect(result).toEqual(expect.objectContaining({
-        id: 'class-1',
-        proposalId: 'proposal-1',
-        studentId: 'student-1',
-        personalId: 'personal-1',
-        location: 'Academia Central',
-        status: ClassStatus.SCHEDULED,
-      }));
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'class-1',
+          proposalId: 'proposal-1',
+          studentId: 'student-1',
+          personalId: 'personal-1',
+          location: 'Academia Central',
+          status: ClassStatus.SCHEDULED,
+        }),
+      );
     });
 
     it('deve lançar erro se proposta não for encontrada', async () => {
@@ -123,8 +134,9 @@ describe('ClassesService', () => {
       mockDb.query.proposals.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createClass(createClassDto, userId))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('deve lançar erro se usuário não for o aluno da proposta', async () => {
@@ -149,8 +161,9 @@ describe('ClassesService', () => {
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
 
       // Act & Assert
-      await expect(service.createClass(createClassDto, userId))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('deve lançar erro se proposta não estiver aceita', async () => {
@@ -175,8 +188,9 @@ describe('ClassesService', () => {
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
 
       // Act & Assert
-      await expect(service.createClass(createClassDto, userId))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('deve lançar erro de conflito quando já houver aula do personal no mesmo período', async () => {
@@ -211,11 +225,12 @@ describe('ClassesService', () => {
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
       mockDb.query.classes.findFirst.mockResolvedValue(null);
       mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([existingClass]) })
+        from: () => ({ where: () => Promise.resolve([existingClass]) }),
       }));
 
-      await expect(service.createClass(createClassDto, userId))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -278,8 +293,9 @@ describe('ClassesService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
       // Act & Assert
-      await expect(service.startClass(classId, startClassDto, userId))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.startClass(classId, startClassDto, userId),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('deve lançar erro se aula não estiver agendada', async () => {
@@ -297,8 +313,9 @@ describe('ClassesService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
       // Act & Assert
-      await expect(service.startClass(classId, startClassDto, userId))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.startClass(classId, startClassDto, userId),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -334,7 +351,11 @@ describe('ClassesService', () => {
       });
 
       // Act
-      const result = await service.completeClass(classId, completeClassDto, userId);
+      const result = await service.completeClass(
+        classId,
+        completeClassDto,
+        userId,
+      );
 
       // Assert
       expect(result.status).toBe(ClassStatus.COMPLETED);
@@ -356,8 +377,9 @@ describe('ClassesService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
       // Act & Assert
-      await expect(service.completeClass(classId, completeClassDto, userId))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.completeClass(classId, completeClassDto, userId),
+      ).rejects.toThrow(BadRequestException);
     });
   });
   describe('updateClass', () => {
@@ -388,11 +410,12 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
       mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([otherClass]) })
+        from: () => ({ where: () => Promise.resolve([otherClass]) }),
       }));
 
-      await expect(service.updateClass(classId, updateDto as any, userId))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.updateClass(classId, updateDto as any, userId),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('deve atualizar aula quando não houver conflito', async () => {
@@ -424,15 +447,21 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
       mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([nonOverlapping]) })
+        from: () => ({ where: () => Promise.resolve([nonOverlapping]) }),
       }));
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({ returning: jest.fn().mockResolvedValue([updated]) })
-        })
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updated]),
+          }),
+        }),
       });
 
-      const result = await service.updateClass(classId, updateDto as any, userId);
+      const result = await service.updateClass(
+        classId,
+        updateDto as any,
+        userId,
+      );
       expect(result.time).toBe('16:00');
     });
   });

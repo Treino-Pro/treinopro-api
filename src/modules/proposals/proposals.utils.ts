@@ -1,4 +1,7 @@
-export function buildTrainingStartDate(trainingDate: Date | string, trainingTime?: string): Date {
+export function buildTrainingStartDate(
+  trainingDate: Date | string,
+  trainingTime?: string,
+): Date {
   const base = new Date(trainingDate);
   try {
     const [hhStr, mmStr] = String(trainingTime ?? '00:00').split(':');
@@ -11,10 +14,16 @@ export function buildTrainingStartDate(trainingDate: Date | string, trainingTime
   }
 }
 
-export function isProposalExpired(now: Date, proposal: { trainingDate: Date | string; trainingTime?: string }): boolean {
-  const start = buildTrainingStartDate(proposal.trainingDate, proposal.trainingTime);
+export function isProposalExpired(
+  now: Date,
+  proposal: { trainingDate: Date | string; trainingTime?: string },
+): boolean {
+  const start = buildTrainingStartDate(
+    proposal.trainingDate,
+    proposal.trainingTime,
+  );
   const isExpired = start.getTime() < now.getTime();
-  
+
   // Log detalhado para debug
   if (isExpired) {
     console.log(`🔍 [PROPOSAL_UTILS] Proposta expirada detectada:`, {
@@ -27,8 +36,6 @@ export function isProposalExpired(now: Date, proposal: { trainingDate: Date | st
       timeDiff: now.getTime() - start.getTime(),
     });
   }
-  
+
   return isExpired;
 }
-
-

@@ -11,7 +11,15 @@ import { RatingsModule } from '../ratings/ratings.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, GamificationModule, ChatModule, PaymentsModule, RatingsModule, forwardRef(() => NotificationsModule)],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    GamificationModule,
+    ChatModule,
+    PaymentsModule,
+    RatingsModule,
+    forwardRef(() => NotificationsModule),
+  ],
   controllers: [ClassesController],
   providers: [ClassesService, ClassesCleanupService],
   exports: [ClassesService, ClassesCleanupService],

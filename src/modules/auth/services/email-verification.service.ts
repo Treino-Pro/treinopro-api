@@ -4,18 +4,24 @@ import { EmailService } from '../../notifications/services/email.service';
 @Injectable()
 export class EmailVerificationService {
   // Em produção, isso deveria usar Redis ou banco de dados
-  private verificationCodes = new Map<string, {
-    code: string;
-    expiresAt: Date;
-    attempts: number;
-    verified: boolean;
-  }>();
+  private verificationCodes = new Map<
+    string,
+    {
+      code: string;
+      expiresAt: Date;
+      attempts: number;
+      verified: boolean;
+    }
+  >();
 
   private verifiedEmails = new Set<string>();
 
   constructor(private emailService: EmailService) {}
 
-  async sendVerificationCode(email: string, firstName: string): Promise<{ message: string; expiresAt: Date }> {
+  async sendVerificationCode(
+    email: string,
+    firstName: string,
+  ): Promise<{ message: string; expiresAt: Date }> {
     // Validar formato do email
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     if (!emailRegex.test(email)) {
@@ -23,7 +29,9 @@ export class EmailVerificationService {
     }
 
     // Gerar código de 6 dígitos
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationCode = Math.floor(
+      100000 + Math.random() * 900000,
+    ).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
     // Armazenar código
@@ -31,13 +39,12 @@ export class EmailVerificationService {
       code: verificationCode,
       expiresAt: expiresAt,
       attempts: 0,
-      verified: false
+      verified: false,
     });
-
 
     // Enviar email com código
     try {
-       await this.emailService.sendTemplateEmail(email, 'email-verification', {
+      await this.emailService.sendTemplateEmail(email, 'email-verification', {
         firstName: firstName,
         code: verificationCode,
         expiresAt: expiresAt.toLocaleString('pt-BR', {
@@ -46,21 +53,27 @@ export class EmailVerificationService {
           month: '2-digit',
           year: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
-        })
+          minute: '2-digit',
+        }),
       });
     } catch (error) {
-      console.error(`❌ [EMAIL_VERIFICATION] Erro ao enviar email para ${email}:`, error);
+      console.error(
+        `❌ [EMAIL_VERIFICATION] Erro ao enviar email para ${email}:`,
+        error,
+      );
       // Continuar mesmo se o email falhar (para desenvolvimento)
     }
 
     return {
       message: 'Código de verificação enviado com sucesso',
-      expiresAt: expiresAt
+      expiresAt: expiresAt,
     };
   }
 
-  async sendPasswordResetCode(email: string, firstName: string): Promise<{ message: string; expiresAt: Date }> {
+  async sendPasswordResetCode(
+    email: string,
+    firstName: string,
+  ): Promise<{ message: string; expiresAt: Date }> {
     // Validar formato do email
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     if (!emailRegex.test(email)) {
@@ -68,7 +81,9 @@ export class EmailVerificationService {
     }
 
     // Gerar código de 6 dígitos
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationCode = Math.floor(
+      100000 + Math.random() * 900000,
+    ).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
     // Armazenar código
@@ -76,12 +91,12 @@ export class EmailVerificationService {
       code: verificationCode,
       expiresAt: expiresAt,
       attempts: 0,
-      verified: false
+      verified: false,
     });
 
     // Enviar email com template específico de recuperação de senha
     try {
-       await this.emailService.sendTemplateEmail(email, 'password-reset', {
+      await this.emailService.sendTemplateEmail(email, 'password-reset', {
         firstName: firstName,
         code: verificationCode,
         expiresAt: expiresAt.toLocaleString('pt-BR', {
@@ -90,24 +105,32 @@ export class EmailVerificationService {
           month: '2-digit',
           year: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
-        })
+          minute: '2-digit',
+        }),
       });
     } catch (error) {
-      console.error(`❌ [EMAIL_VERIFICATION] Erro ao enviar email de recuperação para ${email}:`, error);
+      console.error(
+        `❌ [EMAIL_VERIFICATION] Erro ao enviar email de recuperação para ${email}:`,
+        error,
+      );
       // Continuar mesmo se o email falhar (para desenvolvimento)
     }
 
     return {
       message: 'Código de recuperação enviado com sucesso',
-      expiresAt: expiresAt
+      expiresAt: expiresAt,
     };
   }
 
-  async verifyCode(email: string, code: string): Promise<{ message: string; verified: boolean }> {
+  async verifyCode(
+    email: string,
+    code: string,
+  ): Promise<{ message: string; verified: boolean }> {
     const storedData = this.verificationCodes.get(email);
     if (!storedData) {
-      throw new BadRequestException('Nenhum código foi enviado para este email');
+      throw new BadRequestException(
+        'Nenhum código foi enviado para este email',
+      );
     }
 
     // Verificar se o código expirou
@@ -119,25 +142,28 @@ export class EmailVerificationService {
     // Verificar número de tentativas (máximo 3)
     if (storedData.attempts >= 3) {
       this.verificationCodes.delete(email);
-      throw new BadRequestException('Muitas tentativas inválidas. Solicite um novo código');
+      throw new BadRequestException(
+        'Muitas tentativas inválidas. Solicite um novo código',
+      );
     }
 
     // Verificar se o código está correto
     if (storedData.code !== code) {
       storedData.attempts++;
       this.verificationCodes.set(email, storedData);
-      throw new BadRequestException(`Código inválido. Tentativas restantes: ${3 - storedData.attempts}`);
+      throw new BadRequestException(
+        `Código inválido. Tentativas restantes: ${3 - storedData.attempts}`,
+      );
     }
 
     // Código correto - marcar como verificado
     storedData.verified = true;
     this.verificationCodes.set(email, storedData);
     this.verifiedEmails.add(email);
-    
 
     return {
       message: 'Código verificado com sucesso',
-      verified: true
+      verified: true,
     };
   }
 

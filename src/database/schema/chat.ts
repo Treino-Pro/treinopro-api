@@ -10,7 +10,7 @@ export const messages = pgTable('messages', {
   messageText: text('message_text').notNull(),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
   isRead: boolean('is_read').default(false),
-  
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

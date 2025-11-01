@@ -1,4 +1,14 @@
-import { pgTable, text, integer, timestamp, boolean, json, uuid, varchar, decimal } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  integer,
+  timestamp,
+  boolean,
+  json,
+  uuid,
+  varchar,
+  decimal,
+} from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 // ===== TABELAS DE GAMIFICAÇÃO =====
@@ -6,7 +16,10 @@ import { users } from './users';
 // Perfil de gamificação do usuário
 export const userProfiles = pgTable('user_profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull().unique(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
   level: integer('level').default(1).notNull(),
   totalXP: integer('total_xp').default(0).notNull(),
   currentLevelXP: integer('current_level_xp').default(0).notNull(),
@@ -31,12 +44,14 @@ export const missions = pgTable('missions', {
   prerequisites: json('prerequisites').$type<string[]>().default([]), // IDs das missões que devem ser completadas antes
   startDate: timestamp('start_date'),
   endDate: timestamp('end_date'),
-  requirements: json('requirements').$type<{
-    action: string;
-    count: number;
-    timeframe?: string;
-    conditions?: Record<string, any>;
-  }>().notNull(),
+  requirements: json('requirements')
+    .$type<{
+      action: string;
+      count: number;
+      timeframe?: string;
+      conditions?: Record<string, any>;
+    }>()
+    .notNull(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -51,11 +66,13 @@ export const achievements = pgTable('achievements', {
   icon: varchar('icon', { length: 100 }),
   category: varchar('category', { length: 50 }).notNull(), // 'training', 'social', 'streak', 'special'
   action: varchar('action', { length: 100 }).notNull(), // Ação que a conquista monitora
-  requirements: json('requirements').$type<{
-    action: string;
-    count: number;
-    conditions?: Record<string, any>;
-  }>().notNull(),
+  requirements: json('requirements')
+    .$type<{
+      action: string;
+      count: number;
+      conditions?: Record<string, any>;
+    }>()
+    .notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -65,8 +82,12 @@ export const achievements = pgTable('achievements', {
 // Conquistas conquistadas pelos usuários
 export const userAchievements = pgTable('user_achievements', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  achievementId: uuid('achievement_id').references(() => achievements.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  achievementId: uuid('achievement_id')
+    .references(() => achievements.id, { onDelete: 'cascade' })
+    .notNull(),
   earnedAt: timestamp('earned_at').defaultNow().notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -75,8 +96,12 @@ export const userAchievements = pgTable('user_achievements', {
 // Missões atribuídas aos usuários
 export const userMissions = pgTable('user_missions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  missionId: uuid('mission_id').references(() => missions.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  missionId: uuid('mission_id')
+    .references(() => missions.id, { onDelete: 'cascade' })
+    .notNull(),
   status: varchar('status', { length: 20 }).default('active').notNull(), // 'active', 'completed', 'expired'
   progress: integer('progress').default(0).notNull(),
   completedAt: timestamp('completed_at'),
@@ -87,7 +112,9 @@ export const userMissions = pgTable('user_missions', {
 // Histórico de XP (para auditoria e estatísticas)
 export const xpHistory = pgTable('xp_history', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
   xpAmount: integer('xp_amount').notNull(),
   source: varchar('source', { length: 50 }).notNull(), // 'class_completion', 'achievement', 'mission', 'bonus'
   sourceId: uuid('source_id'), // ID da fonte (aula, conquista, missão)
@@ -126,10 +153,11 @@ export const XPSource = {
 
 // ===== TIPOS TYPESCRIPT =====
 
-export type MissionType = typeof MissionType[keyof typeof MissionType];
-export type AchievementCategory = typeof AchievementCategory[keyof typeof AchievementCategory];
-export type MissionStatus = typeof MissionStatus[keyof typeof MissionStatus];
-export type XPSource = typeof XPSource[keyof typeof XPSource];
+export type MissionType = (typeof MissionType)[keyof typeof MissionType];
+export type AchievementCategory =
+  (typeof AchievementCategory)[keyof typeof AchievementCategory];
+export type MissionStatus = (typeof MissionStatus)[keyof typeof MissionStatus];
+export type XPSource = (typeof XPSource)[keyof typeof XPSource];
 
 export type UserProfile = typeof userProfiles.$inferSelect;
 export type NewUserProfile = typeof userProfiles.$inferInsert;

@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MercadoPagoService } from './mercadopago.service';
 import { db } from '../../database/connection';
 import { payments } from '../../database/schema/payments';
@@ -28,7 +32,10 @@ export class RefundsService {
   ) {}
 
   // Criar reembolso
-  async createRefund(userId: string, refundDto: CreateRefundDto): Promise<RefundResponseDto> {
+  async createRefund(
+    userId: string,
+    refundDto: CreateRefundDto,
+  ): Promise<RefundResponseDto> {
     try {
       console.log('💰 [REFUND] Criando reembolso...');
       console.log('🔍 [REFUND] User ID:', userId);
@@ -38,7 +45,7 @@ export class RefundsService {
       const payment = await db.query.payments.findFirst({
         where: and(
           eq(payments.id, refundDto.paymentId),
-          eq(payments.studentId, userId)
+          eq(payments.studentId, userId),
         ),
       });
 
@@ -50,7 +57,7 @@ export class RefundsService {
         id: payment.id,
         totalAmount: payment.totalAmount,
         status: payment.status,
-        mpPaymentId: payment.mpPaymentId
+        mpPaymentId: payment.mpPaymentId,
       });
 
       // Verificar se o pagamento pode ser reembolsado
@@ -59,10 +66,13 @@ export class RefundsService {
       }
 
       // Criar reembolso no Mercado Pago
-      const mpRefund = await this.mercadoPagoService.createRefund(payment.mpPaymentId, {
-        amount: refundDto.amount,
-        reason: refundDto.reason || 'Solicitação do cliente',
-      });
+      const mpRefund = await this.mercadoPagoService.createRefund(
+        payment.mpPaymentId,
+        {
+          amount: refundDto.amount,
+          reason: refundDto.reason || 'Solicitação do cliente',
+        },
+      );
 
       console.log('✅ [REFUND] Reembolso criado no MP:', mpRefund.id);
 
@@ -85,10 +95,11 @@ export class RefundsService {
         reason: refundDto.reason,
         createdAt: mpRefund.date_created,
       };
-
     } catch (error) {
       console.error('❌ [REFUND] Erro ao criar reembolso:', error);
-      throw new BadRequestException(`Erro ao criar reembolso: ${error.message}`);
+      throw new BadRequestException(
+        `Erro ao criar reembolso: ${error.message}`,
+      );
     }
   }
 
@@ -101,10 +112,7 @@ export class RefundsService {
 
       // Verificar se o pagamento existe e pertence ao usuário
       const payment = await db.query.payments.findFirst({
-        where: and(
-          eq(payments.id, paymentId),
-          eq(payments.studentId, userId)
-        ),
+        where: and(eq(payments.id, paymentId), eq(payments.studentId, userId)),
       });
 
       if (!payment) {
@@ -112,11 +120,13 @@ export class RefundsService {
       }
 
       // Buscar reembolsos no Mercado Pago
-      const refunds = await this.mercadoPagoService.getPaymentRefunds(payment.mpPaymentId);
+      const refunds = await this.mercadoPagoService.getPaymentRefunds(
+        payment.mpPaymentId,
+      );
 
       console.log('✅ [REFUND] Reembolsos encontrados:', refunds.length);
 
-      return refunds.map(refund => ({
+      return refunds.map((refund) => ({
         id: refund.id,
         amount: refund.amount,
         status: refund.status,
@@ -124,15 +134,20 @@ export class RefundsService {
         createdAt: refund.date_created,
         updatedAt: refund.date_updated,
       }));
-
     } catch (error) {
       console.error('❌ [REFUND] Erro ao listar reembolsos:', error);
-      throw new BadRequestException(`Erro ao listar reembolsos: ${error.message}`);
+      throw new BadRequestException(
+        `Erro ao listar reembolsos: ${error.message}`,
+      );
     }
   }
 
   // Consultar reembolso específico
-  async getRefund(userId: string, paymentId: string, refundId: string): Promise<any> {
+  async getRefund(
+    userId: string,
+    paymentId: string,
+    refundId: string,
+  ): Promise<any> {
     try {
       console.log('🔍 [REFUND] Consultando reembolso específico...');
       console.log('🔍 [REFUND] User ID:', userId);
@@ -141,10 +156,7 @@ export class RefundsService {
 
       // Verificar se o pagamento existe e pertence ao usuário
       const payment = await db.query.payments.findFirst({
-        where: and(
-          eq(payments.id, paymentId),
-          eq(payments.studentId, userId)
-        ),
+        where: and(eq(payments.id, paymentId), eq(payments.studentId, userId)),
       });
 
       if (!payment) {
@@ -152,7 +164,10 @@ export class RefundsService {
       }
 
       // Buscar reembolso no Mercado Pago
-      const refund = await this.mercadoPagoService.getRefund(payment.mpPaymentId, refundId);
+      const refund = await this.mercadoPagoService.getRefund(
+        payment.mpPaymentId,
+        refundId,
+      );
 
       console.log('✅ [REFUND] Reembolso encontrado:', refund.id);
 
@@ -164,15 +179,20 @@ export class RefundsService {
         createdAt: refund.date_created,
         updatedAt: refund.date_updated,
       };
-
     } catch (error) {
       console.error('❌ [REFUND] Erro ao consultar reembolso:', error);
-      throw new BadRequestException(`Erro ao consultar reembolso: ${error.message}`);
+      throw new BadRequestException(
+        `Erro ao consultar reembolso: ${error.message}`,
+      );
     }
   }
 
   // Listar todos os reembolsos do usuário
-  async getUserRefunds(userId: string, limit: number = 50, offset: number = 0): Promise<any[]> {
+  async getUserRefunds(
+    userId: string,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<any[]> {
     try {
       console.log('📋 [REFUND] Listando reembolsos do usuário...');
       console.log('🔍 [REFUND] User ID:', userId);
@@ -181,42 +201,57 @@ export class RefundsService {
       const refundedPayments = await db.query.payments.findMany({
         where: and(
           eq(payments.studentId, userId),
-          eq(payments.status, 'refunded')
+          eq(payments.status, 'refunded'),
         ),
         limit,
         offset,
         orderBy: (payments, { desc }) => [desc(payments.updatedAt)],
       });
 
-      console.log('✅ [REFUND] Pagamentos reembolsados encontrados:', refundedPayments.length);
+      console.log(
+        '✅ [REFUND] Pagamentos reembolsados encontrados:',
+        refundedPayments.length,
+      );
 
       // Para cada pagamento, buscar os reembolsos
       const allRefunds = [];
       for (const payment of refundedPayments) {
         try {
-          const refunds = await this.mercadoPagoService.getPaymentRefunds(payment.mpPaymentId);
-          allRefunds.push(...refunds.map(refund => ({
-            id: refund.id,
-            paymentId: payment.id,
-            amount: refund.amount,
-            status: refund.status,
-            reason: refund.reason,
-            createdAt: refund.date_created,
-            updatedAt: refund.date_updated,
-          })));
+          const refunds = await this.mercadoPagoService.getPaymentRefunds(
+            payment.mpPaymentId,
+          );
+          allRefunds.push(
+            ...refunds.map((refund) => ({
+              id: refund.id,
+              paymentId: payment.id,
+              amount: refund.amount,
+              status: refund.status,
+              reason: refund.reason,
+              createdAt: refund.date_created,
+              updatedAt: refund.date_updated,
+            })),
+          );
         } catch (error) {
-          console.error('⚠️ [REFUND] Erro ao buscar reembolsos do pagamento:', payment.id, error);
+          console.error(
+            '⚠️ [REFUND] Erro ao buscar reembolsos do pagamento:',
+            payment.id,
+            error,
+          );
           // Continuar mesmo se falhar
         }
       }
 
-      console.log('✅ [REFUND] Total de reembolsos encontrados:', allRefunds.length);
+      console.log(
+        '✅ [REFUND] Total de reembolsos encontrados:',
+        allRefunds.length,
+      );
 
       return allRefunds;
-
     } catch (error) {
       console.error('❌ [REFUND] Erro ao listar reembolsos do usuário:', error);
-      throw new BadRequestException(`Erro ao listar reembolsos: ${error.message}`);
+      throw new BadRequestException(
+        `Erro ao listar reembolsos: ${error.message}`,
+      );
     }
   }
 }

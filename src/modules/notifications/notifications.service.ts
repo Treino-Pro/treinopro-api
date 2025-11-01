@@ -26,7 +26,11 @@ export class NotificationsService {
 
   // ===== MÉTODOS PRINCIPAIS =====
 
-  async sendEmail(userId: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendEmail(
+    userId: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     try {
       // Buscar dados do usuário
       const user = await this.getUserById(userId);
@@ -43,31 +47,57 @@ export class NotificationsService {
       });
 
       // Salvar registro da notificação
-      await this.saveNotificationRecord(userId, 'email', template, data, 'sent');
+      await this.saveNotificationRecord(
+        userId,
+        'email',
+        template,
+        data,
+        'sent',
+      );
 
-      this.logger.log(`📧 Email enviado com sucesso para ${user.email} (${template})`);
-
+      this.logger.log(
+        `📧 Email enviado com sucesso para ${user.email} (${template})`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar email para usuário ${userId}:`, error);
-      await this.saveNotificationRecord(userId, 'email', template, data, 'failed', error.message);
+      this.logger.error(
+        `❌ Erro ao enviar email para usuário ${userId}:`,
+        error,
+      );
+      await this.saveNotificationRecord(
+        userId,
+        'email',
+        template,
+        data,
+        'failed',
+        error.message,
+      );
       throw error;
     }
   }
 
-  async sendEmailToAddress(email: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendEmailToAddress(
+    email: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     try {
       // Enviar email diretamente para o endereço fornecido
       await this.emailService.sendTemplateEmail(email, template, data);
 
-      this.logger.log(`📧 Email enviado com sucesso para ${email} (${template})`);
-
+      this.logger.log(
+        `📧 Email enviado com sucesso para ${email} (${template})`,
+      );
     } catch (error) {
       this.logger.error(`❌ Erro ao enviar email para ${email}:`, error);
       throw error;
     }
   }
 
-  async sendInAppNotification(userId: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendInAppNotification(
+    userId: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     try {
       // Buscar dados do usuário
       const user = await this.getUserById(userId);
@@ -84,18 +114,39 @@ export class NotificationsService {
       });
 
       // Salvar registro da notificação
-      await this.saveNotificationRecord(userId, 'in-app', template, data, 'sent');
+      await this.saveNotificationRecord(
+        userId,
+        'in-app',
+        template,
+        data,
+        'sent',
+      );
 
-      this.logger.log(`🔔 Notificação in-app criada para usuário ${userId} (${template})`);
-
+      this.logger.log(
+        `🔔 Notificação in-app criada para usuário ${userId} (${template})`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao criar notificação in-app para usuário ${userId}:`, error);
-      await this.saveNotificationRecord(userId, 'in-app', template, data, 'failed', error.message);
+      this.logger.error(
+        `❌ Erro ao criar notificação in-app para usuário ${userId}:`,
+        error,
+      );
+      await this.saveNotificationRecord(
+        userId,
+        'in-app',
+        template,
+        data,
+        'failed',
+        error.message,
+      );
       throw error;
     }
   }
 
-  async sendPushNotification(userId: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendPushNotification(
+    userId: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     try {
       // Buscar dados do usuário e tokens de push
       const user = await this.getUserById(userId);
@@ -105,8 +156,17 @@ export class NotificationsService {
 
       const pushTokens = await this.getUserPushTokens(userId);
       if (pushTokens.length === 0) {
-        this.logger.warn(`⚠️ Usuário ${userId} não possui tokens de push notification`);
-        await this.saveNotificationRecord(userId, 'push', template, data, 'skipped', 'No push tokens');
+        this.logger.warn(
+          `⚠️ Usuário ${userId} não possui tokens de push notification`,
+        );
+        await this.saveNotificationRecord(
+          userId,
+          'push',
+          template,
+          data,
+          'skipped',
+          'No push tokens',
+        );
         return;
       }
 
@@ -120,11 +180,22 @@ export class NotificationsService {
       // Salvar registro da notificação
       await this.saveNotificationRecord(userId, 'push', template, data, 'sent');
 
-      this.logger.log(`📱 Push notification enviado com sucesso para usuário ${userId} (${template})`);
-
+      this.logger.log(
+        `📱 Push notification enviado com sucesso para usuário ${userId} (${template})`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar push notification para usuário ${userId}:`, error);
-      await this.saveNotificationRecord(userId, 'push', template, data, 'failed', error.message);
+      this.logger.error(
+        `❌ Erro ao enviar push notification para usuário ${userId}:`,
+        error,
+      );
+      await this.saveNotificationRecord(
+        userId,
+        'push',
+        template,
+        data,
+        'failed',
+        error.message,
+      );
       throw error;
     }
   }
@@ -135,9 +206,9 @@ export class NotificationsService {
     userId: string,
     template: string,
     data: Record<string, any>,
-    channels: ('email' | 'in-app' | 'push')[] = ['in-app', 'push', 'email']
+    channels: ('email' | 'in-app' | 'push')[] = ['in-app', 'push', 'email'],
   ): Promise<void> {
-    const promises = channels.map(channel => {
+    const promises = channels.map((channel) => {
       switch (channel) {
         case 'email':
           return this.sendEmail(userId, template, data);
@@ -151,10 +222,12 @@ export class NotificationsService {
     await Promise.allSettled(promises);
   }
 
-  async sendBulkNotifications(notifications: NotificationData[]): Promise<void> {
-    const promises = notifications.map(notification => {
+  async sendBulkNotifications(
+    notifications: NotificationData[],
+  ): Promise<void> {
+    const promises = notifications.map((notification) => {
       const { userId, type, template, data } = notification;
-      
+
       switch (type) {
         case 'email':
           return this.sendEmail(userId, template, data);
@@ -166,37 +239,46 @@ export class NotificationsService {
     });
 
     await Promise.allSettled(promises);
-    this.logger.log(`📬 ${notifications.length} notificações em lote processadas`);
+    this.logger.log(
+      `📬 ${notifications.length} notificações em lote processadas`,
+    );
   }
 
   // ===== CRIAÇÃO DE NOTIFICAÇÕES IN-APP BASEADAS EM TEMPLATES =====
 
-  private async createInAppNotificationFromTemplate(userId: string, template: string, data: Record<string, any>): Promise<void> {
+  private async createInAppNotificationFromTemplate(
+    userId: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     switch (template) {
       case 'proposal-match':
         await this.inAppService.createProposalMatchNotification(userId, data);
         break;
-      
+
       case 'payment-confirmation':
-        await this.inAppService.createPaymentConfirmationNotification(userId, data);
+        await this.inAppService.createPaymentConfirmationNotification(
+          userId,
+          data,
+        );
         break;
-      
+
       case 'class-reminder':
         await this.inAppService.createClassReminderNotification(userId, data);
         break;
-      
+
       case 'class-started':
         await this.inAppService.createClassStartedNotification(userId, data);
         break;
-      
+
       case 'refund-processed':
         await this.inAppService.createRefundNotification(userId, data);
         break;
-      
+
       case 'rating-request':
         await this.inAppService.createRatingRequestNotification(userId, data);
         break;
-      
+
       case 'profile-reminder':
         await this.inAppService.createProfileReminderNotification(userId);
         break;
@@ -206,7 +288,10 @@ export class NotificationsService {
         break;
 
       case 'class-cancellation':
-        await this.inAppService.createClassCancellationNotification(userId, data);
+        await this.inAppService.createClassCancellationNotification(
+          userId,
+          data,
+        );
         break;
 
       case 'new-message':
@@ -216,7 +301,7 @@ export class NotificationsService {
       case 'dispute-update':
         await this.inAppService.createDisputeUpdateNotification(userId, data);
         break;
-      
+
       default:
         // Template genérico
         await this.inAppService.createNotification(
@@ -224,64 +309,102 @@ export class NotificationsService {
           'TreinoPro',
           data.message || 'Você tem uma nova notificação',
           'info',
-          data
+          data,
         );
     }
   }
 
   // ===== TEMPLATES ESPECÍFICOS =====
 
-  async sendProposalMatchNotification(personalId: string, proposalData: any): Promise<void> {
-    await this.sendMultiChannelNotification(personalId, 'proposal-match', {
-      proposalId: proposalData.id,
-      studentName: proposalData.studentName,
-      location: proposalData.locationName,
-      date: proposalData.trainingDate,
-      time: proposalData.trainingTime,
-      price: proposalData.price,
-      modality: proposalData.modalityName,
-    }, ['in-app', 'push', 'email']);
+  async sendProposalMatchNotification(
+    personalId: string,
+    proposalData: any,
+  ): Promise<void> {
+    await this.sendMultiChannelNotification(
+      personalId,
+      'proposal-match',
+      {
+        proposalId: proposalData.id,
+        studentName: proposalData.studentName,
+        location: proposalData.locationName,
+        date: proposalData.trainingDate,
+        time: proposalData.trainingTime,
+        price: proposalData.price,
+        modality: proposalData.modalityName,
+      },
+      ['in-app', 'push', 'email'],
+    );
   }
 
-  async sendPaymentConfirmationNotification(userId: string, paymentData: any): Promise<void> {
-    await this.sendMultiChannelNotification(userId, 'payment-confirmation', {
-      paymentId: paymentData.id,
-      amount: paymentData.totalAmount,
-      method: paymentData.method,
-      classDate: paymentData.classDate,
-      location: paymentData.location,
-    }, ['in-app', 'push', 'email']);
+  async sendPaymentConfirmationNotification(
+    userId: string,
+    paymentData: any,
+  ): Promise<void> {
+    await this.sendMultiChannelNotification(
+      userId,
+      'payment-confirmation',
+      {
+        paymentId: paymentData.id,
+        amount: paymentData.totalAmount,
+        method: paymentData.method,
+        classDate: paymentData.classDate,
+        location: paymentData.location,
+      },
+      ['in-app', 'push', 'email'],
+    );
   }
 
-  async sendClassReminderNotification(userId: string, classData: any): Promise<void> {
-    await this.sendMultiChannelNotification(userId, 'class-reminder', {
-      classId: classData.id,
-      date: classData.date,
-      time: classData.time,
-      location: classData.location,
-      partnerName: classData.partnerName, // Nome do aluno ou personal
-    }, ['in-app', 'push']);
+  async sendClassReminderNotification(
+    userId: string,
+    classData: any,
+  ): Promise<void> {
+    await this.sendMultiChannelNotification(
+      userId,
+      'class-reminder',
+      {
+        classId: classData.id,
+        date: classData.date,
+        time: classData.time,
+        location: classData.location,
+        partnerName: classData.partnerName, // Nome do aluno ou personal
+      },
+      ['in-app', 'push'],
+    );
   }
 
-  async sendClassCancellationNotification(userId: string, classData: any, reason: string): Promise<void> {
-    await this.sendMultiChannelNotification(userId, 'class-cancellation', {
-      classId: classData.id,
-      date: classData.date,
-      time: classData.time,
-      location: classData.location,
-      partnerName: classData.partnerName,
-      reason: reason,
-      refundInfo: classData.refundInfo,
-    }, ['in-app', 'push', 'email']);
+  async sendClassCancellationNotification(
+    userId: string,
+    classData: any,
+    reason: string,
+  ): Promise<void> {
+    await this.sendMultiChannelNotification(
+      userId,
+      'class-cancellation',
+      {
+        classId: classData.id,
+        date: classData.date,
+        time: classData.time,
+        location: classData.location,
+        partnerName: classData.partnerName,
+        reason: reason,
+        refundInfo: classData.refundInfo,
+      },
+      ['in-app', 'push', 'email'],
+    );
   }
 
   async sendRefundNotification(userId: string, refundData: any): Promise<void> {
-    await this.sendMultiChannelNotification(userId, 'refund-processed', {
-      refundId: refundData.id,
-      amount: refundData.amount,
-      reason: refundData.reason,
-      estimatedDays: refundData.estimatedDays || 5,
-    }, ['in-app', 'push', 'email']);
+    await this.sendMultiChannelNotification(
+      userId,
+      'refund-processed',
+      {
+        refundId: refundData.id,
+        amount: refundData.amount,
+        reason: refundData.reason,
+        estimatedDays: refundData.estimatedDays || 5,
+      },
+      ['in-app', 'push', 'email'],
+    );
   }
 
   // ===== MÉTODOS AUXILIARES =====
@@ -304,7 +427,10 @@ export class NotificationsService {
 
   // ===== MÉTODOS ESPECÍFICOS PARA IN-APP =====
 
-  async getUserNotifications(userId: string, limit: number = 50): Promise<any[]> {
+  async getUserNotifications(
+    userId: string,
+    limit: number = 50,
+  ): Promise<any[]> {
     return this.inAppService.getUserNotifications(userId, limit);
   }
 
@@ -316,7 +442,10 @@ export class NotificationsService {
     return this.inAppService.getUnreadCount(userId);
   }
 
-  async markNotificationAsRead(notificationId: string, userId: string): Promise<void> {
+  async markNotificationAsRead(
+    notificationId: string,
+    userId: string,
+  ): Promise<void> {
     return this.inAppService.markAsRead(notificationId, userId);
   }
 
@@ -324,7 +453,10 @@ export class NotificationsService {
     return this.inAppService.markAllAsRead(userId);
   }
 
-  async deleteNotification(notificationId: string, userId: string): Promise<void> {
+  async deleteNotification(
+    notificationId: string,
+    userId: string,
+  ): Promise<void> {
     return this.inAppService.deleteNotification(notificationId, userId);
   }
 
@@ -334,7 +466,7 @@ export class NotificationsService {
     template: string,
     data: Record<string, any>,
     status: 'sent' | 'failed' | 'skipped',
-    error?: string
+    error?: string,
   ): Promise<void> {
     try {
       // TODO: Implementar tabela de notifications para histórico
@@ -348,8 +480,9 @@ export class NotificationsService {
       //   createdAt: new Date(),
       // });
 
-      this.logger.debug(`📝 Registro de notificação salvo: ${userId} - ${type} - ${template} - ${status}`);
-
+      this.logger.debug(
+        `📝 Registro de notificação salvo: ${userId} - ${type} - ${template} - ${status}`,
+      );
     } catch (error) {
       this.logger.error('❌ Erro ao salvar registro de notificação:', error);
     }
@@ -371,9 +504,14 @@ export class NotificationsService {
     };
   }
 
-  async updateUserNotificationPreferences(userId: string, preferences: any): Promise<void> {
+  async updateUserNotificationPreferences(
+    userId: string,
+    preferences: any,
+  ): Promise<void> {
     // TODO: Implementar atualização de preferências
-    this.logger.log(`⚙️ Preferências de notificação atualizadas para usuário ${userId}`);
+    this.logger.log(
+      `⚙️ Preferências de notificação atualizadas para usuário ${userId}`,
+    );
   }
 
   // ===== ESTATÍSTICAS =====

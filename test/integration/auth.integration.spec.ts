@@ -28,13 +28,15 @@ describe('Auth Integration Tests', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    
+
     // Configurar validação global
-    app.useGlobalPipes(new (await import('@nestjs/common')).ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }));
+    app.useGlobalPipes(
+      new (await import('@nestjs/common')).ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
 
     // Configurar CORS
     app.enableCors({

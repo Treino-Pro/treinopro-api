@@ -1,4 +1,8 @@
-import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -14,7 +18,7 @@ export class JwtAuthGuard {
 
   canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest();
-    
+
     // Verificar se a rota está marcada como pública usando o decorator @Public()
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
@@ -33,7 +37,7 @@ export class JwtAuthGuard {
 
     try {
       const secret = this.configService.get('JWT_SECRET');
-      
+
       const payload = this.jwtService.verify(token, {
         secret: secret,
       });

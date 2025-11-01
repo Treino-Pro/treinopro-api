@@ -17,13 +17,13 @@ export class PaymentJobsProcessor {
   @Process('timeout-payment')
   async handlePaymentTimeout(job: Job<PaymentTimeoutJobData>): Promise<void> {
     const { paymentId, proposalId, classId, timeoutMinutes } = job.data;
-    
+
     this.logger.log(`⏰ Processando timeout de pagamento: ${paymentId}`);
 
     try {
       // Buscar pagamento atual - usando getPayments como workaround
       const payments = await this.paymentsService.getPayments({}, 'system');
-      const payment = payments.find(p => p.id === paymentId) || null;
+      const payment = payments.find((p) => p.id === paymentId) || null;
 
       if (!payment) {
         this.logger.warn(`⚠️ Pagamento não encontrado: ${paymentId}`);
@@ -32,7 +32,9 @@ export class PaymentJobsProcessor {
 
       // Verificar se ainda está pendente
       if (payment.status !== 'pending') {
-        this.logger.log(`✅ Pagamento ${paymentId} já foi processado (status: ${payment.status})`);
+        this.logger.log(
+          `✅ Pagamento ${paymentId} já foi processado (status: ${payment.status})`,
+        );
         return;
       }
 
@@ -45,24 +47,31 @@ export class PaymentJobsProcessor {
         await this.handleGenericPaymentTimeout(paymentId);
       }
 
-      this.logger.log(`✅ Timeout do pagamento ${paymentId} processado com sucesso`);
-
+      this.logger.log(
+        `✅ Timeout do pagamento ${paymentId} processado com sucesso`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao processar timeout do pagamento ${paymentId}:`, error);
+      this.logger.error(
+        `❌ Erro ao processar timeout do pagamento ${paymentId}:`,
+        error,
+      );
       throw error;
     }
   }
 
   @Process('capture-payment')
-  async handlePaymentCapture(job: Job<{ paymentId: string; classId: string }>): Promise<void> {
+  async handlePaymentCapture(
+    job: Job<{ paymentId: string; classId: string }>,
+  ): Promise<void> {
     const { paymentId, classId } = job.data;
-    
-    this.logger.log(`💰 Processando captura de pagamento: ${paymentId} para aula ${classId}`);
+
+    this.logger.log(
+      `💰 Processando captura de pagamento: ${paymentId} para aula ${classId}`,
+    );
 
     try {
       await this.paymentsService.capturePaymentAfterClass(classId, paymentId);
       this.logger.log(`✅ Pagamento ${paymentId} capturado com sucesso`);
-
     } catch (error) {
       this.logger.error(`❌ Erro ao capturar pagamento ${paymentId}:`, error);
       throw error;
@@ -70,15 +79,16 @@ export class PaymentJobsProcessor {
   }
 
   @Process('process-refund')
-  async handleRefundProcessing(job: Job<{ paymentId: string; reason: string }>): Promise<void> {
+  async handleRefundProcessing(
+    job: Job<{ paymentId: string; reason: string }>,
+  ): Promise<void> {
     const { paymentId, reason } = job.data;
-    
+
     this.logger.log(`💸 Processando reembolso: ${paymentId} - ${reason}`);
 
     try {
       await this.paymentsService.refundPayment(paymentId, reason);
       this.logger.log(`✅ Reembolso ${paymentId} processado com sucesso`);
-
     } catch (error) {
       this.logger.error(`❌ Erro ao processar reembolso ${paymentId}:`, error);
       throw error;
@@ -86,46 +96,61 @@ export class PaymentJobsProcessor {
   }
 
   @Process('sync-payment-status')
-  async handlePaymentStatusSync(job: Job<{ paymentId: string }>): Promise<void> {
+  async handlePaymentStatusSync(
+    job: Job<{ paymentId: string }>,
+  ): Promise<void> {
     const { paymentId } = job.data;
-    
+
     this.logger.log(`🔄 Sincronizando status do pagamento: ${paymentId}`);
 
     try {
       // Buscar status atual no Mercado Pago - usando getPayments como workaround
       const payments = await this.paymentsService.getPayments({}, 'system');
-      const payment = payments.find(p => p.id === paymentId) || null;
-      
+      const payment = payments.find((p) => p.id === paymentId) || null;
+
       if (payment && payment.mpPaymentId) {
-        const mpPayment = await this.paymentsService['mercadoPagoService'].getPayment(payment.mpPaymentId);
-        
+        const mpPayment = await this.paymentsService[
+          'mercadoPagoService'
+        ].getPayment(payment.mpPaymentId);
+
         if (mpPayment) {
-          const newStatus = this.paymentsService['mercadoPagoService'].mapPaymentStatus(
-            mpPayment.status,
-            mpPayment.status_detail
-          );
+          const newStatus = this.paymentsService[
+            'mercadoPagoService'
+          ].mapPaymentStatus(mpPayment.status, mpPayment.status_detail);
 
           if (newStatus !== payment.status) {
             // Comentando temporariamente até ajustar os tipos
             // await this.paymentsService.updatePaymentStatus(paymentId, newStatus, payment.mpPaymentId, mpPayment);
-            this.logger.log(`🔄 Status atualizado: ${paymentId} -> ${newStatus}`);
+            this.logger.log(
+              `🔄 Status atualizado: ${paymentId} -> ${newStatus}`,
+            );
           }
         }
       }
-
     } catch (error) {
-      this.logger.error(`❌ Erro ao sincronizar status do pagamento ${paymentId}:`, error);
+      this.logger.error(
+        `❌ Erro ao sincronizar status do pagamento ${paymentId}:`,
+        error,
+      );
       throw error;
     }
   }
 
-  private async handleProposalPaymentTimeout(paymentId: string, proposalId: string): Promise<void> {
-    this.logger.log(`📋 Processando timeout de pagamento de proposta: ${proposalId}`);
+  private async handleProposalPaymentTimeout(
+    paymentId: string,
+    proposalId: string,
+  ): Promise<void> {
+    this.logger.log(
+      `📋 Processando timeout de pagamento de proposta: ${proposalId}`,
+    );
 
     try {
       // Cancelar proposta e processar reembolso
-      await this.paymentsService.cancelPaymentBeforeClass(proposalId, 'Timeout de pagamento');
-      
+      await this.paymentsService.cancelPaymentBeforeClass(
+        proposalId,
+        'Timeout de pagamento',
+      );
+
       // Atualizar status da proposta
       await this.db
         .update(this.db.proposals)
@@ -135,20 +160,24 @@ export class PaymentJobsProcessor {
           updatedAt: new Date(),
         })
         .where(eq(this.db.proposals.id, proposalId));
-
     } catch (error) {
       this.logger.error(`❌ Erro no timeout da proposta ${proposalId}:`, error);
       throw error;
     }
   }
 
-  private async handleClassPaymentTimeout(paymentId: string, classId: string): Promise<void> {
+  private async handleClassPaymentTimeout(
+    paymentId: string,
+    classId: string,
+  ): Promise<void> {
     this.logger.log(`🏋️ Processando timeout de pagamento de aula: ${classId}`);
 
     try {
       // Cancelar pagamento da aula
-      await this.paymentsService.cancelPaymentBeforeClass(classId, 'Timeout de pagamento da aula');
-
+      await this.paymentsService.cancelPaymentBeforeClass(
+        classId,
+        'Timeout de pagamento da aula',
+      );
     } catch (error) {
       this.logger.error(`❌ Erro no timeout da aula ${classId}:`, error);
       throw error;
@@ -156,12 +185,16 @@ export class PaymentJobsProcessor {
   }
 
   private async handleGenericPaymentTimeout(paymentId: string): Promise<void> {
-    this.logger.log(`💳 Processando timeout genérico de pagamento: ${paymentId}`);
+    this.logger.log(
+      `💳 Processando timeout genérico de pagamento: ${paymentId}`,
+    );
 
     try {
       // Cancelar pagamento genérico
-      await this.paymentsService.refundPayment(paymentId, 'Timeout de pagamento');
-
+      await this.paymentsService.refundPayment(
+        paymentId,
+        'Timeout de pagamento',
+      );
     } catch (error) {
       this.logger.error(`❌ Erro no timeout genérico ${paymentId}:`, error);
       throw error;

@@ -1,9 +1,19 @@
-import { IsString, IsEnum, IsOptional, IsNotEmpty, IsEmail, Matches, Length, IsBoolean, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsNotEmpty,
+  IsEmail,
+  Matches,
+  Length,
+  IsBoolean,
+  IsDateString,
+} from 'class-validator';
 
 // Enums
 export enum StudentPaymentMethod {
   CREDIT_CARD = 'credit_card',
-  DEBIT_CARD = 'debit_card', 
+  DEBIT_CARD = 'debit_card',
   MERCADO_PAGO = 'mercado_pago',
   PIX = 'pix',
 }
@@ -37,7 +47,9 @@ export class SaveCardDto {
 
   @IsString()
   @IsNotEmpty()
-  @Matches(/^(0[1-9]|1[0-2])\/\d{2}$/, { message: 'Data deve estar no formato MM/YY' })
+  @Matches(/^(0[1-9]|1[0-2])\/\d{2}$/, {
+    message: 'Data deve estar no formato MM/YY',
+  })
   expirationDate: string; // MM/YY
 
   @IsString()
@@ -171,24 +183,24 @@ export class ProcessClassPaymentDto {
 export class PaymentProcessResponseDto {
   success: boolean;
   paymentId: string;
-  
+
   // Dados do Mercado Pago
   mpPreferenceId?: string;
   mpPaymentId?: string;
   checkoutUrl?: string; // URL para checkout
-  
+
   // Status do pagamento
   status: string; // pending, approved, rejected, etc.
   statusDetail?: string;
-  
+
   // Dados da transação
   transactionAmount: number;
   installments?: number;
-  
+
   // QR Code (para PIX)
   qrCode?: string;
   qrCodeBase64?: string;
-  
+
   // Dados do cartão (se aplicável)
   cardInfo?: {
     lastFourDigits: string;
@@ -196,12 +208,12 @@ export class PaymentProcessResponseDto {
     wasCardSaved: boolean;
     cardId?: string;
   };
-  
+
   // URLs de retorno
   successUrl?: string;
   failureUrl?: string;
   pendingUrl?: string;
-  
+
   message: string;
   createdAt: Date;
 }
@@ -233,7 +245,7 @@ export class StudentPaymentHistoryDto {
   method: StudentPaymentMethod;
   status: string;
   installments?: number;
-  
+
   // Dados da aula
   classInfo: {
     date: Date;
@@ -242,14 +254,14 @@ export class StudentPaymentHistoryDto {
     personalName: string;
     duration: number;
   };
-  
+
   // Dados do pagamento
   mpPaymentId?: string;
   cardInfo?: {
     lastFourDigits: string;
     cardBrand: CardBrand;
   };
-  
+
   // Timestamps
   createdAt: Date;
   processedAt?: Date;
@@ -262,24 +274,24 @@ export class StudentPaymentStatsDto {
   totalSpent: string;
   totalClasses: number;
   averagePerClass: string;
-  
+
   // Este mês
   thisMonth: {
     spent: string;
     classes: number;
     averagePerClass: string;
   };
-  
+
   // Métodos mais usados
   preferredMethods: {
     method: StudentPaymentMethod;
     count: number;
     percentage: number;
   }[];
-  
+
   // Histórico recente
   recentPayments: StudentPaymentHistoryDto[];
-  
+
   // Status atual
   paymentStatus: {
     hasValidMethod: boolean;

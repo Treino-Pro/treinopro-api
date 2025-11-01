@@ -50,7 +50,11 @@ describe('CrefQueueService', () => {
 
     mockQueue.add.mockResolvedValue(mockJob);
 
-    const result = await service.addValidationJob('SP-123456', 'personal', 'normal');
+    const result = await service.addValidationJob(
+      'SP-123456',
+      'personal',
+      'normal',
+    );
 
     expect(result).toEqual(mockJob);
     expect(mockQueue.add).toHaveBeenCalledWith(

@@ -1,7 +1,17 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
-import { financialProfiles, withdrawalRequests, userWallets, users } from '../../database/schema';
+import {
+  financialProfiles,
+  withdrawalRequests,
+  userWallets,
+  users,
+} from '../../database/schema';
 // Removido import incorreto - usando DATABASE_CONNECTION via @Inject
 import {
   UpdateFinancialProfileDto,
@@ -20,7 +30,9 @@ export class FinancialProfileService {
   constructor(@Inject('DATABASE_CONNECTION') private db: any) {}
 
   // Buscar perfil financeiro do usuário
-  async getFinancialProfile(userId: string): Promise<FinancialProfileResponseDto> {
+  async getFinancialProfile(
+    userId: string,
+  ): Promise<FinancialProfileResponseDto> {
     const profile = await this.db.query.financialProfiles.findFirst({
       where: eq(financialProfiles.userId, userId),
       with: {
@@ -37,7 +49,9 @@ export class FinancialProfileService {
   }
 
   // Criar perfil padrão
-  private async createDefaultProfile(userId: string): Promise<FinancialProfileResponseDto> {
+  private async createDefaultProfile(
+    userId: string,
+  ): Promise<FinancialProfileResponseDto> {
     const [newProfile] = await this.db
       .insert(financialProfiles)
       .values({
@@ -80,14 +94,16 @@ export class FinancialProfileService {
     });
 
     if (!user || user.userType !== 'personal') {
-      throw new ForbiddenException('Apenas personal trainers podem configurar perfil financeiro');
+      throw new ForbiddenException(
+        'Apenas personal trainers podem configurar perfil financeiro',
+      );
     }
 
     // Validar dados baseado no método escolhido
     await this.validateProfileData(updateDto);
 
     // Buscar perfil existente ou criar
-    let profile = await this.db.query.financialProfiles.findFirst({
+    const profile = await this.db.query.financialProfiles.findFirst({
       where: eq(financialProfiles.userId, userId),
     });
 
@@ -145,12 +161,16 @@ export class FinancialProfileService {
   }
 
   // Validar dados do perfil
-  private async validateProfileData(updateDto: UpdateFinancialProfileDto): Promise<void> {
+  private async validateProfileData(
+    updateDto: UpdateFinancialProfileDto,
+  ): Promise<void> {
     if (updateDto.preferredMethod === PaymentMethod.BANK_TRANSFER) {
       if (!updateDto.bankAccount) {
-        throw new BadRequestException('Dados bancários são obrigatórios para transferência bancária');
+        throw new BadRequestException(
+          'Dados bancários são obrigatórios para transferência bancária',
+        );
       }
-      
+
       // Validar dados bancários
       await this.validateBankAccount({
         bankCode: updateDto.bankAccount.bankCode,
@@ -164,7 +184,7 @@ export class FinancialProfileService {
       if (!updateDto.mercadoPagoAccount) {
         throw new BadRequestException('Dados do Mercado Pago são obrigatórios');
       }
-      
+
       // Validar email do MP
       await this.validateMercadoPago({
         email: updateDto.mercadoPagoAccount.email,
@@ -174,22 +194,32 @@ export class FinancialProfileService {
   }
 
   // Verificar se perfil está completo
-  private checkProfileCompleteness(updateDto: UpdateFinancialProfileDto): boolean {
+  private checkProfileCompleteness(
+    updateDto: UpdateFinancialProfileDto,
+  ): boolean {
     if (updateDto.preferredMethod === PaymentMethod.BANK_TRANSFER) {
       const bank = updateDto.bankAccount;
-      return !!(bank?.bankCode && bank?.accountNumber && bank?.agency && bank?.document && bank?.accountHolderName);
+      return !!(
+        bank?.bankCode &&
+        bank?.accountNumber &&
+        bank?.agency &&
+        bank?.document &&
+        bank?.accountHolderName
+      );
     }
 
     if (updateDto.preferredMethod === PaymentMethod.MERCADO_PAGO) {
       const mp = updateDto.mercadoPagoAccount;
-      return !!(mp?.email);
+      return !!mp?.email;
     }
 
     return false;
   }
 
   // Validar conta bancária
-  async validateBankAccount(validateDto: ValidateBankAccountDto): Promise<{ isValid: boolean; errors: string[] }> {
+  async validateBankAccount(
+    validateDto: ValidateBankAccountDto,
+  ): Promise<{ isValid: boolean; errors: string[] }> {
     const errors: string[] = [];
 
     // Validar código do banco (3 dígitos)
@@ -224,7 +254,9 @@ export class FinancialProfileService {
   }
 
   // Validar Mercado Pago
-  async validateMercadoPago(validateDto: ValidateMercadoPagoDto): Promise<{ isValid: boolean; errors: string[] }> {
+  async validateMercadoPago(
+    validateDto: ValidateMercadoPagoDto,
+  ): Promise<{ isValid: boolean; errors: string[] }> {
     const errors: string[] = [];
 
     // Validar formato do email
@@ -245,11 +277,16 @@ export class FinancialProfileService {
   }
 
   // Solicitar saque
-  async requestWithdrawal(userId: string, withdrawalDto: WithdrawalRequestDto): Promise<WithdrawalHistoryDto> {
+  async requestWithdrawal(
+    userId: string,
+    withdrawalDto: WithdrawalRequestDto,
+  ): Promise<WithdrawalHistoryDto> {
     // Verificar perfil financeiro
     const profile = await this.getFinancialProfile(userId);
     if (!profile.canReceivePayments) {
-      throw new BadRequestException('Perfil financeiro incompleto. Configure seus dados primeiro.');
+      throw new BadRequestException(
+        'Perfil financeiro incompleto. Configure seus dados primeiro.',
+      );
     }
 
     // Verificar saldo disponível
@@ -265,11 +302,17 @@ export class FinancialProfileService {
     const availableBalance = parseFloat(wallet.availableBalance);
 
     if (requestedAmount > availableBalance) {
-      throw new BadRequestException(`Saldo insuficiente. Disponível: R$ ${availableBalance.toFixed(2)}`);
+      throw new BadRequestException(
+        `Saldo insuficiente. Disponível: R$ ${availableBalance.toFixed(2)}`,
+      );
     }
 
     // Calcular taxa
-    const fee = this.calculateWithdrawalFee(requestedAmount, withdrawalDto.method, withdrawalDto.urgency);
+    const fee = this.calculateWithdrawalFee(
+      requestedAmount,
+      withdrawalDto.method,
+      withdrawalDto.urgency,
+    );
     const netAmount = requestedAmount - fee;
 
     // Criar solicitação de saque
@@ -297,7 +340,9 @@ export class FinancialProfileService {
       .update(userWallets)
       .set({
         availableBalance: (availableBalance - requestedAmount).toString(),
-        pendingBalance: (parseFloat(wallet.pendingBalance) + requestedAmount).toString(),
+        pendingBalance: (
+          parseFloat(wallet.pendingBalance) + requestedAmount
+        ).toString(),
         updatedAt: new Date(),
       })
       .where(eq(userWallets.userId, userId));
@@ -306,11 +351,15 @@ export class FinancialProfileService {
   }
 
   // Calcular taxa de saque
-  private calculateWithdrawalFee(amount: number, method: PaymentMethod, urgency?: string): number {
+  private calculateWithdrawalFee(
+    amount: number,
+    method: PaymentMethod,
+    urgency?: string,
+  ): number {
     let fee = 0;
 
     if (method === PaymentMethod.BANK_TRANSFER) {
-      fee = urgency === 'urgent' ? 5.00 : 2.00; // Taxa fixa
+      fee = urgency === 'urgent' ? 5.0 : 2.0; // Taxa fixa
     } else if (method === PaymentMethod.MERCADO_PAGO) {
       fee = amount * 0.01; // 1% do valor
     }
@@ -326,11 +375,13 @@ export class FinancialProfileService {
       limit: 50,
     });
 
-    return withdrawals.map(w => this.formatWithdrawalResponse(w));
+    return withdrawals.map((w) => this.formatWithdrawalResponse(w));
   }
 
   // Obter estatísticas financeiras
-  async getPersonalFinancialStats(userId: string): Promise<PersonalFinancialStatsDto> {
+  async getPersonalFinancialStats(
+    userId: string,
+  ): Promise<PersonalFinancialStatsDto> {
     // Buscar carteira
     let wallet = await this.db.query.userWallets.findFirst({
       where: eq(userWallets.userId, userId),
@@ -380,12 +431,14 @@ export class FinancialProfileService {
       if (!profile.bankAccount?.bankCode) missing.push('Código do banco');
       if (!profile.bankAccount?.accountNumber) missing.push('Número da conta');
       if (!profile.bankAccount?.agency) missing.push('Agência');
-      if (!profile.bankAccount?.accountHolderName) missing.push('Nome do titular');
+      if (!profile.bankAccount?.accountHolderName)
+        missing.push('Nome do titular');
       if (!profile.bankAccount?.document) missing.push('CPF/CNPJ');
     }
 
     if (profile.preferredMethod === PaymentMethod.MERCADO_PAGO) {
-      if (!profile.mercadoPagoAccount?.email) missing.push('Email do Mercado Pago');
+      if (!profile.mercadoPagoAccount?.email)
+        missing.push('Email do Mercado Pago');
     }
 
     return missing;
@@ -398,20 +451,24 @@ export class FinancialProfileService {
       userId: profile.userId,
       preferredMethod: profile.preferredMethod,
       isComplete: profile.isComplete,
-      bankAccount: profile.bankCode ? {
-        bankCode: profile.bankCode,
-        bankName: profile.bankName,
-        accountType: profile.accountType,
-        accountNumber: this.maskAccountNumber(profile.accountNumber),
-        agency: this.maskAgency(profile.agency),
-        accountHolderName: profile.accountHolderName,
-        document: this.maskDocument(profile.document),
-      } : undefined,
-      mercadoPagoAccount: profile.mpEmail ? {
-        email: this.maskEmail(profile.mpEmail),
-        userId: profile.mpUserId,
-        isVerified: profile.mpIsVerified,
-      } : undefined,
+      bankAccount: profile.bankCode
+        ? {
+            bankCode: profile.bankCode,
+            bankName: profile.bankName,
+            accountType: profile.accountType,
+            accountNumber: this.maskAccountNumber(profile.accountNumber),
+            agency: this.maskAgency(profile.agency),
+            accountHolderName: profile.accountHolderName,
+            document: this.maskDocument(profile.document),
+          }
+        : undefined,
+      mercadoPagoAccount: profile.mpEmail
+        ? {
+            email: this.maskEmail(profile.mpEmail),
+            userId: profile.mpUserId,
+            isVerified: profile.mpIsVerified,
+          }
+        : undefined,
       canReceivePayments: profile.canReceivePayments,
       lastUpdatedAt: profile.lastUpdatedAt,
       verifiedAt: profile.verifiedAt,

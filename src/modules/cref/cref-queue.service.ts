@@ -23,7 +23,8 @@ export class CrefQueueService {
   private readonly RETRY_DELAY = 5000; // 5 segundos
 
   constructor(
-    @InjectQueue('cref-validation') private crefQueue: Queue<CrefValidationJobData>,
+    @InjectQueue('cref-validation')
+    private crefQueue: Queue<CrefValidationJobData>,
   ) {
     this.setupQueueEventListeners();
   }
@@ -36,7 +37,9 @@ export class CrefQueueService {
     userType: 'personal' | 'student',
     priority: 'high' | 'normal' | 'low' = 'normal',
   ): Promise<Job<CrefValidationJobData>> {
-    this.logger.log(`📋 [QUEUE] Adicionando validação CREF à fila: ${crefNumber}`);
+    this.logger.log(
+      `📋 [QUEUE] Adicionando validação CREF à fila: ${crefNumber}`,
+    );
 
     const job = await this.crefQueue.add(
       'validate-cref',
@@ -58,10 +61,11 @@ export class CrefQueueService {
       },
     );
 
-    this.logger.log(`✅ [QUEUE] Job ${job.id} adicionado à fila para CREF: ${crefNumber}`);
+    this.logger.log(
+      `✅ [QUEUE] Job ${job.id} adicionado à fila para CREF: ${crefNumber}`,
+    );
     return job;
   }
-
 
   /**
    * Configura os event listeners da fila
@@ -69,15 +73,22 @@ export class CrefQueueService {
   private setupQueueEventListeners(): void {
     // Event listeners
     this.crefQueue.on('completed', (job, result) => {
-      this.logger.log(`✅ [QUEUE] Job ${job.id} completado: ${job.data.crefNumber}`);
+      this.logger.log(
+        `✅ [QUEUE] Job ${job.id} completado: ${job.data.crefNumber}`,
+      );
     });
 
     this.crefQueue.on('failed', (job, err) => {
-      this.logger.error(`❌ [QUEUE] Job ${job.id} falhou: ${job.data.crefNumber}`, err.message);
+      this.logger.error(
+        `❌ [QUEUE] Job ${job.id} falhou: ${job.data.crefNumber}`,
+        err.message,
+      );
     });
 
     this.crefQueue.on('stalled', (job) => {
-      this.logger.warn(`⚠️ [QUEUE] Job ${job.id} travado: ${job.data.crefNumber}`);
+      this.logger.warn(
+        `⚠️ [QUEUE] Job ${job.id} travado: ${job.data.crefNumber}`,
+      );
     });
 
     this.crefQueue.on('progress', (job, progress) => {
@@ -130,7 +141,9 @@ export class CrefQueueService {
   /**
    * Obtém jobs por status
    */
-  async getJobsByStatus(status: 'waiting' | 'active' | 'completed' | 'failed'): Promise<Job[]> {
+  async getJobsByStatus(
+    status: 'waiting' | 'active' | 'completed' | 'failed',
+  ): Promise<Job[]> {
     switch (status) {
       case 'waiting':
         return await this.crefQueue.getWaiting();

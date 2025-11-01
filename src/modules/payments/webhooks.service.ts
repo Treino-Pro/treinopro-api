@@ -20,7 +20,7 @@ export class WebhooksService {
     try {
       const signature = headers['x-signature'];
       const requestId = headers['x-request-id'];
-      
+
       if (!signature || !requestId) {
         this.logger.error('❌ [WEBHOOK] Headers de assinatura não encontrados');
         return false;
@@ -28,7 +28,7 @@ export class WebhooksService {
 
       // Verificar se é um webhook válido do Mercado Pago
       const expectedSignature = this.generateSignature(payload, requestId);
-      
+
       if (signature !== expectedSignature) {
         this.logger.error('❌ [WEBHOOK] Assinatura não confere');
         return false;
@@ -44,14 +44,17 @@ export class WebhooksService {
   private generateSignature(payload: any, requestId: string): string {
     const webhookSecret = process.env.MP_WEBHOOK_SECRET || 'default_secret';
     const data = JSON.stringify(payload) + requestId;
-    return crypto.createHmac('sha256', webhookSecret).update(data).digest('hex');
+    return crypto
+      .createHmac('sha256', webhookSecret)
+      .update(data)
+      .digest('hex');
   }
 
   // ===== HANDLERS DE PAGAMENTO =====
 
   async handlePaymentCreated(payment: any): Promise<void> {
     this.logger.log(`🆕 [WEBHOOK] Pagamento criado: ${payment.id}`);
-    
+
     try {
       // Verificar se já existe no banco
       const existingPayment = await db.query.payments.findFirst({
@@ -59,7 +62,9 @@ export class WebhooksService {
       });
 
       if (existingPayment) {
-        this.logger.log(`✅ [WEBHOOK] Pagamento já existe no banco: ${existingPayment.id}`);
+        this.logger.log(
+          `✅ [WEBHOOK] Pagamento já existe no banco: ${existingPayment.id}`,
+        );
         return;
       }
 
@@ -76,7 +81,6 @@ export class WebhooksService {
       });
 
       this.logger.log(`✅ [WEBHOOK] Pagamento criado no banco: ${payment.id}`);
-
     } catch (error) {
       this.logger.error(`❌ [WEBHOOK] Erro ao criar pagamento:`, error);
       throw error;
@@ -85,7 +89,7 @@ export class WebhooksService {
 
   async handlePaymentUpdated(payment: any): Promise<void> {
     this.logger.log(`🔄 [WEBHOOK] Pagamento atualizado: ${payment.id}`);
-    
+
     try {
       // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
@@ -93,12 +97,16 @@ export class WebhooksService {
       });
 
       if (!existingPayment) {
-        this.logger.warn(`⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`);
+        this.logger.warn(
+          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+        );
         return;
       }
 
       // Atualizar status
-      const mappedStatus = this.mapMercadoPagoStatus(payment.status) as PaymentStatus;
+      const mappedStatus = this.mapMercadoPagoStatus(
+        payment.status,
+      ) as PaymentStatus;
       await db
         .update(payments)
         .set({
@@ -107,8 +115,9 @@ export class WebhooksService {
         })
         .where(eq(payments.id, existingPayment.id));
 
-      this.logger.log(`✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${payment.status}`);
-
+      this.logger.log(
+        `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${payment.status}`,
+      );
     } catch (error) {
       this.logger.error(`❌ [WEBHOOK] Erro ao atualizar pagamento:`, error);
       throw error;
@@ -117,7 +126,7 @@ export class WebhooksService {
 
   async handlePaymentApproved(payment: any): Promise<void> {
     this.logger.log(`✅ [WEBHOOK] Pagamento aprovado: ${payment.id}`);
-    
+
     try {
       // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
@@ -125,13 +134,17 @@ export class WebhooksService {
       });
 
       if (!existingPayment) {
-        this.logger.warn(`⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`);
+        this.logger.warn(
+          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+        );
         return;
       }
 
       // ✅ CORRIGIDO: Usar mapeamento correto para disparar repasse
-      const mappedStatus = this.mapMercadoPagoStatus(payment.status) as PaymentStatus;
-      
+      const mappedStatus = this.mapMercadoPagoStatus(
+        payment.status,
+      ) as PaymentStatus;
+
       await db
         .update(payments)
         .set({
@@ -140,22 +153,29 @@ export class WebhooksService {
         })
         .where(eq(payments.id, existingPayment.id));
 
-      this.logger.log(`✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${mappedStatus}`);
+      this.logger.log(
+        `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${mappedStatus}`,
+      );
 
       // Notificar personal trainer se for uma aula
       if (existingPayment.studentId) {
-        await this.notifyPersonalTrainer(existingPayment.studentId, 'payment_approved');
+        await this.notifyPersonalTrainer(
+          existingPayment.studentId,
+          'payment_approved',
+        );
       }
-
     } catch (error) {
-      this.logger.error(`❌ [WEBHOOK] Erro ao processar pagamento aprovado:`, error);
+      this.logger.error(
+        `❌ [WEBHOOK] Erro ao processar pagamento aprovado:`,
+        error,
+      );
       throw error;
     }
   }
 
   async handlePaymentCancelled(payment: any): Promise<void> {
     this.logger.log(`❌ [WEBHOOK] Pagamento cancelado: ${payment.id}`);
-    
+
     try {
       // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
@@ -163,7 +183,9 @@ export class WebhooksService {
       });
 
       if (!existingPayment) {
-        this.logger.warn(`⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`);
+        this.logger.warn(
+          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+        );
         return;
       }
 
@@ -180,18 +202,23 @@ export class WebhooksService {
 
       // Notificar personal trainer se for uma aula
       if (existingPayment.studentId) {
-        await this.notifyPersonalTrainer(existingPayment.studentId, 'payment_cancelled');
+        await this.notifyPersonalTrainer(
+          existingPayment.studentId,
+          'payment_cancelled',
+        );
       }
-
     } catch (error) {
-      this.logger.error(`❌ [WEBHOOK] Erro ao processar pagamento cancelado:`, error);
+      this.logger.error(
+        `❌ [WEBHOOK] Erro ao processar pagamento cancelado:`,
+        error,
+      );
       throw error;
     }
   }
 
   async handlePaymentRefunded(payment: any): Promise<void> {
     this.logger.log(`💰 [WEBHOOK] Pagamento reembolsado: ${payment.id}`);
-    
+
     try {
       // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
@@ -199,7 +226,9 @@ export class WebhooksService {
       });
 
       if (!existingPayment) {
-        this.logger.warn(`⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`);
+        this.logger.warn(
+          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+        );
         return;
       }
 
@@ -216,11 +245,16 @@ export class WebhooksService {
 
       // Notificar personal trainer se for uma aula
       if (existingPayment.studentId) {
-        await this.notifyPersonalTrainer(existingPayment.studentId, 'payment_refunded');
+        await this.notifyPersonalTrainer(
+          existingPayment.studentId,
+          'payment_refunded',
+        );
       }
-
     } catch (error) {
-      this.logger.error(`❌ [WEBHOOK] Erro ao processar pagamento reembolsado:`, error);
+      this.logger.error(
+        `❌ [WEBHOOK] Erro ao processar pagamento reembolsado:`,
+        error,
+      );
       throw error;
     }
   }
@@ -229,24 +263,29 @@ export class WebhooksService {
 
   private mapMercadoPagoStatus(mpStatus: string): string {
     const statusMap: Record<string, string> = {
-      'pending': 'pending',
-      'approved': 'captured', // ✅ CORRIGIDO: approved deve virar captured para disparar repasse
-      'authorized': 'authorized',
-      'in_process': 'pending',
-      'in_mediation': 'pending',
-      'rejected': 'cancelled',
-      'cancelled': 'cancelled',
-      'refunded': 'refunded',
-      'charged_back': 'refunded',
+      pending: 'pending',
+      approved: 'captured', // ✅ CORRIGIDO: approved deve virar captured para disparar repasse
+      authorized: 'authorized',
+      in_process: 'pending',
+      in_mediation: 'pending',
+      rejected: 'cancelled',
+      cancelled: 'cancelled',
+      refunded: 'refunded',
+      charged_back: 'refunded',
     };
 
     return statusMap[mpStatus] || 'pending';
   }
 
-  private async notifyPersonalTrainer(classId: string, eventType: string): Promise<void> {
+  private async notifyPersonalTrainer(
+    classId: string,
+    eventType: string,
+  ): Promise<void> {
     try {
-      this.logger.log(`📢 [WEBHOOK] Notificando personal trainer: ${eventType}`);
-      
+      this.logger.log(
+        `📢 [WEBHOOK] Notificando personal trainer: ${eventType}`,
+      );
+
       // Buscar aula
       const classData = await db.query.classes.findFirst({
         where: eq(classes.id, classId),
@@ -262,20 +301,27 @@ export class WebhooksService {
       // - Push notifications
       // - Email
       // - SMS
-      
-      this.logger.log(`✅ [WEBHOOK] Personal trainer notificado: ${classData.personalId}`);
 
+      this.logger.log(
+        `✅ [WEBHOOK] Personal trainer notificado: ${classData.personalId}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ [WEBHOOK] Erro ao notificar personal trainer:`, error);
+      this.logger.error(
+        `❌ [WEBHOOK] Erro ao notificar personal trainer:`,
+        error,
+      );
       // Não falhar o webhook por erro de notificação
     }
   }
 
   // ===== RETRY MECHANISM =====
 
-  async retryFailedWebhook(webhookId: string, maxRetries: number = 3): Promise<void> {
+  async retryFailedWebhook(
+    webhookId: string,
+    maxRetries: number = 3,
+  ): Promise<void> {
     this.logger.log(`🔄 [WEBHOOK] Tentando reprocessar webhook: ${webhookId}`);
-    
+
     // Implementar lógica de retry
     // - Buscar webhook falhado
     // - Reprocessar com backoff exponencial

@@ -19,7 +19,8 @@ describe('CrefService', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) => {
-              if (key === 'CREF_API_URL') return 'https://api.confef.org.br/validate';
+              if (key === 'CREF_API_URL')
+                return 'https://api.confef.org.br/validate';
               if (key === 'CREF_API_TOKEN') return 'mock-token';
               return null;
             }),
@@ -95,7 +96,7 @@ describe('CrefService', () => {
     expect(result).toEqual({
       uf: 'SP',
       numero: '106227',
-      full: 'SP-106227'
+      full: 'SP-106227',
     });
   });
 
@@ -104,7 +105,7 @@ describe('CrefService', () => {
     expect(result).toEqual({
       uf: 'RJ',
       numero: '123456',
-      full: 'RJ-123456'
+      full: 'RJ-123456',
     });
   });
 
@@ -117,7 +118,10 @@ describe('CrefService', () => {
     } as Response);
     const token = await service['getToken']();
     expect(token).toBe('new-test-token');
-    expect(mockedFetch).toHaveBeenCalledWith(service['TOKEN_URL'], expect.any(Object));
+    expect(mockedFetch).toHaveBeenCalledWith(
+      service['TOKEN_URL'],
+      expect.any(Object),
+    );
     // Subsequent call should use cache
     await service['getToken']();
     expect(mockedFetch).toHaveBeenCalledTimes(1);
@@ -129,28 +133,30 @@ describe('CrefService', () => {
       status: 200,
       json: async () => ({ someOtherKey: 'value' }),
     } as Response);
-    await expect(service['getToken']()).rejects.toThrow('Falha ao obter token de acesso');
+    await expect(service['getToken']()).rejects.toThrow(
+      'Falha ao obter token de acesso',
+    );
   });
 
   // Test fetchFromConfef
   it('should fetch data from CONFEF API and return matching CREF', async () => {
     const mockConfefResponse = {
       data: [
-        { 
-          registro: 'SP-123456', 
-          nome: 'João Silva', 
-          categoria: 'BACHAREL', 
+        {
+          registro: 'SP-123456',
+          nome: 'João Silva',
+          categoria: 'BACHAREL',
           uf: 'SP',
           naturezaTitulo: 'LICENCIADO/BACHAREL',
-          NUM_REGISTRO: 'SP-123456'
+          NUM_REGISTRO: 'SP-123456',
         },
-        { 
-          registro: 'RJ-987654', 
-          nome: 'Maria Souza', 
-          categoria: 'LICENCIADO', 
+        {
+          registro: 'RJ-987654',
+          nome: 'Maria Souza',
+          categoria: 'LICENCIADO',
           uf: 'RJ',
           naturezaTitulo: 'LICENCIADO',
-          NUM_REGISTRO: 'RJ-987654'
+          NUM_REGISTRO: 'RJ-987654',
         },
       ],
     };
@@ -173,13 +179,21 @@ describe('CrefService', () => {
       cref: 'SP-123456',
       naturezaTitulo: 'LICENCIADO/BACHAREL',
     });
-    expect(mockedFetch).toHaveBeenCalledWith(expect.stringContaining(service['API_URL']), expect.any(Object));
+    expect(mockedFetch).toHaveBeenCalledWith(
+      expect.stringContaining(service['API_URL']),
+      expect.any(Object),
+    );
   });
 
   it('should return null if CREF not found in CONFEF API', async () => {
     const mockConfefResponse = {
       data: [
-        { registro: 'RJ-987654', nome: 'Maria Souza', categoria: 'LICENCIADO', uf: 'RJ' },
+        {
+          registro: 'RJ-987654',
+          nome: 'Maria Souza',
+          categoria: 'LICENCIADO',
+          uf: 'RJ',
+        },
       ],
     };
     mockedFetch.mockResolvedValueOnce({
@@ -205,7 +219,9 @@ describe('CrefService', () => {
     } as Response); // For getToken
     mockedFetch.mockRejectedValueOnce(new Error('Network error')); // For fetchFromConfef
 
-    await expect(service['fetchFromConfef']('SP-123456')).rejects.toThrow('Falha na consulta ao CONFEF');
+    await expect(service['fetchFromConfef']('SP-123456')).rejects.toThrow(
+      'Falha na consulta ao CONFEF',
+    );
   });
 
   // Test validateCref (main method)
@@ -218,15 +234,17 @@ describe('CrefService', () => {
     mockedFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ 
-        data: [{ 
-          registro: 'SP-123456', 
-          nome: 'João Silva', 
-          categoria: 'BACHAREL', 
-          uf: 'SP',
-          naturezaTitulo: 'LICENCIADO/BACHAREL',
-          NUM_REGISTRO: 'SP-123456'
-        }] 
+      json: async () => ({
+        data: [
+          {
+            registro: 'SP-123456',
+            nome: 'João Silva',
+            categoria: 'BACHAREL',
+            uf: 'SP',
+            naturezaTitulo: 'LICENCIADO/BACHAREL',
+            NUM_REGISTRO: 'SP-123456',
+          },
+        ],
       }),
     } as Response);
 
@@ -237,8 +255,12 @@ describe('CrefService', () => {
   });
 
   it('should throw BadRequestException for invalid CREF format', async () => {
-    await expect(service.validateCref('INVALID-CREF')).rejects.toThrow(BadRequestException);
-    await expect(service.validateCref('INVALID-CREF')).rejects.toThrow('Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)');
+    await expect(service.validateCref('INVALID-CREF')).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.validateCref('INVALID-CREF')).rejects.toThrow(
+      'Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)',
+    );
   });
 
   it('should throw BadRequestException if CREF not found in CONFEF', async () => {
@@ -273,15 +295,17 @@ describe('CrefService', () => {
     mockedFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ 
-        data: [{ 
-          registro: 'SP-123456', 
-          nome: 'João Silva', 
-          categoria: 'LICENCIADO', 
-          uf: 'SP',
-          naturezaTitulo: 'LICENCIADO',
-          NUM_REGISTRO: 'SP-123456'
-        }] 
+      json: async () => ({
+        data: [
+          {
+            registro: 'SP-123456',
+            nome: 'João Silva',
+            categoria: 'LICENCIADO',
+            uf: 'SP',
+            naturezaTitulo: 'LICENCIADO',
+            NUM_REGISTRO: 'SP-123456',
+          },
+        ],
       }),
     } as Response);
 
@@ -302,7 +326,11 @@ describe('CrefService', () => {
     } as Response);
     mockedFetch.mockRejectedValueOnce(new Error('API is down'));
 
-    await expect(service.validateCref('SP-123456')).rejects.toThrow(BadRequestException);
-    await expect(service.validateCref('SP-123456')).rejects.toThrow('Erro na validação do CREF: Falha na consulta ao CONFEF');
+    await expect(service.validateCref('SP-123456')).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.validateCref('SP-123456')).rejects.toThrow(
+      'Erro na validação do CREF: Falha na consulta ao CONFEF',
+    );
   });
 });

@@ -2,41 +2,41 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUUID, IsDateString } from 'class-validator';
 
 export class CreateHealthQuestionnaireDto {
-  @ApiPropertyOptional({ 
-    example: 'Hipertensão', 
-    description: 'Condição médica preexistente' 
+  @ApiPropertyOptional({
+    example: 'Hipertensão',
+    description: 'Condição médica preexistente',
   })
   @IsOptional()
   @IsString()
   medicalCondition?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Sim, regularmente', 
-    description: 'Medicamentos regulares' 
+  @ApiPropertyOptional({
+    example: 'Sim, regularmente',
+    description: 'Medicamentos regulares',
   })
   @IsOptional()
   @IsString()
   regularMedication?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Lesão no joelho', 
-    description: 'Lesões ou dores crônicas' 
+  @ApiPropertyOptional({
+    example: 'Lesão no joelho',
+    description: 'Lesões ou dores crônicas',
   })
   @IsOptional()
   @IsString()
   chronicInjury?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Perda de peso', 
-    description: 'Objetivo principal do treino' 
+  @ApiPropertyOptional({
+    example: 'Perda de peso',
+    description: 'Objetivo principal do treino',
   })
   @IsOptional()
   @IsString()
   trainingGoal?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Vegetariano', 
-    description: 'Restrições alimentares ou alergias' 
+  @ApiPropertyOptional({
+    example: 'Vegetariano',
+    description: 'Restrições alimentares ou alergias',
   })
   @IsOptional()
   @IsString()
@@ -44,41 +44,41 @@ export class CreateHealthQuestionnaireDto {
 }
 
 export class UpdateHealthQuestionnaireDto {
-  @ApiPropertyOptional({ 
-    example: 'Hipertensão', 
-    description: 'Condição médica preexistente' 
+  @ApiPropertyOptional({
+    example: 'Hipertensão',
+    description: 'Condição médica preexistente',
   })
   @IsOptional()
   @IsString()
   medicalCondition?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Sim, regularmente', 
-    description: 'Medicamentos regulares' 
+  @ApiPropertyOptional({
+    example: 'Sim, regularmente',
+    description: 'Medicamentos regulares',
   })
   @IsOptional()
   @IsString()
   regularMedication?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Lesão no joelho', 
-    description: 'Lesões ou dores crônicas' 
+  @ApiPropertyOptional({
+    example: 'Lesão no joelho',
+    description: 'Lesões ou dores crônicas',
   })
   @IsOptional()
   @IsString()
   chronicInjury?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Perda de peso', 
-    description: 'Objetivo principal do treino' 
+  @ApiPropertyOptional({
+    example: 'Perda de peso',
+    description: 'Objetivo principal do treino',
   })
   @IsOptional()
   @IsString()
   trainingGoal?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Vegetariano', 
-    description: 'Restrições alimentares ou alergias' 
+  @ApiPropertyOptional({
+    example: 'Vegetariano',
+    description: 'Restrições alimentares ou alergias',
   })
   @IsOptional()
   @IsString()
@@ -92,65 +92,65 @@ export class HealthQuestionnaireResponseDto {
   @ApiProperty({ example: 'uuid', description: 'ID do usuário' })
   userId: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Hipertensão', 
-    description: 'Condição médica preexistente' 
+  @ApiPropertyOptional({
+    example: 'Hipertensão',
+    description: 'Condição médica preexistente',
   })
   medicalCondition?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Sim, regularmente', 
-    description: 'Medicamentos regulares' 
+  @ApiPropertyOptional({
+    example: 'Sim, regularmente',
+    description: 'Medicamentos regulares',
   })
   regularMedication?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Lesão no joelho', 
-    description: 'Lesões ou dores crônicas' 
+  @ApiPropertyOptional({
+    example: 'Lesão no joelho',
+    description: 'Lesões ou dores crônicas',
   })
   chronicInjury?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Perda de peso', 
-    description: 'Objetivo principal do treino' 
+  @ApiPropertyOptional({
+    example: 'Perda de peso',
+    description: 'Objetivo principal do treino',
   })
   trainingGoal?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'Vegetariano', 
-    description: 'Restrições alimentares ou alergias' 
+  @ApiPropertyOptional({
+    example: 'Vegetariano',
+    description: 'Restrições alimentares ou alergias',
   })
   dietaryRestrictions?: string;
 
-  @ApiPropertyOptional({ 
-    example: '2024-01-15T10:30:00Z', 
-    description: 'Data de conclusão do questionário' 
+  @ApiPropertyOptional({
+    example: '2024-01-15T10:30:00Z',
+    description: 'Data de conclusão do questionário',
   })
   completedAt?: Date;
 
-  @ApiProperty({ 
-    example: '2024-01-15T10:00:00Z', 
-    description: 'Data de criação' 
+  @ApiProperty({
+    example: '2024-01-15T10:00:00Z',
+    description: 'Data de criação',
   })
   createdAt: Date;
 
-  @ApiProperty({ 
-    example: '2024-01-15T10:30:00Z', 
-    description: 'Data de atualização' 
+  @ApiProperty({
+    example: '2024-01-15T10:30:00Z',
+    description: 'Data de atualização',
   })
   updatedAt: Date;
 
-  @ApiProperty({ 
-    example: true, 
-    description: 'Se o questionário foi completado' 
+  @ApiProperty({
+    example: true,
+    description: 'Se o questionário foi completado',
   })
   isCompleted: boolean;
 }
 
 export class HealthQuestionnaireListResponseDto {
-  @ApiProperty({ 
-    type: [HealthQuestionnaireResponseDto], 
-    description: 'Lista de questionários de saúde' 
+  @ApiProperty({
+    type: [HealthQuestionnaireResponseDto],
+    description: 'Lista de questionários de saúde',
   })
   questionnaires: HealthQuestionnaireResponseDto[];
 

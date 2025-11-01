@@ -26,17 +26,19 @@ export class EmailService {
         tls: {
           // Configurações TLS para melhor compatibilidade
           rejectUnauthorized: false,
-          ciphers: 'SSLv3'
+          ciphers: 'SSLv3',
         },
         // Configurações adicionais para Hostinger
         connectionTimeout: 60000, // 60 segundos
-        greetingTimeout: 30000,   // 30 segundos
-        socketTimeout: 60000,     // 60 segundos
+        greetingTimeout: 30000, // 30 segundos
+        socketTimeout: 60000, // 60 segundos
         debug: process.env.NODE_ENV === 'development', // Habilitar debug em desenvolvimento
-        logger: process.env.NODE_ENV === 'development' // Logs detalhados em desenvolvimento
+        logger: process.env.NODE_ENV === 'development', // Logs detalhados em desenvolvimento
       });
       this.logger.log('📧 Servidor SMTP próprio configurado');
-      this.logger.log(`🔧 Host: ${process.env.EMAIL_HOST}:${process.env.EMAIL_PORT}`);
+      this.logger.log(
+        `🔧 Host: ${process.env.EMAIL_HOST}:${process.env.EMAIL_PORT}`,
+      );
       this.logger.log(`👤 User: ${process.env.EMAIL_USER}`);
     } else {
       // Desenvolvimento - usar Ethereal Email para testes
@@ -46,9 +48,12 @@ export class EmailService {
 
   private async setupAlternativeSMTP(): Promise<boolean> {
     // Tentar configuração alternativa para Hostinger (porta 587)
-    if (process.env.EMAIL_HOST === 'smtp.hostinger.com' && process.env.EMAIL_PORT === '465') {
+    if (
+      process.env.EMAIL_HOST === 'smtp.hostinger.com' &&
+      process.env.EMAIL_PORT === '465'
+    ) {
       this.logger.warn('🔄 Tentando configuração alternativa (porta 587)...');
-      
+
       try {
         this.transporter = nodemailer.createTransport({
           host: process.env.EMAIL_HOST,
@@ -60,22 +65,25 @@ export class EmailService {
           },
           tls: {
             rejectUnauthorized: false,
-            ciphers: 'SSLv3'
+            ciphers: 'SSLv3',
           },
           connectionTimeout: 60000,
           greetingTimeout: 30000,
           socketTimeout: 60000,
         });
-        
+
         await this.transporter.verify();
         this.logger.log('✅ Configuração alternativa funcionou!');
         return true;
       } catch (error) {
-        this.logger.error('❌ Configuração alternativa também falhou:', error.message);
+        this.logger.error(
+          '❌ Configuração alternativa também falhou:',
+          error.message,
+        );
         return false;
       }
     }
-    
+
     return false;
   }
 
@@ -97,32 +105,33 @@ export class EmailService {
       this.logger.log('📧 Ethereal Email configurado para desenvolvimento');
       this.logger.log(`👤 Usuário: ${testAccount.user}`);
       this.logger.log(`🔑 Senha: ${testAccount.pass}`);
-
     } catch (error) {
       this.logger.error('❌ Erro ao configurar Ethereal Email:', error);
-      
+
       // Fallback para transporter fake
       this.transporter = {
         sendMail: async (options) => {
-          this.logger.log(`📧 [FAKE] Email enviado para ${options.to}: ${options.subject}`);
+          this.logger.log(
+            `📧 [FAKE] Email enviado para ${options.to}: ${options.subject}`,
+          );
           return { messageId: 'fake-message-id' };
-        }
+        },
       } as any;
     }
   }
 
   private async verifyConnection(): Promise<void> {
     if (!this.transporter) return;
-    
+
     try {
       await this.transporter.verify();
       this.logger.log('✅ Conexão SMTP verificada com sucesso');
     } catch (error) {
       this.logger.error('❌ Falha na verificação da conexão SMTP:', error);
-      
+
       // Tentar configuração alternativa primeiro
       const alternativeWorked = await this.setupAlternativeSMTP();
-      
+
       if (!alternativeWorked && process.env.NODE_ENV === 'development') {
         this.logger.warn('🔄 Tentando usar Ethereal Email como fallback...');
         await this.setupEtherealTransporter();
@@ -130,13 +139,17 @@ export class EmailService {
     }
   }
 
-  async sendTemplateEmail(to: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendTemplateEmail(
+    to: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     this.logger.log(`📧 [EMAIL] Iniciando envio de email`);
     this.logger.log(`📧 [EMAIL] Para: ${to}`);
     this.logger.log(`📧 [EMAIL] Template: ${template}`);
-    
+
     const emailContent = this.getEmailTemplate(template, data);
-    
+
     const mailOptions = {
       from: `"TreinoPro" <${process.env.EMAIL_USER}>`,
       to: to,
@@ -151,7 +164,7 @@ export class EmailService {
     try {
       this.logger.log(`📧 [EMAIL] Enviando email...`);
       const result = await this.transporter.sendMail(mailOptions);
-      
+
       // Log da URL de preview para desenvolvimento
       if (process.env.NODE_ENV !== 'production' && result.messageId) {
         const previewUrl = nodemailer.getTestMessageUrl(result);
@@ -160,48 +173,66 @@ export class EmailService {
         }
       }
 
-      this.logger.log(`📧 [EMAIL] Email enviado! Message ID: ${result.messageId}`);
-      this.logger.log(`✅ [EMAIL] Email enviado com sucesso para ${to} (${template})`);
-
+      this.logger.log(
+        `📧 [EMAIL] Email enviado! Message ID: ${result.messageId}`,
+      );
+      this.logger.log(
+        `✅ [EMAIL] Email enviado com sucesso para ${to} (${template})`,
+      );
     } catch (error) {
       this.logger.error(`❌ Erro ao enviar email para ${to}:`, error);
-      
+
       // Se for erro de autenticação, tentar configuração alternativa primeiro
       if (error.code === 'EAUTH') {
-        this.logger.warn('🔄 Erro de autenticação detectado, tentando configuração alternativa...');
-        
+        this.logger.warn(
+          '🔄 Erro de autenticação detectado, tentando configuração alternativa...',
+        );
+
         // Tentar configuração alternativa
         const alternativeWorked = await this.setupAlternativeSMTP();
-        
+
         if (alternativeWorked) {
           try {
             const result = await this.transporter.sendMail(mailOptions);
-            this.logger.log(`✅ Email enviado via configuração alternativa para ${to} (${template})`);
+            this.logger.log(
+              `✅ Email enviado via configuração alternativa para ${to} (${template})`,
+            );
             return;
           } catch (altError) {
-            this.logger.error('❌ Configuração alternativa falhou:', altError.message);
+            this.logger.error(
+              '❌ Configuração alternativa falhou:',
+              altError.message,
+            );
           }
         }
-        
+
         // Se ainda estiver em desenvolvimento, tentar Ethereal
         if (process.env.NODE_ENV === 'development') {
           this.logger.warn('🔄 Tentando Ethereal Email como último recurso...');
           try {
             await this.setupEtherealTransporter();
             const result = await this.transporter.sendMail(mailOptions);
-            this.logger.log(`✅ Email enviado via Ethereal para ${to} (${template})`);
+            this.logger.log(
+              `✅ Email enviado via Ethereal para ${to} (${template})`,
+            );
             return;
           } catch (fallbackError) {
-            this.logger.error('❌ Fallback Ethereal também falhou:', fallbackError);
+            this.logger.error(
+              '❌ Fallback Ethereal também falhou:',
+              fallbackError,
+            );
           }
         }
       }
-      
+
       throw error;
     }
   }
 
-  private getEmailTemplate(template: string, data: Record<string, any>): { subject: string; html: string; text: string } {
+  private getEmailTemplate(
+    template: string,
+    data: Record<string, any>,
+  ): { subject: string; html: string; text: string } {
     switch (template) {
       case 'proposal-match':
         return {
@@ -304,7 +335,7 @@ export class EmailService {
               </div>
             </div>
           `,
-          text: `TreinoPro - Código de Verificação\n\nOlá, ${data.firstName}!\n\nUse o código abaixo para verificar seu email:\n\n${data.code}\n\nEste código expira em: ${data.expiresAt}\n\nSe você não solicitou este código, pode ignorar este email.\n\n© 2024 TreinoPro`
+          text: `TreinoPro - Código de Verificação\n\nOlá, ${data.firstName}!\n\nUse o código abaixo para verificar seu email:\n\n${data.code}\n\nEste código expira em: ${data.expiresAt}\n\nSe você não solicitou este código, pode ignorar este email.\n\n© 2024 TreinoPro`,
         };
 
       case 'profile-reminder':
@@ -407,7 +438,7 @@ export class EmailService {
   private getPaymentReminderHTML(data: any, type: 'first' | 'final'): string {
     const urgency = type === 'final' ? '🚨 URGENTE' : '⏰';
     const timeLeft = type === 'final' ? '5 minutos' : '20 minutos';
-    
+
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: ${type === 'final' ? '#f44336' : '#ff9800'};">${urgency} Finalize seu Pagamento</h2>
@@ -469,11 +500,15 @@ export class EmailService {
           <p><strong>Motivo:</strong> ${data.reason}</p>
         </div>
         
-        ${data.refundInfo ? `
+        ${
+          data.refundInfo
+            ? `
           <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p><strong>💰 Reembolso:</strong> ${data.refundInfo}</p>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <p>Pedimos desculpas pelo inconveniente.</p>
         

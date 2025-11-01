@@ -1,8 +1,18 @@
-import { pgTable, uuid, text, timestamp, integer, pgEnum } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  integer,
+  pgEnum,
+} from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
-export const evaluationTypeEnum = pgEnum('evaluation_type', ['student_to_personal', 'personal_to_student']);
+export const evaluationTypeEnum = pgEnum('evaluation_type', [
+  'student_to_personal',
+  'personal_to_student',
+]);
 
 // Evaluations table
 export const evaluations = pgTable('evaluations', {
@@ -13,7 +23,7 @@ export const evaluations = pgTable('evaluations', {
   rating: integer('rating').notNull(), // 1-5 stars
   comment: text('comment'),
   type: evaluationTypeEnum('type').notNull(),
-  
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

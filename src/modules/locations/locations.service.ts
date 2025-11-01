@@ -1,6 +1,11 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SearchLocationsDto, SearchLocationsResponseDto, LocationDto, UserFavoriteLocationDto } from './dto/locations.dto';
+import {
+  SearchLocationsDto,
+  SearchLocationsResponseDto,
+  LocationDto,
+  UserFavoriteLocationDto,
+} from './dto/locations.dto';
 
 @Injectable()
 export class LocationsService {
@@ -12,28 +17,48 @@ export class LocationsService {
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly configService: ConfigService,
   ) {
-    this.googlePlacesApiKey = this.configService.get<string>('GOOGLE_PLACES_API_KEY');
+    this.googlePlacesApiKey = this.configService.get<string>(
+      'GOOGLE_PLACES_API_KEY',
+    );
   }
 
-  async searchLocations(searchDto: SearchLocationsDto, userId: string): Promise<SearchLocationsResponseDto> {
+  async searchLocations(
+    searchDto: SearchLocationsDto,
+    userId: string,
+  ): Promise<SearchLocationsResponseDto> {
     const { query, userLat, userLng, radius, type, limit } = searchDto;
 
     try {
       // 1. Buscar locais favoritos do usuário primeiro
-      const favoriteLocations = await this.getUserFavoriteLocations(userId, query, limit);
-      
+      const favoriteLocations = await this.getUserFavoriteLocations(
+        userId,
+        query,
+        limit,
+      );
+
       // 2. Buscar na Google Places API
-      const googleLocations = await this.searchGooglePlaces(query, userLat, userLng, radius, type, limit);
-      
+      const googleLocations = await this.searchGooglePlaces(
+        query,
+        userLat,
+        userLng,
+        radius,
+        type,
+        limit,
+      );
+
       // 3. Combinar e ordenar resultados
       const allLocations = [...favoriteLocations, ...googleLocations];
-      
+
       // 4. Remover duplicatas baseado no endereço
       const uniqueLocations = this.removeDuplicateLocations(allLocations);
-      
+
       // 5. Ordenar por relevância (favoritos primeiro, depois por distância)
-      const sortedLocations = this.sortLocationsByRelevance(uniqueLocations, userLat, userLng);
-      
+      const sortedLocations = this.sortLocationsByRelevance(
+        uniqueLocations,
+        userLat,
+        userLng,
+      );
+
       // 6. Limitar resultados
       const limitedLocations = sortedLocations.slice(0, limit);
 
@@ -48,7 +73,11 @@ export class LocationsService {
     }
   }
 
-  private async getUserFavoriteLocations(userId: string, query: string, limit: number): Promise<LocationDto[]> {
+  private async getUserFavoriteLocations(
+    userId: string,
+    query: string,
+    limit: number,
+  ): Promise<LocationDto[]> {
     try {
       // Por enquanto, retornar array vazio para evitar stack overflow
       // TODO: Implementar busca de favoritos quando necessário
@@ -61,12 +90,12 @@ export class LocationsService {
   }
 
   private async searchGooglePlaces(
-    query: string, 
-    userLat?: number, 
-    userLng?: number, 
-    radius?: number, 
-    type?: string, 
-    limit?: number
+    query: string,
+    userLat?: number,
+    userLng?: number,
+    radius?: number,
+    type?: string,
+    limit?: number,
   ): Promise<LocationDto[]> {
     if (!this.googlePlacesApiKey) {
       this.logger.warn('Google Places API key não configurada');
@@ -88,10 +117,10 @@ export class LocationsService {
           circle: {
             center: {
               latitude: userLat,
-              longitude: userLng
+              longitude: userLng,
             },
-            radius: radius || 10000
-          }
+            radius: radius || 10000,
+          },
         };
       }
 
@@ -101,15 +130,19 @@ export class LocationsService {
       }
 
       // Fazer requisição para Google Places API (Nova) usando fetch
-      const response = await fetch(`${this.googlePlacesBaseUrl}/places:searchText`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': this.googlePlacesApiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location'
+      const response = await fetch(
+        `${this.googlePlacesBaseUrl}/places:searchText`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': this.googlePlacesApiKey,
+            'X-Goog-FieldMask':
+              'places.id,places.displayName,places.formattedAddress,places.location',
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody)
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -146,9 +179,14 @@ export class LocationsService {
     }
   }
 
-  private getMockLocations(query: string, userLat?: number, userLng?: number, limit?: number): LocationDto[] {
+  private getMockLocations(
+    query: string,
+    userLat?: number,
+    userLng?: number,
+    limit?: number,
+  ): LocationDto[] {
     this.logger.log('Retornando dados mockados para query:', query);
-    
+
     const mockLocations: LocationDto[] = [
       {
         id: 'smartfit_01',
@@ -236,9 +274,10 @@ export class LocationsService {
     if (query && query.trim()) {
       const lowerQuery = query.toLowerCase();
       return mockLocations
-        .filter(location => 
-          location.name.toLowerCase().includes(lowerQuery) ||
-          location.address.toLowerCase().includes(lowerQuery)
+        .filter(
+          (location) =>
+            location.name.toLowerCase().includes(lowerQuery) ||
+            location.address.toLowerCase().includes(lowerQuery),
         )
         .slice(0, limit || 10);
     }
@@ -258,12 +297,15 @@ export class LocationsService {
         },
         type: 'gym',
         rating: place.rating || 0,
-        openingHours: place.regularOpeningHours?.weekdayDescriptions?.join(', ') || null,
+        openingHours:
+          place.regularOpeningHours?.weekdayDescriptions?.join(', ') || null,
         phone: place.nationalPhoneNumber || null,
         website: place.websiteUri || null,
-        photos: place.photos?.map((photo: any) => 
-          `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=400&key=${this.googlePlacesApiKey}`
-        ) || [],
+        photos:
+          place.photos?.map(
+            (photo: any) =>
+              `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=400&key=${this.googlePlacesApiKey}`,
+          ) || [],
         usageCount: 0,
       };
 
@@ -276,7 +318,8 @@ export class LocationsService {
 
   private determineLocationType(types: string[]): string {
     if (types.includes('gym') || types.includes('health')) return 'gym';
-    if (types.includes('park') || types.includes('recreation_area')) return 'park';
+    if (types.includes('park') || types.includes('recreation_area'))
+      return 'park';
     if (types.includes('home') || types.includes('residential')) return 'home';
     return 'other';
   }
@@ -288,7 +331,7 @@ export class LocationsService {
 
   private removeDuplicateLocations(locations: LocationDto[]): LocationDto[] {
     const seen = new Set<string>();
-    return locations.filter(location => {
+    return locations.filter((location) => {
       const key = `${location.name}-${location.address}`.toLowerCase();
       if (seen.has(key)) {
         return false;
@@ -298,7 +341,11 @@ export class LocationsService {
     });
   }
 
-  private sortLocationsByRelevance(locations: LocationDto[], userLat?: number, userLng?: number): LocationDto[] {
+  private sortLocationsByRelevance(
+    locations: LocationDto[],
+    userLat?: number,
+    userLng?: number,
+  ): LocationDto[] {
     return locations.sort((a, b) => {
       // 1. Favoritos primeiro (baseado no usageCount)
       if (a.usageCount && !b.usageCount) return -1;
@@ -307,8 +354,18 @@ export class LocationsService {
 
       // 2. Por distância se coordenadas do usuário disponíveis
       if (userLat && userLng) {
-        const distanceA = this.calculateDistance(userLat, userLng, a.coordinates.lat, a.coordinates.lng);
-        const distanceB = this.calculateDistance(userLat, userLng, b.coordinates.lat, b.coordinates.lng);
+        const distanceA = this.calculateDistance(
+          userLat,
+          userLng,
+          a.coordinates.lat,
+          a.coordinates.lng,
+        );
+        const distanceB = this.calculateDistance(
+          userLat,
+          userLng,
+          b.coordinates.lat,
+          b.coordinates.lng,
+        );
         return distanceA - distanceB;
       }
 
@@ -319,17 +376,22 @@ export class LocationsService {
     });
   }
 
-  private calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  private calculateDistance(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
     const R = 6371e3; // Raio da Terra em metros
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lng2 - lng1) * Math.PI / 180;
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
 
-    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ/2) * Math.sin(Δλ/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c; // Distância em metros
   }
@@ -354,7 +416,11 @@ export class LocationsService {
     };
   }
 
-  async addToFavorites(userId: string, locationId: string, customName?: string): Promise<void> {
+  async addToFavorites(
+    userId: string,
+    locationId: string,
+    customName?: string,
+  ): Promise<void> {
     try {
       // Verificar se já existe
       const existing = await this.db
@@ -375,16 +441,14 @@ export class LocationsService {
           .where('user_id = ? AND location_id = ?', [userId, locationId]);
       } else {
         // Criar novo favorito
-        await this.db
-          .insert('user_favorite_locations')
-          .values({
-            user_id: userId,
-            location_id: locationId,
-            custom_name: customName,
-            usage_count: 1,
-            last_used_at: new Date(),
-            created_at: new Date(),
-          });
+        await this.db.insert('user_favorite_locations').values({
+          user_id: userId,
+          location_id: locationId,
+          custom_name: customName,
+          usage_count: 1,
+          last_used_at: new Date(),
+          created_at: new Date(),
+        });
       }
     } catch (error) {
       this.logger.error('Erro ao adicionar aos favoritos:', error);
@@ -418,11 +482,15 @@ export class LocationsService {
           },
         })
         .from('user_favorite_locations')
-        .innerJoin('locations', 'user_favorite_locations.location_id', 'locations.id')
+        .innerJoin(
+          'locations',
+          'user_favorite_locations.location_id',
+          'locations.id',
+        )
         .where('user_favorite_locations.user_id = ?', [userId])
         .orderBy('user_favorite_locations.usage_count', 'desc');
 
-      return favorites.map(fav => ({
+      return favorites.map((fav) => ({
         id: fav.id,
         userId: fav.userId,
         locationId: fav.locationId,

@@ -1,4 +1,12 @@
-import { pgTable, uuid, varchar, integer, boolean, timestamp, text } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  integer,
+  boolean,
+  timestamp,
+  text,
+} from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 export const files = pgTable('files', {
@@ -8,7 +16,7 @@ export const files = pgTable('files', {
   mimeType: varchar('mime_type', { length: 100 }).notNull(),
   size: integer('size').notNull(),
   path: varchar('path', { length: 500 }).notNull(), // Caminho físico
-  url: varchar('url', { length: 500 }).notNull(),   // URL pública
+  url: varchar('url', { length: 500 }).notNull(), // URL pública
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   category: varchar('category', { length: 50 }).notNull(), // 'profile', 'document', 'temp'
   isProcessed: boolean('is_processed').default(false).notNull(),

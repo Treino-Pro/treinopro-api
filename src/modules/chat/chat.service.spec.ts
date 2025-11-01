@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { SendMessageDto, GetMessagesDto, MarkAsReadDto } from './dto/chat.dto';
 
@@ -85,21 +89,23 @@ describe('ChatService', () => {
         limit: jest.fn().mockResolvedValue([]),
       });
 
-      await expect(service.sendMessage('user-1', sendMessageDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.sendMessage('user-1', sendMessageDto),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException when user does not have access to class', async () => {
       const otherClass = { ...mockClass, studentId: 'other-user' };
-      
+
       mockDb.select.mockReturnValue({
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([otherClass]),
       });
 
-      await expect(service.sendMessage('user-1', sendMessageDto))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.sendMessage('user-1', sendMessageDto),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('should throw BadRequestException when receiver is not the other participant', async () => {
@@ -111,8 +117,9 @@ describe('ChatService', () => {
 
       const invalidDto = { ...sendMessageDto, receiverId: 'other-user' };
 
-      await expect(service.sendMessage('user-1', invalidDto))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.sendMessage('user-1', invalidDto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw NotFoundException when receiver does not exist', async () => {
@@ -128,8 +135,9 @@ describe('ChatService', () => {
           limit: jest.fn().mockResolvedValue([]),
         });
 
-      await expect(service.sendMessage('user-1', sendMessageDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.sendMessage('user-1', sendMessageDto),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -147,21 +155,23 @@ describe('ChatService', () => {
         limit: jest.fn().mockResolvedValue([]),
       });
 
-      await expect(service.getMessages('user-1', getMessagesDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.getMessages('user-1', getMessagesDto),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException when user does not have access to class', async () => {
       const otherClass = { ...mockClass, studentId: 'other-user' };
-      
+
       mockDb.select.mockReturnValue({
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([otherClass]),
       });
 
-      await expect(service.getMessages('user-1', getMessagesDto))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.getMessages('user-1', getMessagesDto),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -178,8 +188,9 @@ describe('ChatService', () => {
         limit: jest.fn().mockResolvedValue([]),
       });
 
-      await expect(service.markAsRead('personal-1', markAsReadDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.markAsRead('personal-1', markAsReadDto),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -191,13 +202,14 @@ describe('ChatService', () => {
         limit: jest.fn().mockResolvedValue([]),
       });
 
-      await expect(service.markAllAsRead('personal-1', 'class-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.markAllAsRead('personal-1', 'class-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException when user does not have access to class', async () => {
       const otherClass = { ...mockClass, studentId: 'other-user' };
-      
+
       mockDb.select.mockReturnValue({
         from: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -208,11 +220,14 @@ describe('ChatService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockRejectedValue(new ForbiddenException('Acesso negado')),
+        returning: jest
+          .fn()
+          .mockRejectedValue(new ForbiddenException('Acesso negado')),
       });
 
-      await expect(service.markAllAsRead('personal-1', 'class-1'))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.markAllAsRead('personal-1', 'class-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -273,8 +288,9 @@ describe('ChatService', () => {
         throw new Error('Database connection failed');
       });
 
-      await expect(service.getChatStats('user-1'))
-        .rejects.toThrow('Database connection failed');
+      await expect(service.getChatStats('user-1')).rejects.toThrow(
+        'Database connection failed',
+      );
     });
   });
 });

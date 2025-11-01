@@ -1,13 +1,18 @@
-import { Injectable, NotFoundException, ForbiddenException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Inject,
+} from '@nestjs/common';
 import { healthQuestionnaires } from '../../database/schema/health';
 import { users } from '../../database/schema/users';
 import { eq, and, desc } from 'drizzle-orm';
-import { 
-  CreateHealthQuestionnaireDto, 
+import {
+  CreateHealthQuestionnaireDto,
   UpdateHealthQuestionnaireDto,
   HealthQuestionnaireResponseDto,
   HealthQuestionnaireListResponseDto,
-  StudentHealthQuestionnaireDto
+  StudentHealthQuestionnaireDto,
 } from './dto/health-questionnaire.dto';
 
 @Injectable()
@@ -19,10 +24,12 @@ export class HealthQuestionnaireService {
    */
   async createOrUpdateQuestionnaire(
     userId: string,
-    dto: CreateHealthQuestionnaireDto
+    dto: CreateHealthQuestionnaireDto,
   ): Promise<HealthQuestionnaireResponseDto> {
-    console.log(`🏥 [HEALTH] Criando/atualizando questionário para usuário: ${userId}`);
-    
+    console.log(
+      `🏥 [HEALTH] Criando/atualizando questionário para usuário: ${userId}`,
+    );
+
     // Verificar se já existe um questionário
     const existing = await this.db
       .select()
@@ -35,8 +42,10 @@ export class HealthQuestionnaireService {
 
     if (existing.length > 0) {
       // Atualizar questionário existente
-      console.log(`🏥 [HEALTH] Atualizando questionário existente: ${existing[0].id}`);
-      
+      console.log(
+        `🏥 [HEALTH] Atualizando questionário existente: ${existing[0].id}`,
+      );
+
       const [updated] = await this.db
         .update(healthQuestionnaires)
         .set({
@@ -54,8 +63,10 @@ export class HealthQuestionnaireService {
       return this.mapToResponseDto(updated);
     } else {
       // Criar novo questionário
-      console.log(`🏥 [HEALTH] Criando novo questionário para usuário: ${userId}`);
-      
+      console.log(
+        `🏥 [HEALTH] Criando novo questionário para usuário: ${userId}`,
+      );
+
       const [created] = await this.db
         .insert(healthQuestionnaires)
         .values({
@@ -76,9 +87,11 @@ export class HealthQuestionnaireService {
   /**
    * Obter questionário de saúde do usuário
    */
-  async getQuestionnaireByUserId(userId: string): Promise<HealthQuestionnaireResponseDto | null> {
+  async getQuestionnaireByUserId(
+    userId: string,
+  ): Promise<HealthQuestionnaireResponseDto | null> {
     console.log(`🏥 [HEALTH] Buscando questionário para usuário: ${userId}`);
-    
+
     const [questionnaire] = await this.db
       .select()
       .from(healthQuestionnaires)
@@ -86,7 +99,9 @@ export class HealthQuestionnaireService {
       .limit(1);
 
     if (!questionnaire) {
-      console.log(`🏥 [HEALTH] Questionário não encontrado para usuário: ${userId}`);
+      console.log(
+        `🏥 [HEALTH] Questionário não encontrado para usuário: ${userId}`,
+      );
       return null;
     }
 
@@ -107,13 +122,15 @@ export class HealthQuestionnaireService {
   async getStudentQuestionnaires(
     personalTrainerId: string,
     page: number = 1,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<HealthQuestionnaireListResponseDto> {
-    console.log(`🏥 [HEALTH] Listando questionários dos alunos para personal: ${personalTrainerId}`);
-    
+    console.log(
+      `🏥 [HEALTH] Listando questionários dos alunos para personal: ${personalTrainerId}`,
+    );
+
     // Buscar alunos do personal trainer através de propostas ativas
     const offset = (page - 1) * limit;
-    
+
     const questionnaires = await this.db
       .select({
         id: healthQuestionnaires.id,
@@ -136,7 +153,7 @@ export class HealthQuestionnaireService {
           eq(users.userType, 'student'),
           // TODO: Adicionar filtro por personal trainer quando tivermos a relação
           // eq(proposals.personalTrainerId, personalTrainerId)
-        )
+        ),
       )
       .orderBy(desc(healthQuestionnaires.updatedAt))
       .limit(limit)
@@ -149,11 +166,14 @@ export class HealthQuestionnaireService {
       .where(eq(users.userType, 'student'));
 
     return {
-      questionnaires: questionnaires.map(q => ({
-        ...this.mapToResponseDto(q),
-        studentName: `${q.studentName} ${users.lastName}`,
-        studentEmail: q.studentEmail,
-      } as StudentHealthQuestionnaireDto)),
+      questionnaires: questionnaires.map(
+        (q) =>
+          ({
+            ...this.mapToResponseDto(q),
+            studentName: `${q.studentName} ${users.lastName}`,
+            studentEmail: q.studentEmail,
+          }) as StudentHealthQuestionnaireDto,
+      ),
       total: total.length,
       page,
       limit,
@@ -165,13 +185,15 @@ export class HealthQuestionnaireService {
    */
   async getStudentQuestionnaire(
     personalTrainerId: string,
-    studentId: string
+    studentId: string,
   ): Promise<StudentHealthQuestionnaireDto | null> {
-    console.log(`🏥 [HEALTH] Buscando questionário do aluno ${studentId} para personal ${personalTrainerId}`);
-    
+    console.log(
+      `🏥 [HEALTH] Buscando questionário do aluno ${studentId} para personal ${personalTrainerId}`,
+    );
+
     // TODO: Verificar se o personal trainer tem acesso a este aluno
     // através de propostas ativas
-    
+
     const [questionnaire] = await this.db
       .select({
         id: healthQuestionnaires.id,
@@ -192,8 +214,8 @@ export class HealthQuestionnaireService {
       .where(
         and(
           eq(healthQuestionnaires.userId, studentId),
-          eq(users.userType, 'student')
-        )
+          eq(users.userType, 'student'),
+        ),
       )
       .limit(1);
 
@@ -211,17 +233,22 @@ export class HealthQuestionnaireService {
   /**
    * Deletar questionário de saúde
    */
-  async deleteQuestionnaire(userId: string, questionnaireId: string): Promise<void> {
-    console.log(`🏥 [HEALTH] Deletando questionário ${questionnaireId} do usuário ${userId}`);
-    
+  async deleteQuestionnaire(
+    userId: string,
+    questionnaireId: string,
+  ): Promise<void> {
+    console.log(
+      `🏥 [HEALTH] Deletando questionário ${questionnaireId} do usuário ${userId}`,
+    );
+
     const questionnaire = await this.db
       .select()
       .from(healthQuestionnaires)
       .where(
         and(
           eq(healthQuestionnaires.id, questionnaireId),
-          eq(healthQuestionnaires.userId, userId)
-        )
+          eq(healthQuestionnaires.userId, userId),
+        ),
       )
       .limit(1);
 
@@ -233,13 +260,17 @@ export class HealthQuestionnaireService {
       .delete(healthQuestionnaires)
       .where(eq(healthQuestionnaires.id, questionnaireId));
 
-    console.log(`🏥 [HEALTH] Questionário ${questionnaireId} deletado com sucesso`);
+    console.log(
+      `🏥 [HEALTH] Questionário ${questionnaireId} deletado com sucesso`,
+    );
   }
 
   /**
    * Verificar se o questionário está completo
    */
-  private isQuestionnaireDataComplete(dto: CreateHealthQuestionnaireDto): boolean {
+  private isQuestionnaireDataComplete(
+    dto: CreateHealthQuestionnaireDto,
+  ): boolean {
     return !!(
       dto.medicalCondition &&
       dto.regularMedication &&

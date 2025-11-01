@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GamificationService } from './gamification.service';
-import { XPSource, MissionType, AchievementCategory } from '../../database/schema';
+import {
+  XPSource,
+  MissionType,
+  AchievementCategory,
+} from '../../database/schema';
 
 // Mock do banco de dados
 const mockDb = {
@@ -98,17 +102,19 @@ describe('GamificationService', () => {
 
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: 'profile-1',
-            userId,
-            level: 1,
-            totalXP: 0,
-            currentLevelXP: 0,
-            achievements: [],
-            missions: [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: 'profile-1',
+              userId,
+              level: 1,
+              totalXP: 0,
+              currentLevelXP: 0,
+              achievements: [],
+              missions: [],
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]),
         }),
       });
 

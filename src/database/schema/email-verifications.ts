@@ -1,4 +1,12 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, integer } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  timestamp,
+  boolean,
+  integer,
+} from 'drizzle-orm/pg-core';
 
 // Email verifications table
 export const emailVerifications = pgTable('email_verifications', {
@@ -9,7 +17,7 @@ export const emailVerifications = pgTable('email_verifications', {
   expiresAt: timestamp('expires_at').notNull(),
   verifiedAt: timestamp('verified_at'),
   verified: boolean('verified').default(false).notNull(),
-  
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

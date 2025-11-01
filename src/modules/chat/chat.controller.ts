@@ -11,7 +11,14 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
@@ -35,9 +42,9 @@ export class ChatController {
 
   @Post('messages')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Enviar mensagem',
-    description: 'Envia uma nova mensagem em uma conversa de classe'
+    description: 'Envia uma nova mensagem em uma conversa de classe',
   })
   @ApiResponse({
     status: 201,
@@ -60,7 +67,10 @@ export class ChatController {
     @Request() req: any,
     @Body() sendMessageDto: SendMessageDto,
   ): Promise<MessageResponseDto> {
-    const message = await this.chatService.sendMessage(req.user.sub, sendMessageDto);
+    const message = await this.chatService.sendMessage(
+      req.user.sub,
+      sendMessageDto,
+    );
 
     // Emitir evento em tempo real para a sala da classe
     try {
@@ -78,13 +88,23 @@ export class ChatController {
   }
 
   @Get('messages')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Listar mensagens',
-    description: 'Lista mensagens de uma conversa de classe com paginação'
+    description: 'Lista mensagens de uma conversa de classe com paginação',
   })
   @ApiQuery({ name: 'classId', description: 'ID da classe', type: String })
-  @ApiQuery({ name: 'page', description: 'Número da página', required: false, type: Number })
-  @ApiQuery({ name: 'limit', description: 'Mensagens por página', required: false, type: Number })
+  @ApiQuery({
+    name: 'page',
+    description: 'Número da página',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Mensagens por página',
+    required: false,
+    type: Number,
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de mensagens retornada com sucesso',
@@ -119,9 +139,9 @@ export class ChatController {
 
   @Put('messages/:messageId/read')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Marcar mensagem como lida',
-    description: 'Marca uma mensagem específica como lida'
+    description: 'Marca uma mensagem específica como lida',
   })
   @ApiParam({ name: 'messageId', description: 'ID da mensagem' })
   @ApiResponse({
@@ -151,9 +171,9 @@ export class ChatController {
 
   @Put('classes/:classId/read-all')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Marcar todas as mensagens como lidas',
-    description: 'Marca todas as mensagens não lidas de uma classe como lidas'
+    description: 'Marca todas as mensagens não lidas de uma classe como lidas',
   })
   @ApiParam({ name: 'classId', description: 'ID da classe' })
   @ApiResponse({
@@ -175,17 +195,14 @@ export class ChatController {
     status: 404,
     description: 'Classe não encontrada',
   })
-  async markAllAsRead(
-    @Request() req: any,
-    @Param('classId') classId: string,
-  ) {
+  async markAllAsRead(@Request() req: any, @Param('classId') classId: string) {
     return this.chatService.markAllAsRead(req.user.sub, classId);
   }
 
   @Get('stats')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Estatísticas do chat',
-    description: 'Retorna estatísticas gerais do chat do usuário'
+    description: 'Retorna estatísticas gerais do chat do usuário',
   })
   @ApiResponse({
     status: 200,
@@ -197,9 +214,10 @@ export class ChatController {
   }
 
   @Get('conversations')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Listar conversas',
-    description: 'Lista todas as conversas do usuário com última mensagem e contadores'
+    description:
+      'Lista todas as conversas do usuário com última mensagem e contadores',
   })
   @ApiResponse({
     status: 200,
@@ -237,13 +255,24 @@ export class ChatController {
   }
 
   @Get('classes/:classId/messages')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Mensagens de uma classe específica',
-    description: 'Lista mensagens de uma classe específica (alias para GET /messages)'
+    description:
+      'Lista mensagens de uma classe específica (alias para GET /messages)',
   })
   @ApiParam({ name: 'classId', description: 'ID da classe' })
-  @ApiQuery({ name: 'page', description: 'Número da página', required: false, type: Number })
-  @ApiQuery({ name: 'limit', description: 'Mensagens por página', required: false, type: Number })
+  @ApiQuery({
+    name: 'page',
+    description: 'Número da página',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Mensagens por página',
+    required: false,
+    type: Number,
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de mensagens retornada com sucesso',

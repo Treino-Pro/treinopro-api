@@ -14,29 +14,35 @@ export class MockDatabase {
           return createQueryBuilder(newTableName);
         },
         where: (condition: any) => createQueryBuilder(tableName),
-        leftJoin: (joinTable: any, condition: any) => createQueryBuilder(tableName),
+        leftJoin: (joinTable: any, condition: any) =>
+          createQueryBuilder(tableName),
         orderBy: (order: any) => createQueryBuilder(tableName),
         limit: (count: number) => createQueryBuilder(tableName),
         offset: (offset: number) => createQueryBuilder(tableName),
         then: (callback: any) => {
           console.log(`🔍 [MOCK-DB] Executando select na tabela: ${tableName}`);
-          
+
           // Simular dados baseados na tabela
           let result = [];
           if (tableName === 'users' || tableName.includes('user')) {
             result = this.users.slice(0, 10);
-          } else if (tableName === 'messages' || tableName.includes('message')) {
+          } else if (
+            tableName === 'messages' ||
+            tableName.includes('message')
+          ) {
             result = this.messages.slice(0, 10);
           } else if (tableName === 'classes' || tableName.includes('class')) {
             result = this.classes.slice(0, 10);
           }
-          
-          console.log(`🔍 [MOCK-DB] Retornando ${result.length} registros da tabela ${tableName}`);
+
+          console.log(
+            `🔍 [MOCK-DB] Retornando ${result.length} registros da tabela ${tableName}`,
+          );
           return Promise.resolve(result);
-        }
+        },
       };
     };
-    
+
     return createQueryBuilder();
   };
 
@@ -44,42 +50,54 @@ export class MockDatabase {
     users: {
       findFirst: async (options: any) => {
         const { where } = options;
-        
+
         // Verificar se where é uma função (caso do Drizzle ORM)
         if (typeof where === 'function') {
           const user = this.users.find(where);
           return user || null;
         }
-        
+
         // Verificar se where é um objeto SQL do Drizzle ORM
         if (where && where.queryChunks && Array.isArray(where.queryChunks)) {
           // Procurar por um chunk do tipo Param que contenha o email
           for (const chunk of where.queryChunks) {
-            if (chunk && chunk.constructor && chunk.constructor.name === 'Param') {
+            if (
+              chunk &&
+              chunk.constructor &&
+              chunk.constructor.name === 'Param'
+            ) {
               const email = chunk.value;
               if (email) {
-                const user = this.users.find(user => user.email === email);
+                const user = this.users.find((user) => user.email === email);
                 return user || null;
               }
             }
           }
-          
+
           // Se não encontrou email nos chunks, tentar buscar por outros padrões
           // Para testes, vamos retornar null se não encontrar email específico
           return null;
         }
-        
+
         // Verificar se where tem email (caso direto)
         if (where && where.email) {
-          const user = this.users.find(user => user.email === where.email);
-          console.log('🔍 [MOCK-DB] Usuário encontrado (email):', user ? 'Sim' : 'Não');
+          const user = this.users.find((user) => user.email === where.email);
+          console.log(
+            '🔍 [MOCK-DB] Usuário encontrado (email):',
+            user ? 'Sim' : 'Não',
+          );
           if (user) {
-            console.log('🔍 [MOCK-DB] Dados do usuário encontrado:', { id: user.id, email: user.email });
+            console.log('🔍 [MOCK-DB] Dados do usuário encontrado:', {
+              id: user.id,
+              email: user.email,
+            });
           }
           return user || null;
         }
-        
-        console.log('🔍 [MOCK-DB] Nenhuma condição where compatível encontrada, retornando null');
+
+        console.log(
+          '🔍 [MOCK-DB] Nenhuma condição where compatível encontrada, retornando null',
+        );
         return null;
       },
       findMany: async () => this.users,
@@ -95,7 +113,7 @@ export class MockDatabase {
           ...userData,
           isVerified: false,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         };
         this.users.push(newUser);
         console.log('👤 [MOCK-DB] Usuário adicionado diretamente:', newUser);
@@ -106,7 +124,8 @@ export class MockDatabase {
 
   insert = (table: any) => {
     // Se table é uma string, usar diretamente; se é um objeto, extrair o nome
-    const tableName = typeof table === 'string' ? table : (table?.name || 'unknown');
+    const tableName =
+      typeof table === 'string' ? table : table?.name || 'unknown';
     console.log('👤 [MOCK-DB] Inserindo dados na tabela:', tableName);
     return {
       values: (data: any) => {
@@ -114,12 +133,14 @@ export class MockDatabase {
         return {
           returning: async () => {
             // Ajustar nome da tabela para ID (remover 's' do final para singular)
-            const idTableName = tableName.endsWith('s') ? tableName.slice(0, -1) : tableName;
-            const baseRecord = { 
-              id: `mock-${idTableName}-${this.nextId++}`, 
-              ...data, 
-              createdAt: new Date(), 
-              updatedAt: new Date()
+            const idTableName = tableName.endsWith('s')
+              ? tableName.slice(0, -1)
+              : tableName;
+            const baseRecord = {
+              id: `mock-${idTableName}-${this.nextId++}`,
+              ...data,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             };
 
             // Adicionar campos específicos baseados na tabela
@@ -129,18 +150,18 @@ export class MockDatabase {
               console.log('✅ [MOCK-DB] Usuário criado:', newUser);
               return [newUser];
             } else if (tableName === 'messages') {
-              const newMessage = { 
-                ...baseRecord, 
+              const newMessage = {
+                ...baseRecord,
                 isRead: false,
-                sentAt: new Date()
+                sentAt: new Date(),
               };
               this.messages.push(newMessage);
               console.log('✅ [MOCK-DB] Mensagem criada:', newMessage);
               return [newMessage];
             } else if (tableName === 'classes') {
-              const newClass = { 
+              const newClass = {
                 ...baseRecord,
-                status: 'active'
+                status: 'active',
               };
               this.classes.push(newClass);
               console.log('✅ [MOCK-DB] Classe criada:', newClass);
@@ -163,30 +184,34 @@ export class MockDatabase {
           returning: () => {
             console.log('🔄 [MOCK-DB] Atualizando dados na tabela:', tableName);
             console.log('🔄 [MOCK-DB] Dados para atualização:', data);
-            
+
             // Simular atualização baseada na tabela
             let updatedRecords = [];
-            
+
             if (tableName === 'messages') {
               // Simular atualização de mensagens
-              const messagesToUpdate = this.messages.filter(msg => !msg.isRead);
-              messagesToUpdate.forEach(msg => {
+              const messagesToUpdate = this.messages.filter(
+                (msg) => !msg.isRead,
+              );
+              messagesToUpdate.forEach((msg) => {
                 Object.assign(msg, data, { updatedAt: new Date() });
               });
               updatedRecords = messagesToUpdate;
-              console.log(`🔄 [MOCK-DB] ${updatedRecords.length} mensagens atualizadas`);
+              console.log(
+                `🔄 [MOCK-DB] ${updatedRecords.length} mensagens atualizadas`,
+              );
             } else {
               // Atualização genérica
               const updatedRecord = {
                 id: `mock-${tableName}-${this.nextId}`,
                 ...data,
-                updatedAt: new Date()
+                updatedAt: new Date(),
               };
               updatedRecords = [updatedRecord];
             }
-            
+
             return updatedRecords;
-          }
+          },
         }),
       }),
     };
@@ -201,7 +226,7 @@ export class MockDatabase {
       personalId: 'mock-users-2',
       status: 'active',
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     console.log('🧪 [MOCK-DB] Dados de teste adicionados');

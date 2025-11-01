@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+  Inject,
+} from '@nestjs/common';
 import { proposals } from '../../database/schema';
 import { isProposalExpired } from './proposals.utils';
 import { eq, and, lt } from 'drizzle-orm';
@@ -7,7 +13,9 @@ import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsService } from './proposals.service';
 
 @Injectable()
-export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy {
+export class ProposalBackgroundService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(ProposalBackgroundService.name);
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
@@ -19,12 +27,16 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   async onModuleInit() {
-    this.logger.log('🚀 [BACKGROUND] Iniciando serviço de verificação contínua de propostas...');
+    this.logger.log(
+      '🚀 [BACKGROUND] Iniciando serviço de verificação contínua de propostas...',
+    );
     this.startBackgroundCleanup();
   }
 
   async onModuleDestroy() {
-    this.logger.log('🛑 [BACKGROUND] Parando serviço de verificação contínua...');
+    this.logger.log(
+      '🛑 [BACKGROUND] Parando serviço de verificação contínua...',
+    );
     this.stopBackgroundCleanup();
   }
 
@@ -39,13 +51,18 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
     }
 
     this.isRunning = true;
-    this.logger.log('🔄 [BACKGROUND] Iniciando verificação contínua (intervalo: 30s)');
+    this.logger.log(
+      '🔄 [BACKGROUND] Iniciando verificação contínua (intervalo: 30s)',
+    );
 
     this.intervalId = setInterval(async () => {
       try {
         await this.cleanupExpiredProposals();
       } catch (error) {
-        this.logger.error('❌ [BACKGROUND] Erro na verificação contínua:', error);
+        this.logger.error(
+          '❌ [BACKGROUND] Erro na verificação contínua:',
+          error,
+        );
       }
     }, 30000); // 30 segundos
   }
@@ -70,7 +87,7 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
   async cleanupExpiredProposals(): Promise<void> {
     try {
       const now = new Date();
-      
+
       // Buscar candidatas (até amanhã), depois combinar data + hora em memória
       const candidates = await this.db
         .select()
@@ -78,24 +95,30 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
         .where(
           and(
             eq(proposals.status, ProposalStatus.PENDING),
-            lt(proposals.trainingDate, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))
-          )
+            lt(
+              proposals.trainingDate,
+              new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+            ),
+          ),
         );
 
       const expiredProposals = candidates.filter((p: any) => {
         const isExpired = isProposalExpired(now, p);
-        
+
         // Log específico para recontratações
         if (p.targetPersonalId && isExpired) {
-          console.log(`⚠️ [BACKGROUND] ATENÇÃO: Proposta de recontratação sendo removida:`, {
-            id: p.id,
-            targetPersonalId: p.targetPersonalId,
-            trainingDate: p.trainingDate,
-            trainingTime: p.trainingTime,
-            now: now.toISOString(),
-          });
+          console.log(
+            `⚠️ [BACKGROUND] ATENÇÃO: Proposta de recontratação sendo removida:`,
+            {
+              id: p.id,
+              targetPersonalId: p.targetPersonalId,
+              trainingDate: p.trainingDate,
+              trainingTime: p.trainingTime,
+              now: now.toISOString(),
+            },
+          );
         }
-        
+
         return isExpired;
       });
 
@@ -103,39 +126,49 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
         return; // Nenhuma proposta expirada
       }
 
-      this.logger.log(`🧹 [BACKGROUND] Encontradas ${expiredProposals.length} propostas expiradas (horário do treino já passou)`);
+      this.logger.log(
+        `🧹 [BACKGROUND] Encontradas ${expiredProposals.length} propostas expiradas (horário do treino já passou)`,
+      );
 
       // Processar propostas expiradas (reembolso + deleção)
       for (const proposal of expiredProposals) {
-        this.logger.log(`🔄 [BACKGROUND] Processando proposta expirada: ${proposal.id}`);
-        
+        this.logger.log(
+          `🔄 [BACKGROUND] Processando proposta expirada: ${proposal.id}`,
+        );
+
         // Processar reembolso se houver pagamento
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
           try {
             await this.proposalsService.processAutomaticRefund(
-              proposal.id, 
-              proposal.paymentId, 
-              'Proposta expirada - reembolso automático'
+              proposal.id,
+              proposal.paymentId,
+              'Proposta expirada - reembolso automático',
             );
-            this.logger.log(`💰 [BACKGROUND] Reembolso processado para proposta ${proposal.id}`);
+            this.logger.log(
+              `💰 [BACKGROUND] Reembolso processado para proposta ${proposal.id}`,
+            );
           } catch (error) {
-            this.logger.error(`❌ [BACKGROUND] Erro ao processar reembolso da proposta ${proposal.id}:`, error);
+            this.logger.error(
+              `❌ [BACKGROUND] Erro ao processar reembolso da proposta ${proposal.id}:`,
+              error,
+            );
           }
         }
 
         // Deletar proposta após processar reembolso
-        await this.db
-          .delete(proposals)
-          .where(eq(proposals.id, proposal.id));
+        await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
 
-        this.logger.log(`🗑️ [BACKGROUND] Proposta ${proposal.id} deletada (horário do treino expirado)`);
+        this.logger.log(
+          `🗑️ [BACKGROUND] Proposta ${proposal.id} deletada (horário do treino expirado)`,
+        );
 
         // Notificar via WebSocket de forma assíncrona
         this.notifyProposalExpired(proposal);
       }
 
-      this.logger.log(`✅ [BACKGROUND] Limpeza concluída: ${expiredProposals.length} propostas removidas`);
-
+      this.logger.log(
+        `✅ [BACKGROUND] Limpeza concluída: ${expiredProposals.length} propostas removidas`,
+      );
     } catch (error) {
       this.logger.error('❌ [BACKGROUND] Erro na limpeza de propostas:', error);
     }
@@ -166,21 +199,33 @@ export class ProposalBackgroundService implements OnModuleInit, OnModuleDestroy 
         timestamp: new Date(),
       };
 
-      this.logger.log(`📡 [BACKGROUND] Emitindo evento proposal_expired para proposta ${proposal.id}`);
-      this.logger.log(`📡 [BACKGROUND] Dados do evento:`, JSON.stringify(eventData, null, 2));
-      
+      this.logger.log(
+        `📡 [BACKGROUND] Emitindo evento proposal_expired para proposta ${proposal.id}`,
+      );
+      this.logger.log(
+        `📡 [BACKGROUND] Dados do evento:`,
+        JSON.stringify(eventData, null, 2),
+      );
+
       // Verificar se o servidor WebSocket está disponível
       if (!this.chatGateway.server) {
-        this.logger.error('❌ [BACKGROUND] Servidor WebSocket não está disponível');
+        this.logger.error(
+          '❌ [BACKGROUND] Servidor WebSocket não está disponível',
+        );
         return;
       }
 
       // Emitir evento para todos os usuários conectados
       this.chatGateway.server.emit('proposal_expired', eventData);
 
-      this.logger.log(`✅ [BACKGROUND] Notificação de expiração enviada para proposta ${proposal.id}`);
+      this.logger.log(
+        `✅ [BACKGROUND] Notificação de expiração enviada para proposta ${proposal.id}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ [BACKGROUND] Erro ao notificar sobre proposta expirada ${proposal.id}:`, error);
+      this.logger.error(
+        `❌ [BACKGROUND] Erro ao notificar sobre proposta expirada ${proposal.id}:`,
+        error,
+      );
     }
   }
 

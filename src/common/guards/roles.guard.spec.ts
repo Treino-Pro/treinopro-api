@@ -12,7 +12,9 @@ describe('RolesGuard', () => {
       switchToHttp: () => ({ getRequest: () => ({ user: {} }) }),
     };
 
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined as any);
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(undefined as any);
     expect(guard.canActivate(context as any)).toBe(true);
   });
 
@@ -23,10 +25,14 @@ describe('RolesGuard', () => {
     const context: any = {
       getHandler: () => ({}),
       getClass: () => ({}),
-      switchToHttp: () => ({ getRequest: () => ({ user: { userType: 'student' } }) }),
+      switchToHttp: () => ({
+        getRequest: () => ({ user: { userType: 'student' } }),
+      }),
     };
 
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['admin'] as any);
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['admin'] as any);
     expect(() => guard.canActivate(context as any)).toThrow();
   });
 
@@ -37,12 +43,14 @@ describe('RolesGuard', () => {
     const context: any = {
       getHandler: () => ({}),
       getClass: () => ({}),
-      switchToHttp: () => ({ getRequest: () => ({ user: { userType: 'admin' } }) }),
+      switchToHttp: () => ({
+        getRequest: () => ({ user: { userType: 'admin' } }),
+      }),
     };
 
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['admin'] as any);
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue(['admin'] as any);
     expect(guard.canActivate(context as any)).toBe(true);
   });
 });
-
-

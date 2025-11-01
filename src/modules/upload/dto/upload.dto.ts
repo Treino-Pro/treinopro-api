@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  Min,
+  Max,
+} from 'class-validator';
 
 export enum FileCategory {
   PROFILE = 'profile',
@@ -9,27 +16,27 @@ export enum FileCategory {
 }
 
 export class UploadFileDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Categoria do arquivo',
     enum: FileCategory,
-    example: FileCategory.PROFILE
+    example: FileCategory.PROFILE,
   })
   @IsEnum(FileCategory)
   category: FileCategory;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID do usuário (opcional)',
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
   userId?: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Metadados adicionais (JSON string)',
     example: '{"description": "Foto de perfil principal"}',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()

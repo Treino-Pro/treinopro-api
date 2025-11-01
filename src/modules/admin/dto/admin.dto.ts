@@ -1,24 +1,33 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsEnum, IsUUID, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  IsArray,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // ===== DASHBOARD DTOs =====
 
 export class DashboardSummaryResponseDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Total de usuários',
-    example: 150
+    example: 150,
   })
   users: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Estatísticas de propostas',
     example: {
       total: 300,
       pending: 45,
       matched: 180,
       completed: 60,
-      cancelled: 15
-    }
+      cancelled: 15,
+    },
   })
   proposals: {
     total: number;
@@ -28,15 +37,15 @@ export class DashboardSummaryResponseDto {
     cancelled: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Estatísticas de aulas',
     example: {
       total: 450,
       scheduled: 50,
       active: 25,
       completed: 350,
-      cancelled: 25
-    }
+      cancelled: 25,
+    },
   })
   classes: {
     total: number;
@@ -46,7 +55,7 @@ export class DashboardSummaryResponseDto {
     cancelled: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Pagamentos recentes',
     type: 'array',
     items: {
@@ -55,9 +64,9 @@ export class DashboardSummaryResponseDto {
         id: { type: 'string' },
         totalAmount: { type: 'number' },
         status: { type: 'string' },
-        createdAt: { type: 'string' }
-      }
-    }
+        createdAt: { type: 'string' },
+      },
+    },
   })
   latestPayments: Array<{
     id: string;
@@ -79,10 +88,16 @@ export class UserListResponseDto {
   @ApiProperty({ description: 'Nome completo' })
   fullName: string;
 
-  @ApiProperty({ description: 'Tipo de usuário', enum: ['student', 'personal', 'admin'] })
+  @ApiProperty({
+    description: 'Tipo de usuário',
+    enum: ['student', 'personal', 'admin'],
+  })
   userType: string;
 
-  @ApiProperty({ description: 'Status do usuário', enum: ['active', 'inactive', 'suspended'] })
+  @ApiProperty({
+    description: 'Status do usuário',
+    enum: ['active', 'inactive', 'suspended'],
+  })
   status: string;
 
   @ApiProperty({ description: 'Data de criação' })
@@ -96,7 +111,10 @@ export class UserListResponseDto {
 }
 
 export class UpdateUserDto {
-  @ApiPropertyOptional({ description: 'Status do usuário', enum: ['active', 'inactive', 'suspended'] })
+  @ApiPropertyOptional({
+    description: 'Status do usuário',
+    enum: ['active', 'inactive', 'suspended'],
+  })
   @IsOptional()
   @IsEnum(['active', 'inactive', 'suspended'])
   status?: string;
@@ -115,14 +133,14 @@ export class UpdateUserDto {
 // ===== FINANCIAL DTOs =====
 
 export class FinancialSummaryResponseDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Resumo financeiro',
     example: {
       totalPayments: 150,
-      totalAmount: 12500.50,
+      totalAmount: 12500.5,
       platformFees: 1250.05,
-      personalAmounts: 11250.45
-    }
+      personalAmounts: 11250.45,
+    },
   })
   summary: {
     totalPayments: number;
@@ -131,7 +149,7 @@ export class FinancialSummaryResponseDto {
     personalAmounts: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Pagamentos recentes',
     type: 'array',
     items: {
@@ -142,9 +160,9 @@ export class FinancialSummaryResponseDto {
         platformFee: { type: 'number' },
         personalAmount: { type: 'number' },
         status: { type: 'string' },
-        createdAt: { type: 'string' }
-      }
-    }
+        createdAt: { type: 'string' },
+      },
+    },
   })
   latest: Array<{
     id: string;
@@ -209,14 +227,14 @@ export class UpdateMissionDto {
 // ===== ANALYTICS DTOs =====
 
 export class AnalyticsResponseDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Métricas de usuários',
     example: {
       totalUsers: 150,
       newUsersThisMonth: 25,
       activeUsersThisWeek: 80,
-      userRetentionRate: 85.5
-    }
+      userRetentionRate: 85.5,
+    },
   })
   users: {
     totalUsers: number;
@@ -225,14 +243,14 @@ export class AnalyticsResponseDto {
     userRetentionRate: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Métricas de propostas',
     example: {
       totalProposals: 300,
       acceptedProposals: 180,
       pendingProposals: 45,
-      averageResponseTime: 2.5
-    }
+      averageResponseTime: 2.5,
+    },
   })
   proposals: {
     totalProposals: number;
@@ -241,14 +259,14 @@ export class AnalyticsResponseDto {
     averageResponseTime: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Métricas de aulas',
     example: {
       totalClasses: 450,
       completedClasses: 380,
       cancelledClasses: 20,
-      averageClassRating: 4.7
-    }
+      averageClassRating: 4.7,
+    },
   })
   classes: {
     totalClasses: number;
@@ -257,14 +275,14 @@ export class AnalyticsResponseDto {
     averageClassRating: number;
   };
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'Métricas de pagamentos',
     example: {
-      totalRevenue: 12500.50,
+      totalRevenue: 12500.5,
       monthlyRevenue: 3200.75,
-      averageTransactionValue: 85.50,
-      paymentSuccessRate: 98.5
-    }
+      averageTransactionValue: 85.5,
+      paymentSuccessRate: 98.5,
+    },
   })
   payments: {
     totalRevenue: number;

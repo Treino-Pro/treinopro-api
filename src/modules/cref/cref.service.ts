@@ -1,6 +1,10 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CrefValidationResult, ConfefData, CrefFormatted } from './interfaces/cref.interface';
+import {
+  CrefValidationResult,
+  ConfefData,
+  CrefFormatted,
+} from './interfaces/cref.interface';
 import { CrefCacheService } from './cref-cache.service';
 
 @Injectable()
@@ -9,7 +13,7 @@ export class CrefService {
   private readonly CONFEF_BASE = 'https://www.confef.org.br/confefv2';
   private readonly TOKEN_URL = `${this.CONFEF_BASE}/includes/api/token_generator.php`;
   private readonly API_URL = `${this.CONFEF_BASE}/includes/api/registrados_pf/get_registrados.php`;
-  
+
   private tokenCache: { token: string; expires: number } | null = null;
   private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 minutos - aumentar cache
   private readonly REQUEST_TIMEOUT = 15000; // 15 segundos
@@ -22,12 +26,14 @@ export class CrefService {
 
   async validateCref(crefNumber: string): Promise<CrefValidationResult> {
     this.logger.log(`🔍 [CREF] Iniciando validação do CREF: ${crefNumber}`);
-    
+
     try {
       // 1. Validar formato: SP-106227
       if (!this.isValidCrefFormat(crefNumber)) {
         this.logger.warn(`❌ [CREF] Formato inválido: ${crefNumber}`);
-        throw new BadRequestException('Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)');
+        throw new BadRequestException(
+          'Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)',
+        );
       }
 
       // 2. Verificar cache primeiro
@@ -41,7 +47,7 @@ export class CrefService {
       // 3. Buscar no CONFEF
       this.logger.log(`🌐 [CREF] Buscando no CONFEF: ${crefNumber}`);
       const confefData = await this.fetchFromConfef(crefNumber);
-      
+
       if (!confefData) {
         this.logger.warn(`❌ [CREF] CREF não encontrado: ${crefNumber}`);
         throw new BadRequestException('CREF não encontrado no CONFEF');
@@ -49,11 +55,17 @@ export class CrefService {
 
       // 4. Validar tipo de graduação (apenas BACHAREL)
       if (!this.isValidGraduationType(confefData.naturezaTitulo)) {
-        this.logger.warn(`❌ [CREF] Graduação inválida: ${confefData.naturezaTitulo}`);
-        throw new BadRequestException(`Personal Trainer deve ser BACHAREL. Tipo encontrado: ${confefData.naturezaTitulo}`);
+        this.logger.warn(
+          `❌ [CREF] Graduação inválida: ${confefData.naturezaTitulo}`,
+        );
+        throw new BadRequestException(
+          `Personal Trainer deve ser BACHAREL. Tipo encontrado: ${confefData.naturezaTitulo}`,
+        );
       }
 
-      this.logger.log(`✅ [CREF] Validação bem-sucedida: ${crefNumber} - ${confefData.nome}`);
+      this.logger.log(
+        `✅ [CREF] Validação bem-sucedida: ${crefNumber} - ${confefData.nome}`,
+      );
 
       const validationResult: CrefValidationResult = {
         isValid: true,
@@ -63,7 +75,7 @@ export class CrefService {
         uf: confefData.uf,
         naturezaTitulo: confefData.naturezaTitulo,
         validatedAt: new Date(),
-        details: 'Validação bem-sucedida'
+        details: 'Validação bem-sucedida',
       };
 
       // 5. Armazenar no cache
@@ -71,13 +83,14 @@ export class CrefService {
       this.logger.log(`💾 [CACHE] CREF armazenado no cache: ${crefNumber}`);
 
       return validationResult;
-
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na validação: ${error.message}`);
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(`Erro na validação do CREF: ${error.message}`);
+      throw new BadRequestException(
+        `Erro na validação do CREF: ${error.message}`,
+      );
     }
   }
 
@@ -86,7 +99,7 @@ export class CrefService {
     return {
       uf: uf.toUpperCase(),
       numero,
-      full: crefNumber.toUpperCase()
+      full: crefNumber.toUpperCase(),
     };
   }
 
@@ -98,19 +111,21 @@ export class CrefService {
 
   private isValidGraduationType(naturezaTitulo: string): boolean {
     if (!naturezaTitulo) return false;
-    
+
     const naturezaUpper = naturezaTitulo.toUpperCase();
-    
+
     // Apenas BACHAREL é permitido
     return naturezaUpper.includes('BACHAREL');
   }
 
-  private async fetchFromConfef(crefNumber: string): Promise<ConfefData | null> {
+  private async fetchFromConfef(
+    crefNumber: string,
+  ): Promise<ConfefData | null> {
     try {
       const token = await this.getToken();
-      
+
       const response = await this.makeConfefRequest(token, crefNumber);
-      
+
       this.logger.log(`📡 [CREF] Resposta CONFEF: ${response.status}`);
 
       // Se retornou 401, token expirou - tentar novamente com token novo
@@ -118,9 +133,14 @@ export class CrefService {
         this.logger.warn(`🔄 [CREF] Token expirado (401), renovando...`);
         this.tokenCache = null; // Limpar cache
         const newToken = await this.getToken();
-        
-        const retryResponse = await this.makeConfefRequest(newToken, crefNumber);
-        this.logger.log(`📡 [CREF] Resposta CONFEF (retry): ${retryResponse.status}`);
+
+        const retryResponse = await this.makeConfefRequest(
+          newToken,
+          crefNumber,
+        );
+        this.logger.log(
+          `📡 [CREF] Resposta CONFEF (retry): ${retryResponse.status}`,
+        );
         return this.processConfefResponse(retryResponse.data, crefNumber);
       }
 
@@ -131,7 +151,11 @@ export class CrefService {
     }
   }
 
-  private async makeConfefRequest(token: string, crefNumber: string, retryCount = 0) {
+  private async makeConfefRequest(
+    token: string,
+    crefNumber: string,
+    retryCount = 0,
+  ) {
     const url = new URL(this.API_URL);
     url.searchParams.set('draw', '1');
     url.searchParams.set('start', '0');
@@ -140,19 +164,23 @@ export class CrefService {
     url.searchParams.set('search[regex]', 'false');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.REQUEST_TIMEOUT,
+    );
 
     try {
       const response = await fetch(url.toString(), {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Origin': 'https://www.confef.org.br',
-          'Referer': `${this.CONFEF_BASE}/registrados/`,
+          Authorization: `Bearer ${token}`,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          Origin: 'https://www.confef.org.br',
+          Referer: `${this.CONFEF_BASE}/registrados/`,
           'X-Requested-With': 'XMLHttpRequest',
-          'Connection': 'keep-alive',
+          Connection: 'keep-alive',
           'Cache-Control': 'no-cache',
         },
         signal: controller.signal,
@@ -168,16 +196,21 @@ export class CrefService {
       return { data, status: response.status };
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       // Retry com backoff exponencial em caso de timeout ou erro de rede
-      if ((error.name === 'AbortError' || error.message.includes('fetch')) && retryCount < this.MAX_RETRIES) {
+      if (
+        (error.name === 'AbortError' || error.message.includes('fetch')) &&
+        retryCount < this.MAX_RETRIES
+      ) {
         const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
-        this.logger.warn(`⚠️ [CREF] Timeout/erro na tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`);
-        
-        await new Promise(resolve => setTimeout(resolve, delay));
+        this.logger.warn(
+          `⚠️ [CREF] Timeout/erro na tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
         return this.makeConfefRequest(token, crefNumber, retryCount + 1);
       }
-      
+
       if (error.name === 'AbortError') {
         throw new Error('Request timeout após múltiplas tentativas');
       }
@@ -185,20 +218,26 @@ export class CrefService {
     }
   }
 
-  private processConfefResponse(responseData: any, crefNumber: string): ConfefData | null {
+  private processConfefResponse(
+    responseData: any,
+    crefNumber: string,
+  ): ConfefData | null {
     const data = responseData?.data || [];
-    
-    this.logger.log(`🔍 [CREF] Número de registros encontrados: ${data.length}`);
-    
+
+    this.logger.log(
+      `🔍 [CREF] Número de registros encontrados: ${data.length}`,
+    );
+
     // Buscar correspondência - otimizado para performance
     for (const row of data) {
       // Mapear campos corretos da resposta da API
       const nome = row.Nome || row.nome || row['2'];
       const situacao = row.Categoria || row.categoria || row['4'];
       const uf = row.UF || row.uf || row['0'];
-      const naturezaTitulo = row.NaturezaTitulo || row.naturezaTitulo || row['5'];
+      const naturezaTitulo =
+        row.NaturezaTitulo || row.naturezaTitulo || row['5'];
       const crefCompleto = row.NUM_REGISTRO || row.numeroRegistro || row['7'];
-      
+
       // Verificar se o CREF completo corresponde - parar no primeiro match
       if (crefCompleto === crefNumber) {
         this.logger.log(`✅ [CREF] Registro encontrado: ${nome}`);
@@ -207,12 +246,14 @@ export class CrefService {
           categoria: situacao,
           uf,
           cref: crefCompleto,
-          naturezaTitulo
+          naturezaTitulo,
         };
       }
     }
 
-    this.logger.warn(`❌ [CREF] Nenhum registro encontrado para: ${crefNumber}`);
+    this.logger.warn(
+      `❌ [CREF] Nenhum registro encontrado para: ${crefNumber}`,
+    );
     return null;
   }
 
@@ -224,20 +265,24 @@ export class CrefService {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.REQUEST_TIMEOUT,
+    );
 
     try {
       this.logger.log(`🔑 [CREF] Obtendo novo token do CONFEF`);
-      
+
       const response = await fetch(this.TOKEN_URL, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Origin': 'https://www.confef.org.br',
-          'Referer': `${this.CONFEF_BASE}/registrados/`,
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
+          Accept: 'application/json, text/javascript, */*; q=0.01',
+          Origin: 'https://www.confef.org.br',
+          Referer: `${this.CONFEF_BASE}/registrados/`,
           'X-Requested-With': 'XMLHttpRequest',
-          'Connection': 'keep-alive',
+          Connection: 'keep-alive',
           'Cache-Control': 'no-cache',
         },
         signal: controller.signal,
@@ -265,25 +310,32 @@ export class CrefService {
       // Cache do token
       this.tokenCache = {
         token,
-        expires: Date.now() + this.TOKEN_TTL
+        expires: Date.now() + this.TOKEN_TTL,
       };
 
       this.logger.log(`✅ [CREF] Token obtido com sucesso`);
       return token;
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       // Retry com backoff exponencial
-      if ((error.name === 'AbortError' || error.message.includes('fetch')) && retryCount < this.MAX_RETRIES) {
+      if (
+        (error.name === 'AbortError' || error.message.includes('fetch')) &&
+        retryCount < this.MAX_RETRIES
+      ) {
         const delay = Math.pow(2, retryCount) * 1000;
-        this.logger.warn(`⚠️ [CREF] Timeout/erro ao obter token. Tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`);
-        
-        await new Promise(resolve => setTimeout(resolve, delay));
+        this.logger.warn(
+          `⚠️ [CREF] Timeout/erro ao obter token. Tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
         return this.getToken(retryCount + 1);
       }
-      
+
       if (error.name === 'AbortError') {
-        this.logger.error(`💥 [CREF] Timeout ao obter token após múltiplas tentativas`);
+        this.logger.error(
+          `💥 [CREF] Timeout ao obter token após múltiplas tentativas`,
+        );
         throw new Error('Timeout ao obter token de acesso');
       }
       this.logger.error(`💥 [CREF] Erro ao obter token: ${error.message}`);

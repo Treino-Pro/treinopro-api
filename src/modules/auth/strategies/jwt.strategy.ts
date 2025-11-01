@@ -19,7 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     console.log('🔍 [JWT_STRATEGY] lastName no payload:', payload.lastName);
     console.log('🔍 [JWT_STRATEGY] document no payload:', payload.document);
     console.log('🔍 [JWT_STRATEGY] cref no payload:', payload.cref);
-    
+
     const user = {
       id: payload.sub,
       email: payload.email,
@@ -29,7 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       document: payload.document,
       cref: payload.cref,
     };
-    
+
     console.log('🔍 [JWT_STRATEGY] Usuário construído:', user);
     return user;
   }

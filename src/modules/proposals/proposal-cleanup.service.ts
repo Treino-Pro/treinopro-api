@@ -20,10 +20,12 @@ export class ProposalCleanupService {
    */
   async cleanupExpiredProposals() {
     try {
-      this.logger.log('🧹 [CLEANUP] Iniciando limpeza de propostas expiradas...');
-      
+      this.logger.log(
+        '🧹 [CLEANUP] Iniciando limpeza de propostas expiradas...',
+      );
+
       const now = new Date();
-      
+
       // Buscar propostas do passado/hoje (com possível horário já expirado)
       const candidates = await this.db
         .select()
@@ -31,14 +33,21 @@ export class ProposalCleanupService {
         .where(
           and(
             eq(proposals.status, ProposalStatus.PENDING),
-            lt(proposals.trainingDate, new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))
-          )
+            lt(
+              proposals.trainingDate,
+              new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+            ),
+          ),
         );
 
       // Combinar trainingDate + trainingTime em memória para validar expiração precisa
-      const expiredProposals = candidates.filter((p: any) => isProposalExpired(now, p));
+      const expiredProposals = candidates.filter((p: any) =>
+        isProposalExpired(now, p),
+      );
 
-      this.logger.log(`🔍 [CLEANUP] Encontradas ${expiredProposals.length} propostas expiradas`);
+      this.logger.log(
+        `🔍 [CLEANUP] Encontradas ${expiredProposals.length} propostas expiradas`,
+      );
 
       if (expiredProposals.length === 0) {
         this.logger.log('✅ [CLEANUP] Nenhuma proposta expirada encontrada');
@@ -47,18 +56,19 @@ export class ProposalCleanupService {
 
       // Deletar propostas expiradas
       for (const proposal of expiredProposals) {
-        await this.db
-          .delete(proposals)
-          .where(eq(proposals.id, proposal.id));
+        await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
 
-        this.logger.log(`🗑️ [CLEANUP] Proposta ${proposal.id} deletada (expirada)`);
+        this.logger.log(
+          `🗑️ [CLEANUP] Proposta ${proposal.id} deletada (expirada)`,
+        );
 
         // Notificar o aluno sobre a expiração via WebSocket
         await this.notifyStudentProposalExpired(proposal);
       }
 
-      this.logger.log(`✅ [CLEANUP] Limpeza concluída: ${expiredProposals.length} propostas removidas`);
-
+      this.logger.log(
+        `✅ [CLEANUP] Limpeza concluída: ${expiredProposals.length} propostas removidas`,
+      );
     } catch (error) {
       this.logger.error('❌ [CLEANUP] Erro na limpeza de propostas:', error);
     }
@@ -89,9 +99,14 @@ export class ProposalCleanupService {
         timestamp: new Date(),
       });
 
-      this.logger.log(`📡 [CLEANUP] Notificação de expiração enviada para aluno ${proposal.studentId}`);
+      this.logger.log(
+        `📡 [CLEANUP] Notificação de expiração enviada para aluno ${proposal.studentId}`,
+      );
     } catch (error) {
-      this.logger.error('❌ [CLEANUP] Erro ao notificar aluno sobre expiração:', error);
+      this.logger.error(
+        '❌ [CLEANUP] Erro ao notificar aluno sobre expiração:',
+        error,
+      );
     }
   }
 

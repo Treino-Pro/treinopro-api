@@ -86,7 +86,10 @@ describe('MockDatabase', () => {
       };
 
       // Act
-      const result = await mockDatabase.insert('users').values(userData).returning();
+      const result = await mockDatabase
+        .insert('users')
+        .values(userData)
+        .returning();
 
       // Assert
       expect(result).toHaveLength(1);
@@ -109,8 +112,14 @@ describe('MockDatabase', () => {
       const userData2 = { email: 'user2@email.com', firstName: 'User2' };
 
       // Act
-      const result1 = await mockDatabase.insert('users').values(userData1).returning();
-      const result2 = await mockDatabase.insert('users').values(userData2).returning();
+      const result1 = await mockDatabase
+        .insert('users')
+        .values(userData1)
+        .returning();
+      const result2 = await mockDatabase
+        .insert('users')
+        .values(userData2)
+        .returning();
 
       // Assert
       expect(result1[0].id).toBe('mock-user-1');

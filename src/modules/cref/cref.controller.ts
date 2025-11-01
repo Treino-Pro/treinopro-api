@@ -17,74 +17,78 @@ export class CrefController {
 
   @Post('validate')
   @Public()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Validar CREF',
-    description: 'Valida um número de CREF no formato UF-NÚMERO (ex: SP-106227)'
+    description:
+      'Valida um número de CREF no formato UF-NÚMERO (ex: SP-106227)',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Validação realizada com sucesso',
-    type: CrefValidationResponseDto
+    type: CrefValidationResponseDto,
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Formato inválido ou CREF não encontrado'
+  @ApiResponse({
+    status: 400,
+    description: 'Formato inválido ou CREF não encontrado',
   })
-  async validateCref(@Body() validateCrefDto: ValidateCrefDto): Promise<CrefValidationResponseDto> {
+  async validateCref(
+    @Body() validateCrefDto: ValidateCrefDto,
+  ): Promise<CrefValidationResponseDto> {
     return this.crefService.validateCref(validateCrefDto.crefNumber);
   }
 
   @Get('parse')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Parsear CREF',
-    description: 'Converte CREF no formato UF-NÚMERO em objeto com UF e número separados'
+    description:
+      'Converte CREF no formato UF-NÚMERO em objeto com UF e número separados',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'CREF parseado com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'CREF parseado com sucesso',
   })
   async parseCref(@Query('cref') cref: string) {
     return this.crefService.parseCrefNumber(cref);
   }
 
   @Get('cache/health')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Health Check do Cache',
-    description: 'Verifica se o cache Redis está funcionando corretamente'
+    description: 'Verifica se o cache Redis está funcionando corretamente',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Status do cache'
+  @ApiResponse({
+    status: 200,
+    description: 'Status do cache',
   })
   async cacheHealth() {
     const isHealthy = await this.crefCacheService.healthCheck();
     return {
       status: isHealthy ? 'healthy' : 'unhealthy',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
   }
 
   @Get('cache/stats')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Estatísticas do Cache',
-    description: 'Retorna estatísticas de uso do cache'
+    description: 'Retorna estatísticas de uso do cache',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Estatísticas do cache'
+  @ApiResponse({
+    status: 200,
+    description: 'Estatísticas do cache',
   })
   async cacheStats() {
     return await this.crefCacheService.getStats();
   }
 
   @Delete('cache/:crefNumber')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Remover CREF do Cache',
-    description: 'Remove uma validação específica do cache'
+    description: 'Remove uma validação específica do cache',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'CREF removido do cache com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'CREF removido do cache com sucesso',
   })
   async removeFromCache(@Query('crefNumber') crefNumber: string) {
     await this.crefCacheService.delete(crefNumber);
@@ -92,13 +96,13 @@ export class CrefController {
   }
 
   @Delete('cache')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Limpar Cache',
-    description: 'Remove todas as validações do cache'
+    description: 'Remove todas as validações do cache',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Cache limpo com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'Cache limpo com sucesso',
   })
   async clearCache() {
     await this.crefCacheService.clear();
@@ -108,75 +112,79 @@ export class CrefController {
   // ===== ENDPOINTS DA FILA =====
 
   @Post('queue/validate')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Adicionar Validação à Fila',
-    description: 'Adiciona uma validação CREF à fila de processamento assíncrono'
+    description:
+      'Adiciona uma validação CREF à fila de processamento assíncrono',
   })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Validação adicionada à fila com sucesso'
+  @ApiResponse({
+    status: 201,
+    description: 'Validação adicionada à fila com sucesso',
   })
   async addToQueue(@Body() validateCrefDto: ValidateCrefDto) {
     const job = await this.crefQueueService.addValidationJob(
       validateCrefDto.crefNumber,
       validateCrefDto.userType || 'personal',
-      'normal'
+      'normal',
     );
-    
+
     return {
       message: 'Validação adicionada à fila',
       jobId: job.id,
       crefNumber: validateCrefDto.crefNumber,
-      status: 'queued'
+      status: 'queued',
     };
   }
 
   @Get('queue/stats')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Estatísticas da Fila',
-    description: 'Retorna estatísticas da fila de validações CREF'
+    description: 'Retorna estatísticas da fila de validações CREF',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Estatísticas da fila'
+  @ApiResponse({
+    status: 200,
+    description: 'Estatísticas da fila',
   })
   async getQueueStats() {
     return await this.crefQueueService.getQueueStats();
   }
 
   @Get('queue/jobs')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Listar Jobs da Fila',
-    description: 'Lista jobs por status (waiting, active, completed, failed)'
+    description: 'Lista jobs por status (waiting, active, completed, failed)',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Lista de jobs'
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de jobs',
   })
-  async getQueueJobs(@Query('status') status: 'waiting' | 'active' | 'completed' | 'failed' = 'waiting') {
+  async getQueueJobs(
+    @Query('status')
+    status: 'waiting' | 'active' | 'completed' | 'failed' = 'waiting',
+  ) {
     const jobs = await this.crefQueueService.getJobsByStatus(status);
     return {
       status,
       count: jobs.length,
-      jobs: jobs.map(job => ({
+      jobs: jobs.map((job) => ({
         id: job.id,
         data: job.data,
         progress: job.progress(),
         processedOn: job.processedOn,
         finishedOn: job.finishedOn,
         failedReason: job.failedReason,
-      }))
+      })),
     };
   }
 
   @Delete('queue/clear')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Limpar Fila',
-    description: 'Remove todos os jobs da fila'
+    description: 'Remove todos os jobs da fila',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Fila limpa com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'Fila limpa com sucesso',
   })
   async clearQueue() {
     await this.crefQueueService.clearQueue();
@@ -184,13 +192,13 @@ export class CrefController {
   }
 
   @Post('queue/pause')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Pausar Fila',
-    description: 'Pausa o processamento da fila'
+    description: 'Pausa o processamento da fila',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Fila pausada com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'Fila pausada com sucesso',
   })
   async pauseQueue() {
     await this.crefQueueService.pauseQueue();
@@ -198,13 +206,13 @@ export class CrefController {
   }
 
   @Post('queue/resume')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Retomar Fila',
-    description: 'Retoma o processamento da fila'
+    description: 'Retoma o processamento da fila',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Fila retomada com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'Fila retomada com sucesso',
   })
   async resumeQueue() {
     await this.crefQueueService.resumeQueue();
@@ -212,13 +220,13 @@ export class CrefController {
   }
 
   @Delete('queue/job/:jobId')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Remover Job da Fila',
-    description: 'Remove um job específico da fila'
+    description: 'Remove um job específico da fila',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Job removido com sucesso'
+  @ApiResponse({
+    status: 200,
+    description: 'Job removido com sucesso',
   })
   async removeJob(@Query('jobId') jobId: string) {
     await this.crefQueueService.removeJob(jobId);

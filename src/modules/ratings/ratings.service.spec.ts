@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { RatingsService } from './ratings.service';
 import { RatingType, RatingStatus } from './dto/ratings.dto';
 
@@ -55,8 +59,18 @@ describe('RatingsService', () => {
       status: 'completed',
       studentId: 'student-1',
       personalId: 'personal-1',
-      student: { id: 'student-1', name: 'João', email: 'joao@email.com', role: 'student' },
-      personal: { id: 'personal-1', name: 'Maria', email: 'maria@email.com', role: 'personal' },
+      student: {
+        id: 'student-1',
+        name: 'João',
+        email: 'joao@email.com',
+        role: 'student',
+      },
+      personal: {
+        id: 'personal-1',
+        name: 'Maria',
+        email: 'maria@email.com',
+        role: 'personal',
+      },
     };
 
     const createRatingDto = {
@@ -77,24 +91,26 @@ describe('RatingsService', () => {
       mockDb.query.ratings.findFirst.mockResolvedValue(null);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: 'rating-1',
-            classId: 'class-1',
-            raterId: 'student-1',
-            ratedId: 'personal-1',
-            type: RatingType.STUDENT_TO_PERSONAL,
-            rating: 5,
-            comment: 'Excelente aula!',
-            status: RatingStatus.COMPLETED,
-            completedAt: new Date(),
-            punctuality: 5,
-            communication: 4,
-            knowledge: 5,
-            motivation: 5,
-            equipment: 4,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: 'rating-1',
+              classId: 'class-1',
+              raterId: 'student-1',
+              ratedId: 'personal-1',
+              type: RatingType.STUDENT_TO_PERSONAL,
+              rating: 5,
+              comment: 'Excelente aula!',
+              status: RatingStatus.COMPLETED,
+              completedAt: new Date(),
+              punctuality: 5,
+              communication: 4,
+              knowledge: 5,
+              motivation: 5,
+              equipment: 4,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]),
         }),
       });
 
@@ -116,8 +132,9 @@ describe('RatingsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createRating(createRatingDto, 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.createRating(createRatingDto, 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando aula não está concluída', async () => {
@@ -128,8 +145,9 @@ describe('RatingsService', () => {
       });
 
       // Act & Assert
-      await expect(service.createRating(createRatingDto, 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.createRating(createRatingDto, 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('deve lançar erro quando usuário não é o aluno', async () => {
@@ -137,8 +155,9 @@ describe('RatingsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
       // Act & Assert
-      await expect(service.createRating(createRatingDto, 'personal-1'))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.createRating(createRatingDto, 'personal-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('deve lançar erro quando avaliação já existe', async () => {
@@ -150,8 +169,9 @@ describe('RatingsService', () => {
       });
 
       // Act & Assert
-      await expect(service.createRating(createRatingDto, 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.createRating(createRatingDto, 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -174,19 +194,25 @@ describe('RatingsService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
-            returning: jest.fn().mockResolvedValue([{
-              ...existingRating,
-              ...updateRatingDto,
-              status: RatingStatus.COMPLETED,
-              completedAt: new Date(),
-              updatedAt: new Date(),
-            }]),
+            returning: jest.fn().mockResolvedValue([
+              {
+                ...existingRating,
+                ...updateRatingDto,
+                status: RatingStatus.COMPLETED,
+                completedAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ]),
           }),
         }),
       });
 
       // Act
-      const result = await service.updateRating('rating-1', updateRatingDto, 'student-1');
+      const result = await service.updateRating(
+        'rating-1',
+        updateRatingDto,
+        'student-1',
+      );
 
       // Assert
       expect(result).toBeDefined();
@@ -201,8 +227,9 @@ describe('RatingsService', () => {
       mockDb.query.ratings.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.updateRating('rating-1', updateRatingDto, 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.updateRating('rating-1', updateRatingDto, 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando avaliação já está concluída', async () => {
@@ -213,8 +240,9 @@ describe('RatingsService', () => {
       });
 
       // Act & Assert
-      await expect(service.updateRating('rating-1', updateRatingDto, 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.updateRating('rating-1', updateRatingDto, 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -224,8 +252,19 @@ describe('RatingsService', () => {
       const mockRating = {
         id: 'rating-1',
         raterId: 'student-1',
-        rated: { id: 'personal-1', name: 'Maria', email: 'maria@email.com', role: 'personal' },
-        class: { id: 'class-1', date: new Date(), time: '10:00', location: 'Academia', duration: 60 },
+        rated: {
+          id: 'personal-1',
+          name: 'Maria',
+          email: 'maria@email.com',
+          role: 'personal',
+        },
+        class: {
+          id: 'class-1',
+          date: new Date(),
+          time: '10:00',
+          location: 'Academia',
+          duration: 60,
+        },
         rating: 5,
         type: RatingType.STUDENT_TO_PERSONAL,
         status: RatingStatus.COMPLETED,
@@ -249,8 +288,9 @@ describe('RatingsService', () => {
       mockDb.query.ratings.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.getRatingById('rating-1', 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.getRatingById('rating-1', 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -264,8 +304,19 @@ describe('RatingsService', () => {
           type: RatingType.STUDENT_TO_PERSONAL,
           rating: 5,
           status: RatingStatus.COMPLETED,
-          rated: { id: 'personal-1', name: 'Maria', email: 'maria@email.com', role: 'personal' },
-          class: { id: 'class-1', date: new Date(), time: '10:00', location: 'Academia', duration: 60 },
+          rated: {
+            id: 'personal-1',
+            name: 'Maria',
+            email: 'maria@email.com',
+            role: 'personal',
+          },
+          class: {
+            id: 'class-1',
+            date: new Date(),
+            time: '10:00',
+            location: 'Academia',
+            duration: 60,
+          },
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -274,7 +325,10 @@ describe('RatingsService', () => {
       mockDb.query.ratings.findMany.mockResolvedValue(mockRatings);
 
       // Act
-      const result = await service.getRatings({ type: RatingType.STUDENT_TO_PERSONAL }, 'student-1');
+      const result = await service.getRatings(
+        { type: RatingType.STUDENT_TO_PERSONAL },
+        'student-1',
+      );
 
       // Assert
       expect(result).toBeDefined();
@@ -332,14 +386,38 @@ describe('RatingsService', () => {
 
       // Mock para personal stats
       mockDb.query.ratings.findMany.mockResolvedValueOnce([
-        { rating: 5, punctuality: 5, communication: 4, knowledge: 5, motivation: 5, equipment: 4 },
-        { rating: 4, punctuality: 4, communication: 4, knowledge: 4, motivation: 4, equipment: 4 },
+        {
+          rating: 5,
+          punctuality: 5,
+          communication: 4,
+          knowledge: 5,
+          motivation: 5,
+          equipment: 4,
+        },
+        {
+          rating: 4,
+          punctuality: 4,
+          communication: 4,
+          knowledge: 4,
+          motivation: 4,
+          equipment: 4,
+        },
       ]);
 
       // Mock para student stats
       mockDb.query.ratings.findMany.mockResolvedValueOnce([
-        { rating: 4, studentEngagement: 4, studentEffort: 4, studentProgress: 4 },
-        { rating: 5, studentEngagement: 5, studentEffort: 5, studentProgress: 5 },
+        {
+          rating: 4,
+          studentEngagement: 4,
+          studentEffort: 4,
+          studentProgress: 4,
+        },
+        {
+          rating: 5,
+          studentEngagement: 5,
+          studentEffort: 5,
+          studentProgress: 5,
+        },
       ]);
 
       // Act
@@ -360,8 +438,18 @@ describe('RatingsService', () => {
         status: 'completed',
         studentId: 'student-1',
         personalId: 'personal-1',
-        student: { id: 'student-1', name: 'João', email: 'joao@email.com', role: 'student' },
-        personal: { id: 'personal-1', name: 'Maria', email: 'maria@email.com', role: 'personal' },
+        student: {
+          id: 'student-1',
+          name: 'João',
+          email: 'joao@email.com',
+          role: 'student',
+        },
+        personal: {
+          id: 'personal-1',
+          name: 'Maria',
+          email: 'maria@email.com',
+          role: 'personal',
+        },
       };
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
@@ -383,8 +471,9 @@ describe('RatingsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createAutomaticRatings({ classId: 'class-1' }))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.createAutomaticRatings({ classId: 'class-1' }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando aula não está concluída', async () => {
@@ -395,8 +484,9 @@ describe('RatingsService', () => {
       });
 
       // Act & Assert
-      await expect(service.createAutomaticRatings({ classId: 'class-1' }))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.createAutomaticRatings({ classId: 'class-1' }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -413,11 +503,13 @@ describe('RatingsService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
-            returning: jest.fn().mockResolvedValue([{
-              ...existingRating,
-              status: RatingStatus.CANCELLED,
-              updatedAt: new Date(),
-            }]),
+            returning: jest.fn().mockResolvedValue([
+              {
+                ...existingRating,
+                status: RatingStatus.CANCELLED,
+                updatedAt: new Date(),
+              },
+            ]),
           }),
         }),
       });
@@ -435,8 +527,9 @@ describe('RatingsService', () => {
       mockDb.query.ratings.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.cancelRating('rating-1', 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.cancelRating('rating-1', 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando avaliação já está concluída', async () => {
@@ -448,8 +541,9 @@ describe('RatingsService', () => {
       });
 
       // Act & Assert
-      await expect(service.cancelRating('rating-1', 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.cancelRating('rating-1', 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

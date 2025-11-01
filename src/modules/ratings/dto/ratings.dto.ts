@@ -1,4 +1,13 @@
-import { IsString, IsNumber, IsEnum, IsOptional, IsUUID, Min, Max, IsNotEmpty } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsEnum,
+  IsOptional,
+  IsUUID,
+  Min,
+  Max,
+  IsNotEmpty,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -18,7 +27,7 @@ export enum RatingStatus {
 export class CreateRatingDto {
   @ApiProperty({
     description: 'ID da aula avaliada',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   @IsNotEmpty()
@@ -27,7 +36,7 @@ export class CreateRatingDto {
   @ApiProperty({
     description: 'Tipo de avaliação',
     enum: RatingType,
-    example: RatingType.STUDENT_TO_PERSONAL
+    example: RatingType.STUDENT_TO_PERSONAL,
   })
   @IsEnum(RatingType)
   type: RatingType;
@@ -36,7 +45,7 @@ export class CreateRatingDto {
     description: 'Nota geral (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -45,7 +54,7 @@ export class CreateRatingDto {
 
   @ApiPropertyOptional({
     description: 'Comentário sobre a avaliação',
-    example: 'Excelente personal trainer, muito profissional!'
+    example: 'Excelente personal trainer, muito profissional!',
   })
   @IsString()
   @IsOptional()
@@ -56,7 +65,7 @@ export class CreateRatingDto {
     description: 'Pontualidade do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -68,7 +77,7 @@ export class CreateRatingDto {
     description: 'Comunicação do personal (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -80,7 +89,7 @@ export class CreateRatingDto {
     description: 'Conhecimento técnico do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -92,7 +101,7 @@ export class CreateRatingDto {
     description: 'Motivação do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -104,7 +113,7 @@ export class CreateRatingDto {
     description: 'Equipamentos utilizados (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -117,7 +126,7 @@ export class CreateRatingDto {
     description: 'Engajamento do aluno (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -129,7 +138,7 @@ export class CreateRatingDto {
     description: 'Esforço do aluno (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -141,7 +150,7 @@ export class CreateRatingDto {
     description: 'Progresso do aluno (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -154,7 +163,7 @@ export class CreateRatingDto {
     description: 'Profissionalismo do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -166,7 +175,7 @@ export class CreateRatingDto {
     description: 'Conhecimento do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -178,7 +187,7 @@ export class CreateRatingDto {
     description: 'Motivação do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -190,7 +199,7 @@ export class CreateRatingDto {
     description: 'Comunicação do personal (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -290,32 +299,32 @@ export class UpdateRatingDto {
 export class RatingResponseDto {
   @ApiProperty({
     description: 'ID da avaliação',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   id: string;
 
   @ApiProperty({
     description: 'ID da aula avaliada',
-    example: '123e4567-e89b-12d3-a456-426614174001'
+    example: '123e4567-e89b-12d3-a456-426614174001',
   })
   classId: string;
 
   @ApiProperty({
     description: 'ID do usuário que avaliou',
-    example: '123e4567-e89b-12d3-a456-426614174002'
+    example: '123e4567-e89b-12d3-a456-426614174002',
   })
   raterId: string;
 
   @ApiProperty({
     description: 'ID do usuário avaliado',
-    example: '123e4567-e89b-12d3-a456-426614174003'
+    example: '123e4567-e89b-12d3-a456-426614174003',
   })
   ratedId: string;
 
   @ApiProperty({
     description: 'Tipo de avaliação',
     enum: RatingType,
-    example: RatingType.STUDENT_TO_PERSONAL
+    example: RatingType.STUDENT_TO_PERSONAL,
   })
   type: RatingType;
 
@@ -323,29 +332,29 @@ export class RatingResponseDto {
     description: 'Nota geral (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   rating: number;
 
   @ApiPropertyOptional({
     description: 'Comentário sobre a avaliação',
-    example: 'Excelente personal trainer!'
+    example: 'Excelente personal trainer!',
   })
   comment?: string;
 
   @ApiProperty({
     description: 'Status da avaliação',
     enum: RatingStatus,
-    example: RatingStatus.COMPLETED
+    example: RatingStatus.COMPLETED,
   })
   status: RatingStatus;
-  
+
   // Campos específicos
   @ApiPropertyOptional({
     description: 'Pontualidade (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   punctuality?: number;
 
@@ -353,7 +362,7 @@ export class RatingResponseDto {
     description: 'Comunicação (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   communication?: number;
 
@@ -361,7 +370,7 @@ export class RatingResponseDto {
     description: 'Conhecimento (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   knowledge?: number;
 
@@ -369,7 +378,7 @@ export class RatingResponseDto {
     description: 'Motivação (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   motivation?: number;
 
@@ -377,7 +386,7 @@ export class RatingResponseDto {
     description: 'Equipamentos (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   equipment?: number;
 
@@ -385,7 +394,7 @@ export class RatingResponseDto {
     description: 'Engajamento do aluno (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   studentEngagement?: number;
 
@@ -393,7 +402,7 @@ export class RatingResponseDto {
     description: 'Esforço do aluno (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   studentEffort?: number;
 
@@ -401,7 +410,7 @@ export class RatingResponseDto {
     description: 'Progresso do aluno (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   studentProgress?: number;
 
@@ -409,7 +418,7 @@ export class RatingResponseDto {
     description: 'Profissionalismo do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   personalProfessionalism?: number;
 
@@ -417,7 +426,7 @@ export class RatingResponseDto {
     description: 'Conhecimento do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   personalKnowledge?: number;
 
@@ -425,7 +434,7 @@ export class RatingResponseDto {
     description: 'Motivação do personal (1-5)',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   personalMotivation?: number;
 
@@ -433,10 +442,10 @@ export class RatingResponseDto {
     description: 'Comunicação do personal (1-5)',
     example: 4,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   personalCommunication?: number;
-  
+
   // Informações do usuário avaliado
   @ApiPropertyOptional({
     description: 'Informações do usuário avaliado',
@@ -445,8 +454,8 @@ export class RatingResponseDto {
       id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174003' },
       name: { type: 'string', example: 'Maria Santos' },
       email: { type: 'string', example: 'maria@email.com' },
-      role: { type: 'string', example: 'personal' }
-    }
+      role: { type: 'string', example: 'personal' },
+    },
   })
   ratedUser?: {
     id: string;
@@ -454,18 +463,22 @@ export class RatingResponseDto {
     email: string;
     role: string;
   };
-  
+
   // Informações da aula
   @ApiPropertyOptional({
     description: 'Informações da aula',
     type: 'object',
     properties: {
       id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174001' },
-      date: { type: 'string', format: 'date-time', example: '2024-01-15T14:00:00.000Z' },
+      date: {
+        type: 'string',
+        format: 'date-time',
+        example: '2024-01-15T14:00:00.000Z',
+      },
       time: { type: 'string', example: '14:00' },
       location: { type: 'string', example: 'Academia Smart Fit' },
-      duration: { type: 'number', example: 60 }
-    }
+      duration: { type: 'number', example: 60 },
+    },
   })
   class?: {
     id: string;
@@ -474,22 +487,22 @@ export class RatingResponseDto {
     location: string;
     duration: number;
   };
-  
+
   @ApiProperty({
     description: 'Data de criação',
-    example: '2024-01-15T15:00:00.000Z'
+    example: '2024-01-15T15:00:00.000Z',
   })
   createdAt: Date;
 
   @ApiProperty({
     description: 'Data de atualização',
-    example: '2024-01-15T15:00:00.000Z'
+    example: '2024-01-15T15:00:00.000Z',
   })
   updatedAt: Date;
 
   @ApiPropertyOptional({
     description: 'Data de conclusão',
-    example: '2024-01-15T15:00:00.000Z'
+    example: '2024-01-15T15:00:00.000Z',
   })
   completedAt?: Date;
 }
@@ -497,7 +510,7 @@ export class RatingResponseDto {
 export class RatingStatsDto {
   @ApiProperty({
     description: 'Total de avaliações',
-    example: 25
+    example: 25,
   })
   totalRatings: number;
 
@@ -505,7 +518,7 @@ export class RatingStatsDto {
     description: 'Média geral das avaliações',
     example: 4.2,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   averageRating: number;
 
@@ -517,8 +530,8 @@ export class RatingStatsDto {
       '2': { type: 'number', example: 2 },
       '3': { type: 'number', example: 3 },
       '4': { type: 'number', example: 8 },
-      '5': { type: 'number', example: 11 }
-    }
+      '5': { type: 'number', example: 11 },
+    },
   })
   ratingDistribution: {
     '1': number;
@@ -530,22 +543,22 @@ export class RatingStatsDto {
 
   @ApiProperty({
     description: 'Avaliações concluídas',
-    example: 20
+    example: 20,
   })
   completedRatings: number;
 
   @ApiProperty({
     description: 'Avaliações pendentes',
-    example: 3
+    example: 3,
   })
   pendingRatings: number;
 
   @ApiProperty({
     description: 'Avaliações canceladas',
-    example: 2
+    example: 2,
   })
   cancelledRatings: number;
-  
+
   // Estatísticas específicas por tipo
   @ApiProperty({
     description: 'Estatísticas de avaliações de alunos para personais',
@@ -557,8 +570,8 @@ export class RatingStatsDto {
       communication: { type: 'number', example: 4.2 },
       knowledge: { type: 'number', example: 4.7 },
       motivation: { type: 'number', example: 4.6 },
-      equipment: { type: 'number', example: 4.0 }
-    }
+      equipment: { type: 'number', example: 4.0 },
+    },
   })
   studentToPersonal: {
     total: number;
@@ -569,7 +582,7 @@ export class RatingStatsDto {
     motivation: number;
     equipment: number;
   };
-  
+
   @ApiProperty({
     description: 'Estatísticas de avaliações de personais para alunos',
     type: 'object',
@@ -578,8 +591,8 @@ export class RatingStatsDto {
       average: { type: 'number', example: 4.0 },
       engagement: { type: 'number', example: 4.2 },
       effort: { type: 'number', example: 4.5 },
-      progress: { type: 'number', example: 3.8 }
-    }
+      progress: { type: 'number', example: 3.8 },
+    },
   })
   personalToStudent: {
     total: number;
@@ -615,7 +628,7 @@ export class RatingFiltersDto {
   @ApiPropertyOptional({
     description: 'Tipo de avaliação para filtrar',
     enum: RatingType,
-    example: RatingType.STUDENT_TO_PERSONAL
+    example: RatingType.STUDENT_TO_PERSONAL,
   })
   @IsEnum(RatingType)
   @IsOptional()
@@ -624,7 +637,7 @@ export class RatingFiltersDto {
   @ApiPropertyOptional({
     description: 'Status da avaliação para filtrar',
     enum: RatingStatus,
-    example: RatingStatus.COMPLETED
+    example: RatingStatus.COMPLETED,
   })
   @IsEnum(RatingStatus)
   @IsOptional()
@@ -632,7 +645,7 @@ export class RatingFiltersDto {
 
   @ApiPropertyOptional({
     description: 'ID da aula para filtrar',
-    example: '123e4567-e89b-12d3-a456-426614174000'
+    example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   @IsOptional()
@@ -640,7 +653,7 @@ export class RatingFiltersDto {
 
   @ApiPropertyOptional({
     description: 'ID do usuário para filtrar',
-    example: '123e4567-e89b-12d3-a456-426614174001'
+    example: '123e4567-e89b-12d3-a456-426614174001',
   })
   @IsUUID()
   @IsOptional()
@@ -650,7 +663,7 @@ export class RatingFiltersDto {
     description: 'Nota mínima para filtrar',
     example: 3,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -662,7 +675,7 @@ export class RatingFiltersDto {
     description: 'Nota máxima para filtrar',
     example: 5,
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -672,7 +685,7 @@ export class RatingFiltersDto {
 
   @ApiPropertyOptional({
     description: 'Data inicial para filtrar',
-    example: '2024-01-01T00:00:00.000Z'
+    example: '2024-01-01T00:00:00.000Z',
   })
   @Type(() => Date)
   @IsOptional()
@@ -680,7 +693,7 @@ export class RatingFiltersDto {
 
   @ApiPropertyOptional({
     description: 'Data final para filtrar',
-    example: '2024-12-31T23:59:59.999Z'
+    example: '2024-12-31T23:59:59.999Z',
   })
   @Type(() => Date)
   @IsOptional()

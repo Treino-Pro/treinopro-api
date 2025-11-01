@@ -20,9 +20,7 @@ export class InAppNotificationService {
   // TODO: Implementar tabela de notificações no banco
   private notifications: InAppNotification[] = [];
 
-  constructor(
-    @Inject('DATABASE_CONNECTION') private readonly db: any,
-  ) {}
+  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
   // ===== MÉTODOS PRINCIPAIS =====
 
@@ -31,7 +29,7 @@ export class InAppNotificationService {
     title: string,
     message: string,
     type: 'info' | 'success' | 'warning' | 'error' = 'info',
-    data?: Record<string, any>
+    data?: Record<string, any>,
   ): Promise<InAppNotification> {
     const notification: InAppNotification = {
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -45,31 +43,39 @@ export class InAppNotificationService {
     };
 
     this.notifications.push(notification);
-    this.logger.log(`🔔 Notificação in-app criada para usuário ${userId}: ${title}`);
+    this.logger.log(
+      `🔔 Notificação in-app criada para usuário ${userId}: ${title}`,
+    );
 
     return notification;
   }
 
-  async getUserNotifications(userId: string, limit: number = 50): Promise<InAppNotification[]> {
+  async getUserNotifications(
+    userId: string,
+    limit: number = 50,
+  ): Promise<InAppNotification[]> {
     return this.notifications
-      .filter(n => n.userId === userId)
+      .filter((n) => n.userId === userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
   }
 
   async getUnreadNotifications(userId: string): Promise<InAppNotification[]> {
     return this.notifications
-      .filter(n => n.userId === userId && !n.isRead)
+      .filter((n) => n.userId === userId && !n.isRead)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    return this.notifications.filter(n => n.userId === userId && !n.isRead).length;
+    return this.notifications.filter((n) => n.userId === userId && !n.isRead)
+      .length;
   }
 
   async markAsRead(notificationId: string, userId: string): Promise<void> {
-    const notification = this.notifications.find(n => n.id === notificationId && n.userId === userId);
-    
+    const notification = this.notifications.find(
+      (n) => n.id === notificationId && n.userId === userId,
+    );
+
     if (notification) {
       notification.isRead = true;
       this.logger.log(`✅ Notificação ${notificationId} marcada como lida`);
@@ -77,15 +83,24 @@ export class InAppNotificationService {
   }
 
   async markAllAsRead(userId: string): Promise<void> {
-    const userNotifications = this.notifications.filter(n => n.userId === userId && !n.isRead);
-    
-    userNotifications.forEach(n => n.isRead = true);
-    this.logger.log(`✅ ${userNotifications.length} notificações marcadas como lidas para usuário ${userId}`);
+    const userNotifications = this.notifications.filter(
+      (n) => n.userId === userId && !n.isRead,
+    );
+
+    userNotifications.forEach((n) => (n.isRead = true));
+    this.logger.log(
+      `✅ ${userNotifications.length} notificações marcadas como lidas para usuário ${userId}`,
+    );
   }
 
-  async deleteNotification(notificationId: string, userId: string): Promise<void> {
-    const index = this.notifications.findIndex(n => n.id === notificationId && n.userId === userId);
-    
+  async deleteNotification(
+    notificationId: string,
+    userId: string,
+  ): Promise<void> {
+    const index = this.notifications.findIndex(
+      (n) => n.id === notificationId && n.userId === userId,
+    );
+
     if (index !== -1) {
       this.notifications.splice(index, 1);
       this.logger.log(`🗑️ Notificação ${notificationId} deletada`);
@@ -94,7 +109,10 @@ export class InAppNotificationService {
 
   // ===== TEMPLATES ESPECÍFICOS =====
 
-  async createProposalMatchNotification(userId: string, proposalData: any): Promise<InAppNotification> {
+  async createProposalMatchNotification(
+    userId: string,
+    proposalData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '🎯 Nova Proposta Disponível!',
@@ -107,11 +125,14 @@ export class InAppNotificationService {
         location: proposalData.location,
         price: proposalData.price,
         action: 'view_proposal',
-      }
+      },
     );
   }
 
-  async createPaymentConfirmationNotification(userId: string, paymentData: any): Promise<InAppNotification> {
+  async createPaymentConfirmationNotification(
+    userId: string,
+    paymentData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '✅ Pagamento Confirmado',
@@ -123,11 +144,14 @@ export class InAppNotificationService {
         amount: paymentData.amount,
         classDate: paymentData.classDate,
         action: 'view_class',
-      }
+      },
     );
   }
 
-  async createClassReminderNotification(userId: string, classData: any): Promise<InAppNotification> {
+  async createClassReminderNotification(
+    userId: string,
+    classData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '🏋️ Sua Aula é Hoje!',
@@ -140,11 +164,14 @@ export class InAppNotificationService {
         location: classData.location,
         partnerName: classData.partnerName,
         action: 'view_class',
-      }
+      },
     );
   }
 
-  async createClassStartedNotification(userId: string, classData: any): Promise<InAppNotification> {
+  async createClassStartedNotification(
+    userId: string,
+    classData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '▶️ Aula Iniciada',
@@ -155,13 +182,16 @@ export class InAppNotificationService {
         classId: classData.classId,
         partnerName: classData.partnerName,
         action: 'confirm_presence',
-      }
+      },
     );
   }
 
-  async createClassCancellationNotification(userId: string, classData: any): Promise<InAppNotification> {
+  async createClassCancellationNotification(
+    userId: string,
+    classData: any,
+  ): Promise<InAppNotification> {
     const refundMessage = classData.refundInfo ? ' Reembolso processado.' : '';
-    
+
     return this.createNotification(
       userId,
       '❌ Aula Cancelada',
@@ -174,11 +204,14 @@ export class InAppNotificationService {
         reason: classData.reason,
         refundInfo: classData.refundInfo,
         action: 'view_details',
-      }
+      },
     );
   }
 
-  async createRefundNotification(userId: string, refundData: any): Promise<InAppNotification> {
+  async createRefundNotification(
+    userId: string,
+    refundData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '💰 Reembolso Processado',
@@ -190,11 +223,14 @@ export class InAppNotificationService {
         estimatedDays: refundData.estimatedDays,
         reason: refundData.reason,
         action: 'view_refund',
-      }
+      },
     );
   }
 
-  async createRatingRequestNotification(userId: string, classData: any): Promise<InAppNotification> {
+  async createRatingRequestNotification(
+    userId: string,
+    classData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '⭐ Avalie sua Aula',
@@ -205,11 +241,13 @@ export class InAppNotificationService {
         classId: classData.classId,
         partnerName: classData.partnerName,
         action: 'rate_class',
-      }
+      },
     );
   }
 
-  async createProfileReminderNotification(userId: string): Promise<InAppNotification> {
+  async createProfileReminderNotification(
+    userId: string,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '👤 Complete seu Perfil',
@@ -218,11 +256,14 @@ export class InAppNotificationService {
       {
         type: 'profile_reminder',
         action: 'complete_profile',
-      }
+      },
     );
   }
 
-  async createNewMessageNotification(userId: string, messageData: any): Promise<InAppNotification> {
+  async createNewMessageNotification(
+    userId: string,
+    messageData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       `💬 ${messageData.senderName}`,
@@ -235,11 +276,14 @@ export class InAppNotificationService {
         classId: messageData.classId,
         messagePreview: messageData.messagePreview,
         action: 'open_chat',
-      }
+      },
     );
   }
 
-  async createDisputeUpdateNotification(userId: string, disputeData: any): Promise<InAppNotification> {
+  async createDisputeUpdateNotification(
+    userId: string,
+    disputeData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '⚖️ Atualização da Disputa',
@@ -251,14 +295,17 @@ export class InAppNotificationService {
         status: disputeData.status,
         classId: disputeData.classId,
         action: 'view_dispute',
-      }
+      },
     );
   }
 
-  async createPaymentReminderNotification(userId: string, reminderData: any): Promise<InAppNotification> {
+  async createPaymentReminderNotification(
+    userId: string,
+    reminderData: any,
+  ): Promise<InAppNotification> {
     const isUrgent = reminderData.reminderType === 'final';
     const timeLeft = isUrgent ? '5 minutos' : '20 minutos';
-    
+
     return this.createNotification(
       userId,
       isUrgent ? '🚨 Último Aviso!' : '⏰ Finalize seu Pagamento',
@@ -270,13 +317,16 @@ export class InAppNotificationService {
         timeLeft: timeLeft,
         reminderType: reminderData.reminderType,
         action: 'complete_payment',
-      }
+      },
     );
   }
 
   // ===== NOTIFICAÇÕES ADMINISTRATIVAS =====
 
-  async createSystemMaintenanceNotification(userId: string, maintenanceData: any): Promise<InAppNotification> {
+  async createSystemMaintenanceNotification(
+    userId: string,
+    maintenanceData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '🔧 Manutenção Programada',
@@ -288,11 +338,14 @@ export class InAppNotificationService {
         startTime: maintenanceData.startTime,
         endTime: maintenanceData.endTime,
         action: 'view_details',
-      }
+      },
     );
   }
 
-  async createPromotionNotification(userId: string, promotionData: any): Promise<InAppNotification> {
+  async createPromotionNotification(
+    userId: string,
+    promotionData: any,
+  ): Promise<InAppNotification> {
     return this.createNotification(
       userId,
       '🎉 Promoção Especial!',
@@ -304,7 +357,7 @@ export class InAppNotificationService {
         discount: promotionData.discount,
         validUntil: promotionData.validUntil,
         action: 'view_promotion',
-      }
+      },
     );
   }
 
@@ -312,25 +365,30 @@ export class InAppNotificationService {
 
   async getNotificationStats(userId?: string): Promise<any> {
     let filteredNotifications = this.notifications;
-    
+
     if (userId) {
-      filteredNotifications = this.notifications.filter(n => n.userId === userId);
+      filteredNotifications = this.notifications.filter(
+        (n) => n.userId === userId,
+      );
     }
 
     const total = filteredNotifications.length;
-    const unread = filteredNotifications.filter(n => !n.isRead).length;
-    const byType = filteredNotifications.reduce((acc, n) => {
-      acc[n.type] = (acc[n.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const unread = filteredNotifications.filter((n) => !n.isRead).length;
+    const byType = filteredNotifications.reduce(
+      (acc, n) => {
+        acc[n.type] = (acc[n.type] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     return {
       total,
       read: total - unread,
       unread,
       byType,
-      lastWeek: filteredNotifications.filter(n => 
-        n.createdAt >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      lastWeek: filteredNotifications.filter(
+        (n) => n.createdAt >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
       ).length,
     };
   }
@@ -340,12 +398,14 @@ export class InAppNotificationService {
   async cleanupOldNotifications(daysOld: number = 30): Promise<number> {
     const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
     const initialCount = this.notifications.length;
-    
-    this.notifications = this.notifications.filter(n => n.createdAt >= cutoffDate);
-    
+
+    this.notifications = this.notifications.filter(
+      (n) => n.createdAt >= cutoffDate,
+    );
+
     const removedCount = initialCount - this.notifications.length;
     this.logger.log(`🧹 ${removedCount} notificações antigas removidas`);
-    
+
     return removedCount;
   }
 }

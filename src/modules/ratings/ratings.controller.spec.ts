@@ -29,9 +29,9 @@ describe('RatingsController', () => {
         },
       ],
     })
-    .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
-    .useValue({ canActivate: () => true })
-    .compile();
+      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<RatingsController>(RatingsController);
     service = module.get<RatingsService>(RatingsService);
@@ -78,11 +78,17 @@ describe('RatingsController', () => {
       mockRatingsService.createRating.mockResolvedValue(mockRating);
 
       // Act
-      const result = await controller.createRating(createRatingDto, mockRequest);
+      const result = await controller.createRating(
+        createRatingDto,
+        mockRequest,
+      );
 
       // Assert
       expect(result).toEqual(mockRating);
-      expect(service.createRating).toHaveBeenCalledWith(createRatingDto, 'student-1');
+      expect(service.createRating).toHaveBeenCalledWith(
+        createRatingDto,
+        'student-1',
+      );
     });
   });
 
@@ -107,11 +113,19 @@ describe('RatingsController', () => {
       mockRatingsService.updateRating.mockResolvedValue(mockRating);
 
       // Act
-      const result = await controller.updateRating('rating-1', updateRatingDto, mockRequest);
+      const result = await controller.updateRating(
+        'rating-1',
+        updateRatingDto,
+        mockRequest,
+      );
 
       // Assert
       expect(result).toEqual(mockRating);
-      expect(service.updateRating).toHaveBeenCalledWith('rating-1', updateRatingDto, 'student-1');
+      expect(service.updateRating).toHaveBeenCalledWith(
+        'rating-1',
+        updateRatingDto,
+        'student-1',
+      );
     });
   });
 
@@ -134,7 +148,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRating);
-      expect(service.getRatingById).toHaveBeenCalledWith('rating-1', 'student-1');
+      expect(service.getRatingById).toHaveBeenCalledWith(
+        'rating-1',
+        'student-1',
+      );
     });
   });
 
@@ -192,7 +209,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRatings);
-      expect(service.getReceivedRatings).toHaveBeenCalledWith('personal-1', filters);
+      expect(service.getReceivedRatings).toHaveBeenCalledWith(
+        'personal-1',
+        filters,
+      );
     });
   });
 
@@ -285,7 +305,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRating);
-      expect(service.cancelRating).toHaveBeenCalledWith('rating-1', 'student-1');
+      expect(service.cancelRating).toHaveBeenCalledWith(
+        'rating-1',
+        'student-1',
+      );
     });
   });
 
@@ -300,7 +323,9 @@ describe('RatingsController', () => {
       const result = await controller.createAutomaticRatings(createDto);
 
       // Assert
-      expect(result).toEqual({ message: 'Avaliações automáticas criadas com sucesso' });
+      expect(result).toEqual({
+        message: 'Avaliações automáticas criadas com sucesso',
+      });
       expect(service.createAutomaticRatings).toHaveBeenCalledWith(createDto);
     });
   });
@@ -325,7 +350,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRatings);
-      expect(service.getRatings).toHaveBeenCalledWith({ status: 'pending' }, 'student-1');
+      expect(service.getRatings).toHaveBeenCalledWith(
+        { status: 'pending' },
+        'student-1',
+      );
     });
   });
 
@@ -349,7 +377,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRatings);
-      expect(service.getRatings).toHaveBeenCalledWith({ status: 'completed' }, 'student-1');
+      expect(service.getRatings).toHaveBeenCalledWith(
+        { status: 'completed' },
+        'student-1',
+      );
     });
   });
 
@@ -373,7 +404,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRatings);
-      expect(service.getRatings).toHaveBeenCalledWith({ type: 'student_to_personal' }, 'student-1');
+      expect(service.getRatings).toHaveBeenCalledWith(
+        { type: 'student_to_personal' },
+        'student-1',
+      );
     });
   });
 
@@ -397,7 +431,10 @@ describe('RatingsController', () => {
 
       // Assert
       expect(result).toEqual(mockRatings);
-      expect(service.getRatings).toHaveBeenCalledWith({ type: 'personal_to_student' }, 'personal-1');
+      expect(service.getRatings).toHaveBeenCalledWith(
+        { type: 'personal_to_student' },
+        'personal-1',
+      );
     });
   });
 });

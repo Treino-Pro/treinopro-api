@@ -8,10 +8,14 @@ if (!connectionString) {
   throw new Error('DATABASE_URL não está definida nas variáveis de ambiente');
 }
 
-console.log('🔗 [DATABASE] Connection string:', connectionString.replace(/:([^@]+)@/, ':***@'));
+console.log(
+  '🔗 [DATABASE] Connection string:',
+  connectionString.replace(/:([^@]+)@/, ':***@'),
+);
 
 // Verificar se deve usar mock database
-const useMockDatabase = connectionString.startsWith('mock://') || process.env.NODE_ENV === 'test';
+const useMockDatabase =
+  connectionString.startsWith('mock://') || process.env.NODE_ENV === 'test';
 
 let client = null;
 
@@ -23,7 +27,7 @@ if (useMockDatabase) {
 
   // Create connection with better error handling
   try {
-    client = postgres(connectionString, { 
+    client = postgres(connectionString, {
       max: 1,
       idle_timeout: 20,
       connect_timeout: 10,
@@ -35,8 +39,11 @@ if (useMockDatabase) {
       },
     });
   } catch (error) {
-    console.error('❌ [DATABASE] Erro ao conectar com o banco de dados:', error.message);
-    
+    console.error(
+      '❌ [DATABASE] Erro ao conectar com o banco de dados:',
+      error.message,
+    );
+
     // Fallback para conexão local sem autenticação
     try {
       client = postgres('postgresql://localhost:5432/treinopro', {
@@ -51,7 +58,10 @@ if (useMockDatabase) {
         },
       });
     } catch (fallbackError) {
-      console.error('❌ [DATABASE] Erro na conexão de fallback:', fallbackError.message);
+      console.error(
+        '❌ [DATABASE] Erro na conexão de fallback:',
+        fallbackError.message,
+      );
       console.log('🔄 [DATABASE] Usando banco mock para desenvolvimento...');
       // Criar cliente mock para desenvolvimento
       client = null;
@@ -60,4 +70,3 @@ if (useMockDatabase) {
 }
 
 export const db = client ? drizzle(client, { schema }) : null;
-

@@ -1,27 +1,39 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or, inArray } from 'drizzle-orm';
-import { classes, users, proposals, ratings, payments, files } from '../../database/schema';
+import {
+  classes,
+  users,
+  proposals,
+  ratings,
+  payments,
+  files,
+} from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
 import { RatingsService } from '../ratings/ratings.service';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
-import { 
-  CreateClassDto, 
-  UpdateClassDto, 
-  GetClassesDto, 
-  ClassResponseDto, 
-  ClassStatsDto, 
-  ClassStatus, 
+import {
+  CreateClassDto,
+  UpdateClassDto,
+  GetClassesDto,
+  ClassResponseDto,
+  ClassStatsDto,
+  ClassStatus,
   ClassDisputeStatus,
-  StartClassDto, 
+  StartClassDto,
   CompleteClassDto,
   ConfirmClassStartDto,
   ReportNoShowDto,
   ResolveNoShowDisputeDto,
   ClassTimelineDto,
-  ClassDisputeDto
+  ClassDisputeDto,
 } from './dto/classes.dto';
 
 @Injectable()
@@ -35,7 +47,10 @@ export class ClassesService {
     private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
-  async createClass(createClassDto: CreateClassDto, userId: string): Promise<ClassResponseDto> {
+  async createClass(
+    createClassDto: CreateClassDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     // Verificar se o usuário é o aluno da proposta
     const proposal = await this.db.query.proposals.findFirst({
       where: eq(proposals.id, createClassDto.proposalId),
@@ -46,11 +61,15 @@ export class ClassesService {
     }
 
     if (proposal.studentId !== userId) {
-      throw new ForbiddenException('Você não pode criar uma aula para esta proposta');
+      throw new ForbiddenException(
+        'Você não pode criar uma aula para esta proposta',
+      );
     }
 
     if (proposal.status !== 'accepted') {
-      throw new BadRequestException('A proposta deve estar aceita para criar uma aula');
+      throw new BadRequestException(
+        'A proposta deve estar aceita para criar uma aula',
+      );
     }
 
     // Verificar se já existe uma aula para esta proposta
@@ -65,8 +84,10 @@ export class ClassesService {
     // ===== VALIDAR CONFLITO DE HORÁRIO PARA O PERSONAL =====
     {
       const classDate = new Date(createClassDto.date);
-      const startOfDay = new Date(classDate); startOfDay.setHours(0,0,0,0);
-      const endOfDay = new Date(classDate); endOfDay.setHours(23,59,59,999);
+      const startOfDay = new Date(classDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(classDate);
+      endOfDay.setHours(23, 59, 59, 999);
 
       const existingClasses = await this.db
         .select()
@@ -79,58 +100,74 @@ export class ClassesService {
             or(
               eq(classes.status, ClassStatus.SCHEDULED),
               eq(classes.status, ClassStatus.PENDING_CONFIRMATION),
-              eq(classes.status, ClassStatus.ACTIVE)
-            )
-          )
+              eq(classes.status, ClassStatus.ACTIVE),
+            ),
+          ),
         );
 
-      const [h, m] = String(createClassDto.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
-      const proposedStart = new Date(classDate); proposedStart.setHours(h||0, m||0, 0, 0);
-      const proposedEnd = new Date(proposedStart.getTime() + (createClassDto.duration || 60) * 60 * 1000);
+      const [h, m] = String(createClassDto.time || '00:00')
+        .split(':')
+        .map((v: string) => parseInt(v, 10));
+      const proposedStart = new Date(classDate);
+      proposedStart.setHours(h || 0, m || 0, 0, 0);
+      const proposedEnd = new Date(
+        proposedStart.getTime() + (createClassDto.duration || 60) * 60 * 1000,
+      );
 
       const hasConflict = existingClasses.some((cls: any) => {
         const d = new Date(cls.date);
-        const [ch, cm] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
-        const classStart = new Date(d); classStart.setHours(ch||0, cm||0, 0, 0);
-        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+        const [ch, cm] = String(cls.time || '00:00')
+          .split(':')
+          .map((v: string) => parseInt(v, 10));
+        const classStart = new Date(d);
+        classStart.setHours(ch || 0, cm || 0, 0, 0);
+        const classEnd = new Date(
+          classStart.getTime() + (cls.duration || 60) * 60 * 1000,
+        );
         return !(proposedEnd <= classStart || proposedStart >= classEnd);
       });
 
       if (hasConflict) {
-        throw new BadRequestException('Conflito de horário: o personal já possui aula nesse período.');
+        throw new BadRequestException(
+          'Conflito de horário: o personal já possui aula nesse período.',
+        );
       }
     }
 
     // Criar a aula
-    const [newClass] = await this.db.insert(classes).values({
-      ...createClassDto,
-      date: new Date(createClassDto.date),
-    }).returning();
+    const [newClass] = await this.db
+      .insert(classes)
+      .values({
+        ...createClassDto,
+        date: new Date(createClassDto.date),
+      })
+      .returning();
 
     // Buscar a modalidade da proposta para incluir na resposta
     const proposalWithModality = await this.db.query.proposals.findFirst({
       where: eq(proposals.id, createClassDto.proposalId),
-        columns: {
-          id: true,
+      columns: {
+        id: true,
         modalityName: true,
-            value: true,
-          },
+        value: true,
+      },
     });
 
     // Adicionar dados da proposta ao objeto da aula
     const classWithProposal = {
       ...newClass,
-      proposal: proposalWithModality ? {
-        id: proposalWithModality.id,
-        modality: proposalWithModality.modalityName,
-        value: proposalWithModality.value,
-      } : null,
+      proposal: proposalWithModality
+        ? {
+            id: proposalWithModality.id,
+            modality: proposalWithModality.modalityName,
+            value: proposalWithModality.value,
+          }
+        : null,
       proposalModality: proposalWithModality?.modalityName || null,
     };
 
     return await this.formatClassResponse(classWithProposal); // Incluir proposal na criação
   }
-
 
   async getClassById(id: string, userId: string): Promise<ClassResponseDto> {
     const classData = await this.db.query.classes.findFirst({
@@ -174,27 +211,42 @@ export class ClassesService {
     return await this.formatClassResponse(classData);
   }
 
-  async updateClass(id: string, updateClassDto: UpdateClassDto, userId: string): Promise<ClassResponseDto> {
+  async updateClass(
+    id: string,
+    updateClassDto: UpdateClassDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     const classData = await this.getClassById(id, userId);
 
     // Verificar se o usuário pode editar a aula
-    if (classData.status === ClassStatus.COMPLETED || classData.status === ClassStatus.CANCELLED) {
-      throw new BadRequestException('Não é possível editar uma aula concluída ou cancelada');
+    if (
+      classData.status === ClassStatus.COMPLETED ||
+      classData.status === ClassStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Não é possível editar uma aula concluída ou cancelada',
+      );
     }
 
     // Apenas o personal pode editar a aula
     if (classData.personalId !== userId) {
-      throw new ForbiddenException('Apenas o personal trainer pode editar a aula');
+      throw new ForbiddenException(
+        'Apenas o personal trainer pode editar a aula',
+      );
     }
 
     // ===== VALIDAR CONFLITO DE HORÁRIO (SE ALTERAR DATA/HORA/DURAÇÃO) =====
     if (updateClassDto.date || updateClassDto.time || updateClassDto.duration) {
-      const newDate = updateClassDto.date ? new Date(updateClassDto.date) : new Date(classData.date);
+      const newDate = updateClassDto.date
+        ? new Date(updateClassDto.date)
+        : new Date(classData.date);
       const newTime = updateClassDto.time ?? classData.time;
       const newDuration = updateClassDto.duration ?? classData.duration;
 
-      const startOfDay = new Date(newDate); startOfDay.setHours(0,0,0,0);
-      const endOfDay = new Date(newDate); endOfDay.setHours(23,59,59,999);
+      const startOfDay = new Date(newDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(newDate);
+      endOfDay.setHours(23, 59, 59, 999);
 
       const existingClasses = await this.db
         .select()
@@ -207,26 +259,38 @@ export class ClassesService {
             or(
               eq(classes.status, ClassStatus.SCHEDULED),
               eq(classes.status, ClassStatus.PENDING_CONFIRMATION),
-              eq(classes.status, ClassStatus.ACTIVE)
-            )
-          )
+              eq(classes.status, ClassStatus.ACTIVE),
+            ),
+          ),
         );
 
-      const [h, m] = String(newTime || '00:00').split(':').map((v: string) => parseInt(v, 10));
-      const proposedStart = new Date(newDate); proposedStart.setHours(h||0, m||0, 0, 0);
-      const proposedEnd = new Date(proposedStart.getTime() + (newDuration || 60) * 60 * 1000);
+      const [h, m] = String(newTime || '00:00')
+        .split(':')
+        .map((v: string) => parseInt(v, 10));
+      const proposedStart = new Date(newDate);
+      proposedStart.setHours(h || 0, m || 0, 0, 0);
+      const proposedEnd = new Date(
+        proposedStart.getTime() + (newDuration || 60) * 60 * 1000,
+      );
 
       const hasConflict = existingClasses.some((cls: any) => {
         if (cls.id === id) return false; // ignorar a própria aula
         const d = new Date(cls.date);
-        const [ch, cm] = String(cls.time || '00:00').split(':').map((v: string) => parseInt(v, 10));
-        const classStart = new Date(d); classStart.setHours(ch||0, cm||0, 0, 0);
-        const classEnd = new Date(classStart.getTime() + (cls.duration || 60) * 60 * 1000);
+        const [ch, cm] = String(cls.time || '00:00')
+          .split(':')
+          .map((v: string) => parseInt(v, 10));
+        const classStart = new Date(d);
+        classStart.setHours(ch || 0, cm || 0, 0, 0);
+        const classEnd = new Date(
+          classStart.getTime() + (cls.duration || 60) * 60 * 1000,
+        );
         return !(proposedEnd <= classStart || proposedStart >= classEnd);
       });
 
       if (hasConflict) {
-        throw new BadRequestException('Conflito de horário: o personal já possui aula nesse período.');
+        throw new BadRequestException(
+          'Conflito de horário: o personal já possui aula nesse período.',
+        );
       }
     }
 
@@ -243,42 +307,55 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-
-  async completeClass(id: string, completeClassDto: CompleteClassDto, userId: string): Promise<ClassResponseDto> {
+  async completeClass(
+    id: string,
+    completeClassDto: CompleteClassDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     console.log('🔍 [COMPLETE_CLASS] Iniciando finalização da aula:');
     console.log('🔍 [COMPLETE_CLASS] ID:', id);
     console.log('🔍 [COMPLETE_CLASS] User ID:', userId);
     console.log('🔍 [COMPLETE_CLASS] DTO:', completeClassDto);
-    
+
     const classData = await this.getClassById(id, userId);
     console.log('🔍 [COMPLETE_CLASS] Class Data:', {
       id: classData.id,
       status: classData.status,
       personalId: classData.personalId,
-      startedAt: classData.startedAt
+      startedAt: classData.startedAt,
     });
 
     // Verificar se o usuário é o personal trainer
     if (classData.personalId !== userId) {
       console.log('❌ [COMPLETE_CLASS] Erro: Usuário não é o personal trainer');
-      throw new ForbiddenException('Apenas o personal trainer pode finalizar a aula');
+      throw new ForbiddenException(
+        'Apenas o personal trainer pode finalizar a aula',
+      );
     }
 
     // Verificar se a aula pode ser finalizada
     if (classData.status !== ClassStatus.ACTIVE) {
-      console.log('❌ [COMPLETE_CLASS] Erro: Aula não está ativa. Status:', classData.status);
-      
+      console.log(
+        '❌ [COMPLETE_CLASS] Erro: Aula não está ativa. Status:',
+        classData.status,
+      );
+
       if (classData.status === ClassStatus.COMPLETED) {
-        throw new BadRequestException('Esta aula já foi finalizada anteriormente');
+        throw new BadRequestException(
+          'Esta aula já foi finalizada anteriormente',
+        );
       } else {
-        throw new BadRequestException(`Apenas aulas ativas podem ser finalizadas. Status atual: ${classData.status}`);
+        throw new BadRequestException(
+          `Apenas aulas ativas podem ser finalizadas. Status atual: ${classData.status}`,
+        );
       }
     }
 
     // Verificar se a aula foi iniciada há pelo menos 1 minuto (para testes)
     if (classData.startedAt) {
       const now = new Date();
-      const duration = (now.getTime() - classData.startedAt.getTime()) / (1000 * 60); // em minutos
+      const duration =
+        (now.getTime() - classData.startedAt.getTime()) / (1000 * 60); // em minutos
       console.log('🔍 [COMPLETE_CLASS] Duração da aula:', duration, 'minutos');
 
       if (duration < 1) {
@@ -306,37 +383,55 @@ export class ClassesService {
         columns: { id: true, status: true },
       });
 
-      if (relatedProposal && (relatedProposal.status === 'matched' || relatedProposal.status === 'accepted')) {
+      if (
+        relatedProposal &&
+        (relatedProposal.status === 'matched' ||
+          relatedProposal.status === 'accepted')
+      ) {
         await this.db
           .update(proposals)
           .set({ status: 'completed', updatedAt: new Date() })
           .where(eq(proposals.id, relatedProposal.id));
 
-        console.log('✅ [CLASSES] Proposta vinculada marcada como completed:', relatedProposal.id);
+        console.log(
+          '✅ [CLASSES] Proposta vinculada marcada como completed:',
+          relatedProposal.id,
+        );
       }
     } catch (err) {
-      console.warn('⚠️ [CLASSES] Não foi possível atualizar status da proposta vinculada:', err?.message || err);
+      console.warn(
+        '⚠️ [CLASSES] Não foi possível atualizar status da proposta vinculada:',
+        err?.message || err,
+      );
     }
 
     // ===== INTEGRAÇÃO COM GAMIFICAÇÃO =====
     try {
-      console.log('🎯 [COMPLETE_CLASS] ===== INICIANDO PROCESSAMENTO DE GAMIFICAÇÃO =====');
+      console.log(
+        '🎯 [COMPLETE_CLASS] ===== INICIANDO PROCESSAMENTO DE GAMIFICAÇÃO =====',
+      );
       console.log('🎯 [COMPLETE_CLASS] Student ID:', classData.studentId);
       console.log('🎯 [COMPLETE_CLASS] Personal ID:', userId);
       console.log('🎯 [COMPLETE_CLASS] Class ID:', id);
-      
+
       // Dar XP para o aluno por completar a aula
       console.log('🎯 [COMPLETE_CLASS] Processando XP para aluno...');
-      await this.gamificationService.processClassCompletion(classData.studentId, id);
+      await this.gamificationService.processClassCompletion(
+        classData.studentId,
+        id,
+      );
       console.log('✅ [COMPLETE_CLASS] XP processado para aluno com sucesso');
-      
+
       // Dar XP para o personal trainer por completar a aula
       console.log('🎯 [COMPLETE_CLASS] Processando XP para personal...');
       await this.gamificationService.processClassCompletion(userId, id);
-      console.log('✅ [COMPLETE_CLASS] XP processado para personal com sucesso');
-      
-      console.log('✅ [COMPLETE_CLASS] ===== GAMIFICAÇÃO PROCESSADA COM SUCESSO =====');
-      
+      console.log(
+        '✅ [COMPLETE_CLASS] XP processado para personal com sucesso',
+      );
+
+      console.log(
+        '✅ [COMPLETE_CLASS] ===== GAMIFICAÇÃO PROCESSADA COM SUCESSO =====',
+      );
     } catch (error) {
       console.error('❌ [GAMIFICATION] Erro ao processar XP da aula:', error);
       console.error('❌ [GAMIFICATION] Stack trace:', error.stack);
@@ -345,10 +440,15 @@ export class ClassesService {
 
     // ===== APLICAR SPLIT E ATUALIZAR CARTEIRA APÓS CONCLUSÃO DA AULA =====
     try {
-      console.log('💰 [COMPLETE_CLASS] ===== INICIANDO REPASSE APÓS CONCLUSÃO DA AULA =====');
+      console.log(
+        '💰 [COMPLETE_CLASS] ===== INICIANDO REPASSE APÓS CONCLUSÃO DA AULA =====',
+      );
       console.log('💰 [COMPLETE_CLASS] Class ID:', id);
-      console.log('💰 [COMPLETE_CLASS] User ID (quem está completando):', userId);
-      
+      console.log(
+        '💰 [COMPLETE_CLASS] User ID (quem está completando):',
+        userId,
+      );
+
       // Buscar pagamento da aula
       const payment = await this.db.query.payments.findFirst({
         where: eq(payments.classId, id),
@@ -365,15 +465,22 @@ export class ClassesService {
         platformFee: payment?.platformFee,
         personalAmount: payment?.personalAmount,
         personalId: payment?.personalId,
-        studentId: payment?.studentId
+        studentId: payment?.studentId,
       });
 
       if (payment) {
         if (payment.status === 'authorized' || payment.status === 'pending') {
-          console.log('✅ [COMPLETE_CLASS] Pagamento em custódia - iniciando captura e split');
-          await this.paymentsService.capturePaymentAfterClass(id, 'Aula concluída');
-          console.log('✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService');
-          
+          console.log(
+            '✅ [COMPLETE_CLASS] Pagamento em custódia - iniciando captura e split',
+          );
+          await this.paymentsService.capturePaymentAfterClass(
+            id,
+            'Aula concluída',
+          );
+          console.log(
+            '✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService',
+          );
+
           // Enviar notificação push para personal sobre repasse
           try {
             const personalAmount = payment.personalAmount || 0;
@@ -385,29 +492,43 @@ export class ClassesService {
                 classId: id,
                 amount: personalAmount.toString(),
                 description: `Repasse da aula ${classData.date}`,
-              }
+              },
             });
             console.log('✅ [COMPLETE_CLASS] Notificação de repasse enviada');
           } catch (error) {
-            console.error('❌ [COMPLETE_CLASS] Erro ao enviar notificação de repasse:', error);
+            console.error(
+              '❌ [COMPLETE_CLASS] Erro ao enviar notificação de repasse:',
+              error,
+            );
           }
         } else if (payment.status === 'captured') {
           // Já capturado: split e carteira devem ter sido aplicados no fluxo de pagamentos (webhook/capture)
-          console.log('ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário');
+          console.log(
+            'ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário',
+          );
         } else {
-          console.log('⚠️ [COMPLETE_CLASS] Pagamento com status inesperado para repasse:', {
-            paymentStatus: payment.status,
-            expectedStatuses: ['authorized', 'captured']
-          });
+          console.log(
+            '⚠️ [COMPLETE_CLASS] Pagamento com status inesperado para repasse:',
+            {
+              paymentStatus: payment.status,
+              expectedStatuses: ['authorized', 'captured'],
+            },
+          );
         }
       } else {
-        console.log('⚠️ [COMPLETE_CLASS] Nenhum pagamento encontrado para esta aula');
+        console.log(
+          '⚠️ [COMPLETE_CLASS] Nenhum pagamento encontrado para esta aula',
+        );
       }
-      
-      console.log('💰 [COMPLETE_CLASS] ===== PROCESSO DE REPASSE FINALIZADO =====');
-      
+
+      console.log(
+        '💰 [COMPLETE_CLASS] ===== PROCESSO DE REPASSE FINALIZADO =====',
+      );
     } catch (error) {
-      console.error('❌ [COMPLETE_CLASS] Erro ao aplicar split após conclusão:', error);
+      console.error(
+        '❌ [COMPLETE_CLASS] Erro ao aplicar split após conclusão:',
+        error,
+      );
       console.error('❌ [COMPLETE_CLASS] Stack trace:', error.stack);
       // Não falhar a operação se a atualização de carteira falhar
       // Mas logar o erro para investigação
@@ -419,10 +540,17 @@ export class ClassesService {
       // Buscar valor correto do repasse (personalAmount) para notificação
       let personalAmountValue = 0;
       try {
-        const paymentForWs = await this.db.query.payments.findFirst({ where: eq(payments.classId, id) });
-        personalAmountValue = paymentForWs ? Number(paymentForWs.personalAmount) : 0;
+        const paymentForWs = await this.db.query.payments.findFirst({
+          where: eq(payments.classId, id),
+        });
+        personalAmountValue = paymentForWs
+          ? Number(paymentForWs.personalAmount)
+          : 0;
       } catch (e) {
-        console.warn('⚠️ [COMPLETE_CLASS] Falha ao buscar pagamento para evento financeiro:', e);
+        console.warn(
+          '⚠️ [COMPLETE_CLASS] Falha ao buscar pagamento para evento financeiro:',
+          e,
+        );
       }
 
       // Evento de timer expirado (mesmo que quando timer chega a 0)
@@ -456,7 +584,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      console.log('✅ [COMPLETE_CLASS] Eventos WebSocket emitidos (mesmo que timer expirado)');
+      console.log(
+        '✅ [COMPLETE_CLASS] Eventos WebSocket emitidos (mesmo que timer expirado)',
+      );
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
       // Não falhar a operação por causa de problemas de WebSocket
@@ -466,9 +596,14 @@ export class ClassesService {
   }
 
   // Finalizar aula automaticamente quando timer expira
-  async completeClassByTimerExpiration(classId: string): Promise<ClassResponseDto> {
-    console.log('⏰ [TIMER_EXPIRATION] Finalizando aula por expiração do timer:', classId);
-    
+  async completeClassByTimerExpiration(
+    classId: string,
+  ): Promise<ClassResponseDto> {
+    console.log(
+      '⏰ [TIMER_EXPIRATION] Finalizando aula por expiração do timer:',
+      classId,
+    );
+
     const classData = await this.db.query.classes.findFirst({
       where: eq(classes.id, classId),
       with: {
@@ -483,7 +618,10 @@ export class ClassesService {
     }
 
     if (classData.status !== ClassStatus.ACTIVE) {
-      console.log('⚠️ [TIMER_EXPIRATION] Aula não está ativa, ignorando expiração. Status:', classData.status);
+      console.log(
+        '⚠️ [TIMER_EXPIRATION] Aula não está ativa, ignorando expiração. Status:',
+        classData.status,
+      );
       return this.formatClassResponse(classData);
     }
 
@@ -512,36 +650,68 @@ export class ClassesService {
 
     // ===== PROCESSAR GAMIFICAÇÃO =====
     try {
-      console.log('🎯 [TIMER_EXPIRATION] Processando gamificação para aluno e personal...');
-      
+      console.log(
+        '🎯 [TIMER_EXPIRATION] Processando gamificação para aluno e personal...',
+      );
+
       // Processar gamificação para o aluno
-      await this.gamificationService.processClassCompletion(classData.studentId, classId);
-      console.log('✅ [TIMER_EXPIRATION] Gamificação processada para aluno:', classData.studentId);
-      
+      await this.gamificationService.processClassCompletion(
+        classData.studentId,
+        classId,
+      );
+      console.log(
+        '✅ [TIMER_EXPIRATION] Gamificação processada para aluno:',
+        classData.studentId,
+      );
+
       // Processar gamificação para o personal trainer
-      await this.gamificationService.processClassCompletion(classData.personalId, classId);
-      console.log('✅ [TIMER_EXPIRATION] Gamificação processada para personal:', classData.personalId);
-      
+      await this.gamificationService.processClassCompletion(
+        classData.personalId,
+        classId,
+      );
+      console.log(
+        '✅ [TIMER_EXPIRATION] Gamificação processada para personal:',
+        classData.personalId,
+      );
     } catch (error) {
-      console.error('❌ [TIMER_EXPIRATION] Erro ao processar gamificação:', error);
+      console.error(
+        '❌ [TIMER_EXPIRATION] Erro ao processar gamificação:',
+        error,
+      );
     }
 
     // ===== CAPTURAR PAGAMENTO E APLICAR SPLIT (SE EM CUSTÓDIA) =====
     try {
-      const payment = await this.db.query.payments.findFirst({ where: eq(payments.classId, classId) });
+      const payment = await this.db.query.payments.findFirst({
+        where: eq(payments.classId, classId),
+      });
       if (payment) {
         if (payment.status === 'authorized' || payment.status === 'pending') {
-          console.log('✅ [TIMER_EXPIRATION] Pagamento em custódia - iniciando captura e split');
-          await this.paymentsService.capturePaymentAfterClass(classId, 'Aula concluída por expiração do timer');
-          console.log('✅ [TIMER_EXPIRATION] Pagamento capturado e split aplicado via PaymentsService');
+          console.log(
+            '✅ [TIMER_EXPIRATION] Pagamento em custódia - iniciando captura e split',
+          );
+          await this.paymentsService.capturePaymentAfterClass(
+            classId,
+            'Aula concluída por expiração do timer',
+          );
+          console.log(
+            '✅ [TIMER_EXPIRATION] Pagamento capturado e split aplicado via PaymentsService',
+          );
         } else if (payment.status === 'captured') {
-          console.log('ℹ️ [TIMER_EXPIRATION] Pagamento já capturado - nenhum repasse adicional necessário');
+          console.log(
+            'ℹ️ [TIMER_EXPIRATION] Pagamento já capturado - nenhum repasse adicional necessário',
+          );
         }
       } else {
-        console.log('⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado para esta aula');
+        console.log(
+          '⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado para esta aula',
+        );
       }
     } catch (error) {
-      console.error('❌ [TIMER_EXPIRATION] Erro ao capturar pagamento após expiração:', error);
+      console.error(
+        '❌ [TIMER_EXPIRATION] Erro ao capturar pagamento após expiração:',
+        error,
+      );
     }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
@@ -550,10 +720,17 @@ export class ClassesService {
       // Buscar valor correto do repasse (personalAmount) para notificação
       let personalAmountValue = 0;
       try {
-        const paymentForWs = await this.db.query.payments.findFirst({ where: eq(payments.classId, classId) });
-        personalAmountValue = paymentForWs ? Number(paymentForWs.personalAmount) : 0;
+        const paymentForWs = await this.db.query.payments.findFirst({
+          where: eq(payments.classId, classId),
+        });
+        personalAmountValue = paymentForWs
+          ? Number(paymentForWs.personalAmount)
+          : 0;
       } catch (e) {
-        console.warn('⚠️ [TIMER_EXPIRATION] Falha ao buscar pagamento para evento financeiro:', e);
+        console.warn(
+          '⚠️ [TIMER_EXPIRATION] Falha ao buscar pagamento para evento financeiro:',
+          e,
+        );
       }
 
       // Evento de timer expirado
@@ -589,7 +766,10 @@ export class ClassesService {
 
       console.log('✅ [TIMER_EXPIRATION] Eventos WebSocket emitidos');
     } catch (error) {
-      console.error('❌ [TIMER_EXPIRATION] Erro ao emitir eventos WebSocket:', error);
+      console.error(
+        '❌ [TIMER_EXPIRATION] Erro ao emitir eventos WebSocket:',
+        error,
+      );
     }
 
     return this.formatClassResponse(updatedClass);
@@ -599,7 +779,10 @@ export class ClassesService {
     const classData = await this.getClassById(id, userId);
 
     // Verificar se a aula pode ser cancelada
-    if (classData.status === ClassStatus.COMPLETED || classData.status === ClassStatus.CANCELLED) {
+    if (
+      classData.status === ClassStatus.COMPLETED ||
+      classData.status === ClassStatus.CANCELLED
+    ) {
       throw new BadRequestException('A aula não pode ser cancelada');
     }
 
@@ -627,17 +810,22 @@ export class ClassesService {
             updatedAt: new Date(),
           })
           .where(eq(proposals.id, classData.proposalId));
-        
-        console.log(`✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'cancelled'`);
+
+        console.log(
+          `✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'cancelled'`,
+        );
       } catch (error) {
-        console.error(`❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`, error);
+        console.error(
+          `❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`,
+          error,
+        );
       }
     }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
-      
+
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_cancelled',
@@ -647,7 +835,7 @@ export class ClassesService {
         cancelledBy: userId,
         timestamp: new Date(),
       });
-      
+
       console.log('✅ [CLASSES] Evento WebSocket emitido: class_cancelled');
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
@@ -665,12 +853,7 @@ export class ClassesService {
         count: count(),
       })
       .from(classes)
-      .where(
-        or(
-          eq(classes.studentId, userId),
-          eq(classes.personalId, userId)
-        )
-      )
+      .where(or(eq(classes.studentId, userId), eq(classes.personalId, userId)))
       .groupBy(classes.status, classes.duration);
 
     const result = {
@@ -686,36 +869,54 @@ export class ClassesService {
       averageDuration: 0,
     };
 
-    stats.forEach(stat => {
+    stats.forEach((stat) => {
       result.total += stat.count;
       result[stat.status] += stat.count;
       result.totalDuration += stat.duration * stat.count;
     });
 
-    result.averageDuration = result.total > 0 ? Math.round(result.totalDuration / result.total) : 0;
+    result.averageDuration =
+      result.total > 0 ? Math.round(result.totalDuration / result.total) : 0;
 
     return result;
   }
 
-  async getClassTimeline(classId: string, userId: string): Promise<ClassTimelineDto> {
+  async getClassTimeline(
+    classId: string,
+    userId: string,
+  ): Promise<ClassTimelineDto> {
     const classData = await this.getClassById(classId, userId);
     const now = new Date();
-    const classDateTime = new Date(`${classData.date.toISOString().split('T')[0]}T${classData.time}`);
-    
+    const classDateTime = new Date(
+      `${classData.date.toISOString().split('T')[0]}T${classData.time}`,
+    );
+
     // Calcular deadlines
-    const cancellationDeadline = new Date(classDateTime.getTime() - 2 * 60 * 60 * 1000); // 2h antes
-    const noShowReportDeadline = new Date(classDateTime.getTime() + 10 * 60 * 1000); // 10min depois
-    
+    const cancellationDeadline = new Date(
+      classDateTime.getTime() - 2 * 60 * 60 * 1000,
+    ); // 2h antes
+    const noShowReportDeadline = new Date(
+      classDateTime.getTime() + 10 * 60 * 1000,
+    ); // 10min depois
+
     // Lógica dos botões baseada no tempo
-    const canCancel = now < cancellationDeadline && classData.status === ClassStatus.SCHEDULED;
-    const canStart = now >= new Date(classDateTime.getTime() - 30 * 60 * 1000) && 
-                     now <= new Date(classDateTime.getTime() + 10 * 60 * 1000) &&
-                     (classData.status === ClassStatus.SCHEDULED || classData.status === ClassStatus.PENDING_CONFIRMATION);
-    const canReportNoShow = now >= noShowReportDeadline && 
-                           (classData.status === ClassStatus.PENDING_CONFIRMATION || classData.status === ClassStatus.SCHEDULED);
-    const canConfirmStart = classData.status === ClassStatus.PENDING_CONFIRMATION;
-    const canReportPersonalNoShow = now >= noShowReportDeadline && 
-                                   (classData.status === ClassStatus.PENDING_CONFIRMATION || classData.status === ClassStatus.SCHEDULED);
+    const canCancel =
+      now < cancellationDeadline && classData.status === ClassStatus.SCHEDULED;
+    const canStart =
+      now >= new Date(classDateTime.getTime() - 30 * 60 * 1000) &&
+      now <= new Date(classDateTime.getTime() + 10 * 60 * 1000) &&
+      (classData.status === ClassStatus.SCHEDULED ||
+        classData.status === ClassStatus.PENDING_CONFIRMATION);
+    const canReportNoShow =
+      now >= noShowReportDeadline &&
+      (classData.status === ClassStatus.PENDING_CONFIRMATION ||
+        classData.status === ClassStatus.SCHEDULED);
+    const canConfirmStart =
+      classData.status === ClassStatus.PENDING_CONFIRMATION;
+    const canReportPersonalNoShow =
+      now >= noShowReportDeadline &&
+      (classData.status === ClassStatus.PENDING_CONFIRMATION ||
+        classData.status === ClassStatus.SCHEDULED);
 
     return {
       matchTime: classData.createdAt,
@@ -731,32 +932,45 @@ export class ClassesService {
     };
   }
 
-  async startClass(classId: string, startClassDto: StartClassDto, userId: string): Promise<ClassResponseDto> {
+  async startClass(
+    classId: string,
+    startClassDto: StartClassDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     const classData = await this.getClassById(classId, userId);
 
     // Verificar se o usuário é o personal trainer
     if (classData.personalId !== userId) {
-      throw new ForbiddenException('Apenas o personal trainer pode iniciar a aula');
+      throw new ForbiddenException(
+        'Apenas o personal trainer pode iniciar a aula',
+      );
     }
 
     // Verificar se a aula pode ser iniciada
     if (classData.status !== ClassStatus.SCHEDULED) {
-      throw new BadRequestException('Apenas aulas agendadas podem ser iniciadas');
+      throw new BadRequestException(
+        'Apenas aulas agendadas podem ser iniciadas',
+      );
     }
 
     // Verificar se está dentro do prazo (30min antes até 10min depois)
     const now = new Date();
-    const classDateTime = new Date(`${classData.date.toISOString().split('T')[0]}T${classData.time}`);
-    
+    const classDateTime = new Date(
+      `${classData.date.toISOString().split('T')[0]}T${classData.time}`,
+    );
+
     // Em ambiente de teste, ser mais tolerante
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID;
-    
+    const isTestEnvironment =
+      process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID;
+
     if (!isTestEnvironment) {
       const startWindow = new Date(classDateTime.getTime() - 30 * 60 * 1000); // 30min antes
       const endWindow = new Date(classDateTime.getTime() + 10 * 60 * 1000); // 10min depois
-      
+
       if (now < startWindow || now > endWindow) {
-        throw new BadRequestException('A aula só pode ser iniciada entre 30 minutos antes e 10 minutos depois do horário agendado');
+        throw new BadRequestException(
+          'A aula só pode ser iniciada entre 30 minutos antes e 10 minutos depois do horário agendado',
+        );
       }
     }
 
@@ -774,12 +988,12 @@ export class ClassesService {
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
       const studentId = classData.studentId;
-      
+
       // Buscar dados do personal para notificação
       const personalData = await this.db.query.users.findFirst({
         where: eq(users.id, userId),
       });
-      
+
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_started',
@@ -788,7 +1002,7 @@ export class ClassesService {
         studentId: studentId,
         timestamp: new Date(),
       });
-      
+
       // Enviar notificação push para aluno
       await this.firebaseNotificationService.sendToUser(studentId, {
         title: '▶️ Aula Iniciada',
@@ -800,10 +1014,12 @@ export class ClassesService {
           partnerId: userId,
           time: classData.time,
           location: classData.location || 'Local a definir',
-        }
+        },
       });
-      
-      console.log('✅ [CLASSES] Evento WebSocket e push emitidos: class_started');
+
+      console.log(
+        '✅ [CLASSES] Evento WebSocket e push emitidos: class_started',
+      );
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
@@ -811,12 +1027,18 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  async confirmClassStart(classId: string, confirmDto: ConfirmClassStartDto, userId: string): Promise<ClassResponseDto> {
+  async confirmClassStart(
+    classId: string,
+    confirmDto: ConfirmClassStartDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     const classData = await this.getClassById(classId, userId);
 
     // Verificar se o usuário é o aluno
     if (classData.studentId !== userId) {
-      throw new ForbiddenException('Apenas o aluno pode confirmar o início da aula');
+      throw new ForbiddenException(
+        'Apenas o aluno pode confirmar o início da aula',
+      );
     }
 
     // Verificar se a aula está aguardando confirmação
@@ -841,7 +1063,7 @@ export class ClassesService {
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
-      
+
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_confirmed',
@@ -850,7 +1072,7 @@ export class ClassesService {
         studentId: userId,
         timestamp: new Date(),
       });
-      
+
       // 🕐 NOVO: Evento de timer global para sincronização
       this.chatGateway.server.emit('class_timer_started', {
         classId,
@@ -860,7 +1082,7 @@ export class ClassesService {
         personalId: classData.personalId,
         studentId: userId,
       });
-      
+
       console.log('✅ [CLASSES] Evento WebSocket emitido: class_confirmed');
       console.log('🕐 [TIMER] Evento WebSocket emitido: class_timer_started');
     } catch (error) {
@@ -870,26 +1092,42 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  async reportNoShow(classId: string, reportDto: ReportNoShowDto, userId: string): Promise<ClassResponseDto> {
+  async reportNoShow(
+    classId: string,
+    reportDto: ReportNoShowDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     const classData = await this.getClassById(classId, userId);
 
     // Verificar se o usuário é o personal trainer
     if (classData.personalId !== userId) {
-      throw new ForbiddenException('Apenas o personal trainer pode reportar ausência do aluno');
+      throw new ForbiddenException(
+        'Apenas o personal trainer pode reportar ausência do aluno',
+      );
     }
 
     // Verificar se pode reportar ausência (após 10min do horário)
     const now = new Date();
-    const classDateTime = new Date(`${classData.date.toISOString().split('T')[0]}T${classData.time}`);
+    const classDateTime = new Date(
+      `${classData.date.toISOString().split('T')[0]}T${classData.time}`,
+    );
     const noShowDeadline = new Date(classDateTime.getTime() + 10 * 60 * 1000);
 
     if (now < noShowDeadline) {
-      throw new BadRequestException('A ausência só pode ser reportada após 10 minutos do horário agendado');
+      throw new BadRequestException(
+        'A ausência só pode ser reportada após 10 minutos do horário agendado',
+      );
     }
 
     // Verificar se a aula está em estado válido para reportar ausência
-    if (![ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(classData.status)) {
-      throw new BadRequestException('A aula não está em estado válido para reportar ausência');
+    if (
+      ![ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(
+        classData.status,
+      )
+    ) {
+      throw new BadRequestException(
+        'A aula não está em estado válido para reportar ausência',
+      );
     }
 
     const [updatedClass] = await this.db
@@ -901,7 +1139,9 @@ export class ClassesService {
         disputeStatus: ClassDisputeStatus.PENDING,
         custodyExpiresAt: new Date(now.getTime() + 48 * 60 * 60 * 1000), // 48h
         evidenceDeadline: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24h
-        personalEvidence: reportDto.evidenceUrls ? JSON.stringify(reportDto.evidenceUrls) : null,
+        personalEvidence: reportDto.evidenceUrls
+          ? JSON.stringify(reportDto.evidenceUrls)
+          : null,
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -917,17 +1157,22 @@ export class ClassesService {
             updatedAt: new Date(),
           })
           .where(eq(proposals.id, classData.proposalId));
-        
-        console.log(`✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'disputed'`);
+
+        console.log(
+          `✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'disputed'`,
+        );
       } catch (error) {
-        console.error(`❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`, error);
+        console.error(
+          `❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`,
+          error,
+        );
       }
     }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
-      
+
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_no_show_reported',
@@ -937,8 +1182,10 @@ export class ClassesService {
         reportedBy: 'personal',
         timestamp: new Date(),
       });
-      
-      console.log('✅ [CLASSES] Evento WebSocket emitido: class_no_show_reported');
+
+      console.log(
+        '✅ [CLASSES] Evento WebSocket emitido: class_no_show_reported',
+      );
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
@@ -946,7 +1193,11 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  async reportPersonalNoShow(classId: string, reportDto: ReportNoShowDto, userId: string): Promise<ClassResponseDto> {
+  async reportPersonalNoShow(
+    classId: string,
+    reportDto: ReportNoShowDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Iniciando reporte:', {
       classId,
       userId,
@@ -965,13 +1216,20 @@ export class ClassesService {
 
     // Verificar se o usuário é o aluno
     if (classData.studentId !== userId) {
-      console.log('❌ [REPORT_PERSONAL_NO_SHOW] Usuário não é o aluno:', { userId, studentId: classData.studentId });
-      throw new ForbiddenException('Apenas o aluno pode reportar ausência do personal trainer');
+      console.log('❌ [REPORT_PERSONAL_NO_SHOW] Usuário não é o aluno:', {
+        userId,
+        studentId: classData.studentId,
+      });
+      throw new ForbiddenException(
+        'Apenas o aluno pode reportar ausência do personal trainer',
+      );
     }
 
     // Verificar se pode reportar ausência (após 10min do horário)
     const now = new Date();
-    const classDateTime = new Date(`${classData.date.toISOString().split('T')[0]}T${classData.time}`);
+    const classDateTime = new Date(
+      `${classData.date.toISOString().split('T')[0]}T${classData.time}`,
+    );
     const noShowDeadline = new Date(classDateTime.getTime() + 10 * 60 * 1000);
 
     console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Validação de tempo:', {
@@ -982,20 +1240,33 @@ export class ClassesService {
     });
 
     if (now < noShowDeadline) {
-      console.log('❌ [REPORT_PERSONAL_NO_SHOW] Ainda não pode reportar - muito cedo');
-      throw new BadRequestException('A ausência só pode ser reportada após 10 minutos do horário agendado');
+      console.log(
+        '❌ [REPORT_PERSONAL_NO_SHOW] Ainda não pode reportar - muito cedo',
+      );
+      throw new BadRequestException(
+        'A ausência só pode ser reportada após 10 minutos do horário agendado',
+      );
     }
 
     // Verificar se a aula está em estado válido para reportar ausência
     console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Validação de status:', {
       currentStatus: classData.status,
       validStatuses: [ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION],
-      isValid: [ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(classData.status),
+      isValid: [
+        ClassStatus.SCHEDULED,
+        ClassStatus.PENDING_CONFIRMATION,
+      ].includes(classData.status),
     });
 
-    if (![ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(classData.status)) {
+    if (
+      ![ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(
+        classData.status,
+      )
+    ) {
       console.log('❌ [REPORT_PERSONAL_NO_SHOW] Status inválido para reportar');
-      throw new BadRequestException('A aula não está em estado válido para reportar ausência');
+      throw new BadRequestException(
+        'A aula não está em estado válido para reportar ausência',
+      );
     }
 
     console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Atualizando aula no banco...');
@@ -1009,7 +1280,9 @@ export class ClassesService {
         disputeStatus: ClassDisputeStatus.PENDING,
         custodyExpiresAt: new Date(now.getTime() + 48 * 60 * 60 * 1000), // 48h
         evidenceDeadline: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24h
-        studentEvidence: reportDto.evidenceUrls ? JSON.stringify(reportDto.evidenceUrls) : null,
+        studentEvidence: reportDto.evidenceUrls
+          ? JSON.stringify(reportDto.evidenceUrls)
+          : null,
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -1024,8 +1297,10 @@ export class ClassesService {
 
     // ===== ATUALIZAR STATUS DA PROPOSTA =====
     try {
-      console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Atualizando status da proposta...');
-      
+      console.log(
+        '🔍 [REPORT_PERSONAL_NO_SHOW] Atualizando status da proposta...',
+      );
+
       await this.db
         .update(proposals)
         .set({
@@ -1033,17 +1308,22 @@ export class ClassesService {
           updatedAt: new Date(),
         })
         .where(eq(proposals.id, classData.proposalId));
-      
-      console.log('✅ [REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed');
+
+      console.log(
+        '✅ [REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed',
+      );
     } catch (error) {
-      console.error('❌ [REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta:', error);
+      console.error(
+        '❌ [REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta:',
+        error,
+      );
       // Não falhar o processo se não conseguir atualizar a proposta
     }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
-      
+
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
         action: 'class_personal_no_show_reported',
@@ -1053,8 +1333,10 @@ export class ClassesService {
         reportedBy: 'student',
         timestamp: new Date(),
       });
-      
-      console.log('✅ [CLASSES] Evento WebSocket emitido: class_personal_no_show_reported');
+
+      console.log(
+        '✅ [CLASSES] Evento WebSocket emitido: class_personal_no_show_reported',
+      );
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
@@ -1062,7 +1344,11 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  async resolveNoShowDispute(classId: string, resolveDto: ResolveNoShowDisputeDto, userId: string): Promise<ClassResponseDto> {
+  async resolveNoShowDispute(
+    classId: string,
+    resolveDto: ResolveNoShowDisputeDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
     const classData = await this.db.query.classes.findFirst({
       where: eq(classes.id, classId),
     });
@@ -1092,10 +1378,12 @@ export class ClassesService {
     const isPersonal = classData.personalId === userId;
 
     if (!isStudent && !isPersonal) {
-      throw new ForbiddenException('Apenas o aluno ou personal trainer podem resolver a disputa');
+      throw new ForbiddenException(
+        'Apenas o aluno ou personal trainer podem resolver a disputa',
+      );
     }
 
-    let updateData: any = {
+    const updateData: any = {
       updatedAt: new Date(),
     };
 
@@ -1106,10 +1394,14 @@ export class ClassesService {
     }
 
     // Atualizar status da disputa
-    if (resolveDto.resolution === ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE) {
+    if (
+      resolveDto.resolution === ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE
+    ) {
       updateData.disputeStatus = ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE;
       updateData.status = ClassStatus.COMPLETED; // Pagamento liberado para personal
-    } else if (resolveDto.resolution === ClassDisputeStatus.STUDENT_DENIED_ABSENCE) {
+    } else if (
+      resolveDto.resolution === ClassDisputeStatus.STUDENT_DENIED_ABSENCE
+    ) {
       updateData.disputeStatus = ClassDisputeStatus.STUDENT_DENIED_ABSENCE;
       updateData.status = ClassStatus.CUSTODY; // Valor em custódia
     }
@@ -1125,22 +1417,19 @@ export class ClassesService {
 
   async getClassDisputes(userId: string): Promise<any[]> {
     console.log('🔍 [CLASSES] Buscando disputas para usuário:', userId);
-    
+
     try {
       const disputes = await this.db.query.classes.findMany({
         where: and(
-          or(
-            eq(classes.studentId, userId),
-            eq(classes.personalId, userId)
-          ),
-          eq(classes.status, ClassStatus.NO_SHOW_DISPUTE)
+          or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
+          eq(classes.status, ClassStatus.NO_SHOW_DISPUTE),
         ),
         orderBy: [desc(classes.createdAt)],
       });
 
       console.log('🔍 [CLASSES] Disputas encontradas:', disputes.length);
 
-      return disputes.map(dispute => ({
+      return disputes.map((dispute) => ({
         id: dispute.id,
         classId: dispute.id,
         reportedBy: dispute.noShowReportedBy || 'student',
@@ -1162,7 +1451,11 @@ export class ClassesService {
   private async formatClassResponse(classData: any): Promise<ClassResponseDto> {
     // Calcular dados reais do personal e aluno
     const personalStats = await this.getPersonalStats(classData.personalId);
-    const studentStats = await this.getStudentStats(classData.studentId, classData.personalId, classData.id);
+    const studentStats = await this.getStudentStats(
+      classData.studentId,
+      classData.personalId,
+      classData.id,
+    );
 
     // Buscar rating específico desta aula para o personal (aluno -> personal)
     let personalClassRating: number | null = null;
@@ -1170,83 +1463,115 @@ export class ClassesService {
       const specificPersonal = await this.db
         .select({ rating: ratings.rating })
         .from(ratings)
-        .where(and(
-          eq(ratings.classId, classData.id),
-          eq(ratings.type, 'student_to_personal'),
-          eq(ratings.raterId, classData.studentId),
-          eq(ratings.ratedId, classData.personalId),
-          eq(ratings.status, 'completed')
-        ))
+        .where(
+          and(
+            eq(ratings.classId, classData.id),
+            eq(ratings.type, 'student_to_personal'),
+            eq(ratings.raterId, classData.studentId),
+            eq(ratings.ratedId, classData.personalId),
+            eq(ratings.status, 'completed'),
+          ),
+        )
         .limit(1);
       personalClassRating = specificPersonal[0]?.rating ?? null;
     } catch (_) {
       personalClassRating = null;
     }
-    
+
     console.log('🔍 [FORMAT_CLASS] Personal Stats:', personalStats);
-    console.log('🔍 [FORMAT_CLASS] Personal Time On Platform:', personalStats.timeOnPlatform);
+    console.log(
+      '🔍 [FORMAT_CLASS] Personal Time On Platform:',
+      personalStats.timeOnPlatform,
+    );
     console.log('🔍 [FORMAT_CLASS] Class ID:', classData.id);
     console.log('🔍 [FORMAT_CLASS] Personal ID:', classData.personalId);
     console.log('🔍 [FORMAT_CLASS] Student ID:', classData.studentId);
-    console.log('🔍 [FORMAT_CLASS] Student profileImageId:', classData.student?.profileImageId);
-    
+    console.log(
+      '🔍 [FORMAT_CLASS] Student profileImageId:',
+      classData.student?.profileImageId,
+    );
+
     // Debug: verificar tipos dos campos
     console.log('🔍 [FORMAT_CLASS] Debug tipos dos campos:');
-    console.log('  - duration:', classData.duration, 'tipo:', typeof classData.duration);
-    console.log('  - personalRating:', personalStats.rating, 'tipo:', typeof personalStats.rating);
-    console.log('  - studentRating:', studentStats.rating, 'tipo:', typeof studentStats.rating);
-    
+    console.log(
+      '  - duration:',
+      classData.duration,
+      'tipo:',
+      typeof classData.duration,
+    );
+    console.log(
+      '  - personalRating:',
+      personalStats.rating,
+      'tipo:',
+      typeof personalStats.rating,
+    );
+    console.log(
+      '  - studentRating:',
+      studentStats.rating,
+      'tipo:',
+      typeof studentStats.rating,
+    );
+
     // Converter profileImageId para profileImageUrl se existir
     let personalProfileImageUrl = null;
     let studentProfileImageUrl = null;
-    
+
     if (classData.personal?.profileImageId) {
       try {
         const file = await this.db.query.files.findFirst({
           where: eq(files.id, classData.personal.profileImageId),
         });
-        
+
         if (file?.url) {
           const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
-          
+
           try {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             personalProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
           } catch (_) {
-            personalProfileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+            personalProfileImageUrl = file.url.replace(
+              'https://api.treinopro.com',
+              baseUrl,
+            );
           }
         }
       } catch (e) {
         console.error('⚠️ Falha ao buscar URL da imagem do personal:', e);
       }
     }
-    
+
     // Buscar foto do aluno
     if (classData.student?.profileImageId) {
       try {
         const file = await this.db.query.files.findFirst({
           where: eq(files.id, classData.student.profileImageId),
         });
-        
+
         if (file?.url) {
           const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
-          
+
           try {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             studentProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
           } catch (_) {
-            studentProfileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+            studentProfileImageUrl = file.url.replace(
+              'https://api.treinopro.com',
+              baseUrl,
+            );
           }
         }
       } catch (e) {
         console.error('⚠️ Falha ao buscar URL da imagem do aluno:', e);
       }
     }
-    
-    console.log('🔍 [FORMAT_CLASS] Student profileImageUrl:', studentProfileImageUrl);
-    
+
+    console.log(
+      '🔍 [FORMAT_CLASS] Student profileImageUrl:',
+      studentProfileImageUrl,
+    );
+
     const response: any = {
       id: classData.id,
       proposalId: classData.proposalId,
@@ -1273,15 +1598,19 @@ export class ClassesService {
       resolvedAt: classData.resolvedAt,
       createdAt: classData.createdAt,
       updatedAt: classData.updatedAt,
-      student: classData.student ? {
-        ...classData.student,
-        profilePicture: studentProfileImageUrl,
-      } : null,
+      student: classData.student
+        ? {
+            ...classData.student,
+            profilePicture: studentProfileImageUrl,
+          }
+        : null,
       personal: classData.personal,
-      proposalModality: classData.proposalModality || classData.proposal?.modality || null,
+      proposalModality:
+        classData.proposalModality || classData.proposal?.modality || null,
       // Dados reais do personal
       personalProfileImageUrl: personalProfileImageUrl,
-      personalRating: personalClassRating !== null ? Number(personalClassRating) : null,
+      personalRating:
+        personalClassRating !== null ? Number(personalClassRating) : null,
       personalTimeOnPlatform: personalStats.timeOnPlatform,
       // Dados reais do aluno
       studentRating: studentStats.rating ? Number(studentStats.rating) : null,
@@ -1295,71 +1624,85 @@ export class ClassesService {
       };
     }
 
-    console.log('🔍 [FORMAT_CLASS] Response personalTimeOnPlatform:', response.personalTimeOnPlatform);
-    console.log('🔍 [FORMAT_CLASS] Response personalRating:', response.personalRating);
-    
+    console.log(
+      '🔍 [FORMAT_CLASS] Response personalTimeOnPlatform:',
+      response.personalTimeOnPlatform,
+    );
+    console.log(
+      '🔍 [FORMAT_CLASS] Response personalRating:',
+      response.personalRating,
+    );
+
     return response;
   }
 
   async getClasses(
-    getClassesDto: GetClassesDto, 
-    userId: string
-  ): Promise<{ classes: ClassResponseDto[]; total: number; page: number; limit: number }> {
+    getClassesDto: GetClassesDto,
+    userId: string,
+  ): Promise<{
+    classes: ClassResponseDto[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     console.log('🔍 [CLASSES] Buscando aulas com filtros:', getClassesDto);
     console.log('🔍 [CLASSES] User ID:', userId);
-    
+
     // Construir condições de filtro
     const conditions = [];
-    
+
     // Filtro por usuário (aluno ou personal)
     conditions.push(
-      or(
-        eq(classes.studentId, userId),
-        eq(classes.personalId, userId)
-      )
+      or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
     );
-    
+
     console.log('🔍 [CLASSES] Condições base (usuário):', conditions.length);
-    
+
     // Filtro por status
     if (getClassesDto.status) {
       conditions.push(eq(classes.status, getClassesDto.status));
     }
-    
+
     // Filtro por data
     if (getClassesDto.dateFrom) {
       conditions.push(gte(classes.date, new Date(getClassesDto.dateFrom)));
     }
-    
+
     if (getClassesDto.dateTo) {
       conditions.push(lte(classes.date, new Date(getClassesDto.dateTo)));
     }
-    
+
     // Filtro por data específica (formato YYYY-MM-DD)
     if (getClassesDto.date) {
       console.log('🔍 [CLASSES] Data recebida:', getClassesDto.date);
-      
+
       // Parsear a data no formato YYYY-MM-DD considerando fuso horário local
       const [year, month, day] = getClassesDto.date.split('-').map(Number);
       const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
       const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
-      
-      console.log('🔍 [CLASSES] Data processada - Início:', startOfDay.toISOString());
-      console.log('🔍 [CLASSES] Data processada - Fim:', endOfDay.toISOString());
-      
+
+      console.log(
+        '🔍 [CLASSES] Data processada - Início:',
+        startOfDay.toISOString(),
+      );
+      console.log(
+        '🔍 [CLASSES] Data processada - Fim:',
+        endOfDay.toISOString(),
+      );
+
       conditions.push(
-        and(
-          gte(classes.date, startOfDay),
-          lte(classes.date, endOfDay)
-        )
+        and(gte(classes.date, startOfDay), lte(classes.date, endOfDay)),
       );
     }
-    
+
     // Filtro por faixa de horário
     if (getClassesDto.timeRange) {
-      console.log('🔍 [CLASSES] Faixa de horário recebida:', getClassesDto.timeRange);
+      console.log(
+        '🔍 [CLASSES] Faixa de horário recebida:',
+        getClassesDto.timeRange,
+      );
       let startHour: number, endHour: number;
-      
+
       switch (getClassesDto.timeRange) {
         case 'morning':
           startHour = 6;
@@ -1377,15 +1720,17 @@ export class ClassesService {
           startHour = 0;
           endHour = 23;
       }
-      
-      console.log(`🔍 [CLASSES] Horário processado: ${startHour}:00 - ${endHour}:59`);
-      
+
+      console.log(
+        `🔍 [CLASSES] Horário processado: ${startHour}:00 - ${endHour}:59`,
+      );
+
       // Filtrar por horário usando SQL para extrair a hora do campo time
       conditions.push(
-        sql`EXTRACT(HOUR FROM ${classes.time}::TIME) >= ${startHour} AND EXTRACT(HOUR FROM ${classes.time}::TIME) <= ${endHour}`
+        sql`EXTRACT(HOUR FROM ${classes.time}::TIME) >= ${startHour} AND EXTRACT(HOUR FROM ${classes.time}::TIME) <= ${endHour}`,
       );
     }
-    
+
     // Filtro por categoria
     if (getClassesDto.category) {
       console.log('🔍 [CLASSES] Categoria recebida:', getClassesDto.category);
@@ -1395,32 +1740,32 @@ export class ClassesService {
           SELECT 1 FROM proposals p 
           WHERE p.id = ${classes.proposalId} 
           AND p.modality_name = ${getClassesDto.category}
-        )`
+        )`,
       );
     }
-    
+
     // Filtro por studentId específico
     if (getClassesDto.studentId) {
       conditions.push(eq(classes.studentId, getClassesDto.studentId));
     }
-    
+
     // Filtro por personalId específico
     if (getClassesDto.personalId) {
       conditions.push(eq(classes.personalId, getClassesDto.personalId));
     }
-    
+
     // Filtro por proposalId específico
     if (getClassesDto.proposalId) {
       conditions.push(eq(classes.proposalId, getClassesDto.proposalId));
     }
-    
+
     // Paginação
     const page = getClassesDto.page || 1;
     const limit = getClassesDto.limit || 10;
     const offset = (page - 1) * limit;
-    
+
     console.log('🔍 [CLASSES] Condições de filtro:', conditions);
-    
+
     try {
       // Buscar aulas com filtros
       const classesData = await this.db
@@ -1432,21 +1777,25 @@ export class ClassesService {
         .offset(offset)
         .leftJoin(users, eq(classes.studentId, users.id))
         .leftJoin(proposals, eq(classes.proposalId, proposals.id));
-      
+
       // Contar total de aulas
       const totalResult = await this.db
         .select({ count: count() })
         .from(classes)
         .where(and(...conditions));
-      
+
       const total = totalResult[0]?.count || 0;
-      
-      console.log(`✅ [CLASSES] Encontradas ${classesData.length} aulas de ${total} total`);
-      
+
+      console.log(
+        `✅ [CLASSES] Encontradas ${classesData.length} aulas de ${total} total`,
+      );
+
       // Buscar dados dos personais únicos (OTIMIZADO - 1 query em vez de N)
-      const personalIds = [...new Set(classesData.map((row: any) => row.classes.personalId))];
-      
-      let personalMap: Record<string, any> = {};
+      const personalIds = [
+        ...new Set(classesData.map((row: any) => row.classes.personalId)),
+      ];
+
+      const personalMap: Record<string, any> = {};
       if (personalIds.length > 0) {
         try {
           // Buscar TODOS os personals de uma vez usando inArray
@@ -1459,30 +1808,38 @@ export class ClassesService {
             })
             .from(users)
             .where(inArray(users.id, personalIds as string[]));
-          
+
           // Criar mapa para acesso rápido
           personalsData.forEach((personal: any) => {
             personalMap[personal.id] = personal;
           });
-          
-          console.log(`✅ [CLASSES] Carregados ${personalsData.length} personals em 1 query`);
+
+          console.log(
+            `✅ [CLASSES] Carregados ${personalsData.length} personals em 1 query`,
+          );
         } catch (error) {
           console.error('❌ [CLASSES] Erro ao buscar personals:', error);
         }
       }
-      
+
       // OTIMIZAÇÃO: Buscar stats e imagens em batch antes do loop
-      const uniquePersonalIds = [...new Set(classesData.map((row: any) => row.classes.personalId))];
-      const uniqueStudentIds = [...new Set(classesData.map((row: any) => row.classes.studentId))];
-      const classIds = [...new Set(classesData.map((row: any) => row.classes.id))];
-      
+      const uniquePersonalIds = [
+        ...new Set(classesData.map((row: any) => row.classes.personalId)),
+      ];
+      const uniqueStudentIds = [
+        ...new Set(classesData.map((row: any) => row.classes.studentId)),
+      ];
+      const classIds = [
+        ...new Set(classesData.map((row: any) => row.classes.id)),
+      ];
+
       // Buscar ratings em batch
       const personalRatingsMap: Record<string, any> = {};
       // Nota do personal específica por aula (aluno -> personal)
       const personalRatingByClassId: Record<string, number> = {};
       // Nota do aluno específica por aula
       const studentRatingByClassId: Record<string, number> = {};
-      
+
       try {
         // Buscar ratings dos personals (onde eles são avaliados - ratedId)
         const personalRatings = await this.db
@@ -1491,12 +1848,14 @@ export class ClassesService {
             avgRating: sql<number>`AVG(${ratings.rating})`,
           })
           .from(ratings)
-          .where(and(
-            inArray(ratings.ratedId, uniquePersonalIds as string[]),
-            eq(ratings.type, 'student_to_personal')
-          ))
+          .where(
+            and(
+              inArray(ratings.ratedId, uniquePersonalIds as string[]),
+              eq(ratings.type, 'student_to_personal'),
+            ),
+          )
           .groupBy(ratings.ratedId);
-        
+
         personalRatings.forEach((r: any) => {
           personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
         });
@@ -1509,17 +1868,19 @@ export class ClassesService {
               rating: ratings.rating,
             })
             .from(ratings)
-            .where(and(
-              inArray(ratings.classId, classIds as string[]),
-              eq(ratings.type, 'student_to_personal'),
-              eq(ratings.status, 'completed')
-            ));
+            .where(
+              and(
+                inArray(ratings.classId, classIds as string[]),
+                eq(ratings.type, 'student_to_personal'),
+                eq(ratings.status, 'completed'),
+              ),
+            );
 
           personalClassRatings.forEach((r: any) => {
             personalRatingByClassId[r.classId] = Number(r.rating) || 0;
           });
         }
-        
+
         // Buscar rating ESPECÍFICO por aula para alunos (personal -> student)
         if (classIds.length > 0) {
           const studentClassRatings = await this.db
@@ -1528,30 +1889,32 @@ export class ClassesService {
               rating: ratings.rating,
             })
             .from(ratings)
-            .where(and(
-              inArray(ratings.classId, classIds as string[]),
-              eq(ratings.type, 'personal_to_student'),
-              eq(ratings.status, 'completed')
-            ));
+            .where(
+              and(
+                inArray(ratings.classId, classIds as string[]),
+                eq(ratings.type, 'personal_to_student'),
+                eq(ratings.status, 'completed'),
+              ),
+            );
 
           studentClassRatings.forEach((r: any) => {
             // Em caso de múltiplas avaliações (não esperado), ficará a última lida
             studentRatingByClassId[r.classId] = Number(r.rating) || 0;
           });
         }
-        
+
         console.log(`✅ [CLASSES] Carregados ratings em batch`);
       } catch (error) {
         console.error('❌ [CLASSES] Erro ao buscar ratings:', error);
       }
-      
+
       // Formatar resposta SEM chamar formatClassResponse (evita N queries)
       const formattedClasses = classesData.map((row: any) => {
         const classData = row.classes;
         const student = row.users;
         const proposal = row.proposals;
         const personal = personalMap[classData.personalId];
-        
+
         // Montar resposta diretamente (otimizado)
         return {
           id: classData.id,
@@ -1579,38 +1942,43 @@ export class ClassesService {
           resolvedAt: classData.resolvedAt,
           createdAt: classData.createdAt,
           updatedAt: classData.updatedAt,
-          student: student ? {
-            id: student.id,
-            firstName: student.firstName,
-            lastName: student.lastName,
-            profilePicture: null, // Simplificado por performance
-          } : null,
-          personal: personal ? {
-            id: personal.id,
-            firstName: personal.firstName,
-            lastName: personal.lastName,
-            profilePicture: null, // Simplificado por performance
-          } : null,
+          student: student
+            ? {
+                id: student.id,
+                firstName: student.firstName,
+                lastName: student.lastName,
+                profilePicture: null, // Simplificado por performance
+              }
+            : null,
+          personal: personal
+            ? {
+                id: personal.id,
+                firstName: personal.firstName,
+                lastName: personal.lastName,
+                profilePicture: null, // Simplificado por performance
+              }
+            : null,
           proposalModality: proposal?.modalityName || null,
           personalProfileImageUrl: null, // Simplificado por performance
           personalRating: personalRatingByClassId[classData.id] ?? null,
           personalTimeOnPlatform: '0 dias', // Simplificado por performance
           studentRating: studentRatingByClassId[classData.id] ?? null,
-          proposal: proposal ? {
-            id: proposal.id,
-            modality: proposal.modalityName,
-            value: proposal.price,
-          } : null,
+          proposal: proposal
+            ? {
+                id: proposal.id,
+                modality: proposal.modalityName,
+                value: proposal.price,
+              }
+            : null,
         };
       });
-      
+
       return {
         classes: formattedClasses,
         total,
         page,
         limit,
       };
-      
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao buscar aulas:', error);
       throw new BadRequestException('Erro ao buscar aulas: ' + error.message);
@@ -1633,13 +2001,13 @@ export class ClassesService {
 
     // Verificar se o usuário é o personal ou o aluno da aula
     if (classData.personalId !== userId && classData.studentId !== userId) {
-      throw new ForbiddenException('Você não tem permissão para deletar esta aula');
+      throw new ForbiddenException(
+        'Você não tem permissão para deletar esta aula',
+      );
     }
 
     // Deletar a aula
-    await this.db
-      .delete(classes)
-      .where(eq(classes.id, classId));
+    await this.db.delete(classes).where(eq(classes.id, classId));
   }
 
   /**
@@ -1668,7 +2036,7 @@ export class ClassesService {
       const now = new Date();
       const createdAt = new Date(personal.createdAt);
       const timeOnPlatform = this.calculateTimeOnPlatform(createdAt, now);
-      
+
       console.log('🔍 [PERSONAL_STATS] Personal ID:', personalId);
       console.log('🔍 [PERSONAL_STATS] Created At:', personal.createdAt);
       console.log('🔍 [PERSONAL_STATS] Now:', now);
@@ -1685,20 +2053,22 @@ export class ClassesService {
             and(
               eq(ratings.raterId, personalId),
               eq(ratings.type, 'personal_to_student'),
-              eq(ratings.status, 'completed')
-            )
+              eq(ratings.status, 'completed'),
+            ),
           );
 
         if (personalRatings.length > 0) {
           // Calcular média das avaliações recebidas
-          const totalRating = personalRatings.reduce((sum, r) => sum + r.rating, 0);
+          const totalRating = personalRatings.reduce(
+            (sum, r) => sum + r.rating,
+            0,
+          );
           rating = totalRating / personalRatings.length;
-          
+
           // Garantir que o rating fique entre 1.0 e 5.0
           rating = Math.max(1.0, Math.min(5.0, rating));
         }
         // Se não há avaliações, mantém 5.0 (rating inicial como Uber)
-        
       } catch (error) {
         console.warn('⚠️ [CLASSES] Erro ao buscar rating do personal:', error);
         // Em caso de erro, mantém null (não avaliado)
@@ -1709,7 +2079,7 @@ export class ClassesService {
         rating: rating ? Math.round(rating * 10) / 10 : null, // Arredondar para 1 casa decimal ou null
         timeOnPlatform,
       };
-      
+
       console.log('🔍 [PERSONAL_STATS] Resultado final:', result);
       return result;
     } catch (error) {
@@ -1732,9 +2102,11 @@ export class ClassesService {
     // Lógica dinâmica como Uber
     if (diffInDays < 7) {
       // Menos de 1 semana: mostrar dias
-      return diffInDays === 0 ? 'Hoje' : 
-             diffInDays === 1 ? '1 dia' : 
-             `${diffInDays} dias`;
+      return diffInDays === 0
+        ? 'Hoje'
+        : diffInDays === 1
+          ? '1 dia'
+          : `${diffInDays} dias`;
     } else if (diffInWeeks < 4) {
       // Menos de 1 mês: mostrar semanas
       return diffInWeeks === 1 ? '1 semana' : `${diffInWeeks} semanas`;
@@ -1751,7 +2123,11 @@ export class ClassesService {
    * Calcula dados reais do aluno (rating)
    * Sistema de rating como Uber: começa com 5.0, varia baseado nas avaliações
    */
-  private async getStudentStats(studentId: string, personalId: string, classId?: string): Promise<{
+  private async getStudentStats(
+    studentId: string,
+    personalId: string,
+    classId?: string,
+  ): Promise<{
     rating: number | null;
   }> {
     try {
@@ -1764,19 +2140,24 @@ export class ClassesService {
         const specific = await this.db
           .select({ rating: ratings.rating })
           .from(ratings)
-          .where(and(
-            eq(ratings.classId, classId),
-            eq(ratings.type, 'personal_to_student'),
-            eq(ratings.raterId, personalId),
-            eq(ratings.ratedId, studentId),
-            eq(ratings.status, 'completed')
-          ))
+          .where(
+            and(
+              eq(ratings.classId, classId),
+              eq(ratings.type, 'personal_to_student'),
+              eq(ratings.raterId, personalId),
+              eq(ratings.ratedId, studentId),
+              eq(ratings.status, 'completed'),
+            ),
+          )
           .limit(1);
 
         const value = specific[0]?.rating ?? null;
         return { rating: value !== null ? Number(value) : null };
       } catch (error) {
-        console.warn('⚠️ [CLASSES] Erro ao buscar rating específico da aula para aluno:', error);
+        console.warn(
+          '⚠️ [CLASSES] Erro ao buscar rating específico da aula para aluno:',
+          error,
+        );
         return { rating: null };
       }
     } catch (error) {

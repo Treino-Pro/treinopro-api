@@ -64,7 +64,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
             delay: 1000,
           },
         },
-      }
+      },
     ),
   ],
   providers: [

@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { ConflictException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  BadRequestException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, UserType, DocumentType } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
@@ -110,14 +114,16 @@ describe('AuthService', () => {
       mockDb.query.users.findFirst.mockResolvedValue(null);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: '1',
-            email: validStudentDto.email,
-            firstName: validStudentDto.firstName,
-            lastName: validStudentDto.lastName,
-            userType: validStudentDto.userType,
-            isVerified: false,
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: '1',
+              email: validStudentDto.email,
+              firstName: validStudentDto.firstName,
+              lastName: validStudentDto.lastName,
+              userType: validStudentDto.userType,
+              isVerified: false,
+            },
+          ]),
         }),
       });
       mockJwtService.signAsync.mockResolvedValue('mock-access-token');
@@ -143,19 +149,21 @@ describe('AuthService', () => {
       mockDb.query.users.findFirst.mockResolvedValue(null);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: '2',
-            email: validPersonalDto.email,
-            firstName: validPersonalDto.firstName,
-            lastName: validPersonalDto.lastName,
-            userType: validPersonalDto.userType,
-            isVerified: false,
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: '2',
+              email: validPersonalDto.email,
+              firstName: validPersonalDto.firstName,
+              lastName: validPersonalDto.lastName,
+              userType: validPersonalDto.userType,
+              isVerified: false,
+            },
+          ]),
         }),
       });
       mockJwtService.signAsync.mockResolvedValue('mock-access-token');
       mockConfigService.get.mockReturnValue('mock-secret');
-      
+
       // Mock CrefService
       mockCrefService.validateCref.mockResolvedValue({
         isValid: true,
@@ -164,12 +172,12 @@ describe('AuthService', () => {
         situacao: 'BACHAREL',
         uf: 'SP',
         validatedAt: new Date(),
-        details: 'Validação bem-sucedida'
+        details: 'Validação bem-sucedida',
       });
       mockCrefService.parseCrefNumber.mockReturnValue({
         uf: 'SP',
         numero: '106227',
-        full: 'SP-106227'
+        full: 'SP-106227',
       });
 
       // Act
@@ -204,7 +212,11 @@ describe('AuthService', () => {
 
     it('deve lançar BadRequestException quando personal trainer não tem CREF', async () => {
       // Arrange
-      const invalidPersonalDto = { ...validPersonalDto, cref: undefined, crefImageUrl: undefined };
+      const invalidPersonalDto = {
+        ...validPersonalDto,
+        cref: undefined,
+        crefImageUrl: undefined,
+      };
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
       // Act & Assert
@@ -231,14 +243,16 @@ describe('AuthService', () => {
       mockDb.query.users.findFirst.mockResolvedValue(null);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: '1',
-            email: validStudentDto.email,
-            firstName: validStudentDto.firstName,
-            lastName: validStudentDto.lastName,
-            userType: validStudentDto.userType,
-            isVerified: false,
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: '1',
+              email: validStudentDto.email,
+              firstName: validStudentDto.firstName,
+              lastName: validStudentDto.lastName,
+              userType: validStudentDto.userType,
+              isVerified: false,
+            },
+          ]),
         }),
       });
       mockJwtService.signAsync.mockResolvedValue('mock-access-token');
@@ -266,12 +280,12 @@ describe('AuthService', () => {
 
     it('deve lançar BadRequestException quando menor de idade não tem responsável', async () => {
       // Arrange
-      const minorDto = { 
-        ...validStudentDto, 
+      const minorDto = {
+        ...validStudentDto,
         birthDate: '2010-01-01',
         isMinor: true,
         guardianName: undefined,
-        guardianEmail: undefined
+        guardianEmail: undefined,
       };
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
@@ -283,10 +297,10 @@ describe('AuthService', () => {
 
     it('deve lançar BadRequestException quando idade não confere com data de nascimento', async () => {
       // Arrange
-      const invalidAgeDto = { 
-        ...validStudentDto, 
+      const invalidAgeDto = {
+        ...validStudentDto,
         birthDate: '2010-01-01',
-        isMinor: false
+        isMinor: false,
       };
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
@@ -300,7 +314,9 @@ describe('AuthService', () => {
       // Arrange
       mockDb.query.users.findFirst.mockResolvedValue(null);
       mockCrefService.validateCref.mockRejectedValue(
-        new BadRequestException('Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)')
+        new BadRequestException(
+          'Formato de CREF inválido. Use: UF-NÚMERO (ex: SP-106227)',
+        ),
       );
 
       // Act & Assert
@@ -373,6 +389,5 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
     });
-
   });
 });

@@ -1,24 +1,28 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  Inject,
+} from '@nestjs/common';
 import { eq, and, or, like, desc, asc, count, sql } from 'drizzle-orm';
 import { users, files } from '../../database/schema';
-import { 
-  CreateUserDto, 
-  UpdateUserDto, 
-  UpdateProfileDto, 
-  UserSearchDto, 
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UpdateProfileDto,
+  UserSearchDto,
   UpdateUserStatusDto,
   UserResponseDto,
   UserListResponseDto,
   UserType,
-  UserStatus
+  UserStatus,
 } from './dto/users.dto';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    @Inject('DATABASE_CONNECTION') private db: any,
-  ) {}
+  constructor(@Inject('DATABASE_CONNECTION') private db: any) {}
 
   // ===== CRUD BÁSICO =====
 
@@ -26,7 +30,6 @@ export class UsersService {
    * Criar novo usuário
    */
   async createUser(createUserDto: CreateUserDto): Promise<UserResponseDto> {
-
     // Verificar se email já existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.email, createUserDto.email),
@@ -73,8 +76,14 @@ export class UsersService {
    * Listar usuários com filtros e paginação
    */
   async getUsers(searchDto: UserSearchDto): Promise<UserListResponseDto> {
-
-    const { search, userType, status, specialty, page = 1, limit = 10 } = searchDto;
+    const {
+      search,
+      userType,
+      status,
+      specialty,
+      page = 1,
+      limit = 10,
+    } = searchDto;
     const offset = (page - 1) * limit;
 
     // Construir condições de busca
@@ -86,8 +95,8 @@ export class UsersService {
           like(users.firstName, `%${search}%`),
           like(users.lastName, `%${search}%`),
           like(users.email, `%${search}%`),
-          like(users.cref, `%${search}%`)
-        )
+          like(users.cref, `%${search}%`),
+        ),
       );
     }
 
@@ -100,7 +109,9 @@ export class UsersService {
     }
 
     if (specialty) {
-      conditions.push(sql`${users.specialties} @> ${JSON.stringify([specialty])}`);
+      conditions.push(
+        sql`${users.specialties} @> ${JSON.stringify([specialty])}`,
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -119,9 +130,8 @@ export class UsersService {
       .from(users)
       .where(whereClause);
 
-
     return {
-      users: usersList.map(user => this.mapUserToResponse(user)),
+      users: usersList.map((user) => this.mapUserToResponse(user)),
       total,
       page,
       limit,
@@ -157,7 +167,10 @@ export class UsersService {
             (user as any).profileImageUrl = normalizedUrl;
           } catch (_) {
             // Se parsing falhar, usar fallback simples
-            (user as any).profileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+            (user as any).profileImageUrl = file.url.replace(
+              'https://api.treinopro.com',
+              baseUrl,
+            );
           }
         }
       } catch (e) {
@@ -187,7 +200,10 @@ export class UsersService {
   /**
    * Atualizar usuário
    */
-  async updateUser(id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
+  async updateUser(
+    id: string,
+    updateUserDto: UpdateUserDto,
+  ): Promise<UserResponseDto> {
     console.log('👤 [USERS] Atualizando usuário:', id);
 
     // Verificar se usuário existe
@@ -207,7 +223,7 @@ export class UsersService {
     };
 
     // Remover campos undefined
-    Object.keys(updateData).forEach(key => {
+    Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key];
       }
@@ -227,8 +243,16 @@ export class UsersService {
   /**
    * Atualizar status do usuário
    */
-  async updateUserStatus(id: string, updateStatusDto: UpdateUserStatusDto): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Atualizando status do usuário:', id, 'para:', updateStatusDto.status);
+  async updateUserStatus(
+    id: string,
+    updateStatusDto: UpdateUserStatusDto,
+  ): Promise<UserResponseDto> {
+    console.log(
+      '👤 [USERS] Atualizando status do usuário:',
+      id,
+      'para:',
+      updateStatusDto.status,
+    );
 
     // Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
@@ -243,9 +267,9 @@ export class UsersService {
     // Atualizar status
     const [updatedUser] = await this.db
       .update(users)
-      .set({ 
+      .set({
         status: updateStatusDto.status,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(users.id, id))
       .returning();
@@ -273,9 +297,9 @@ export class UsersService {
     // Desativar usuário (soft delete)
     await this.db
       .update(users)
-      .set({ 
+      .set({
         status: UserStatus.INACTIVE,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(users.id, id));
 
@@ -301,35 +325,33 @@ export class UsersService {
 
     // 2. Verificar se há aulas agendadas (como aluno ou personal)
     const { classes } = await import('../../database/schema');
-    
+
     const scheduledClasses = await this.db.query.classes.findMany({
       where: and(
-        or(
-          eq(classes.studentId, userId),
-          eq(classes.personalId, userId)
-        ),
+        or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
         or(
           eq(classes.status, 'scheduled'),
           eq(classes.status, 'pending_confirmation'),
-          eq(classes.status, 'active')
-        )
+          eq(classes.status, 'active'),
+        ),
       ),
     });
 
     if (scheduledClasses && scheduledClasses.length > 0) {
-      console.log('❌ [USERS] Usuário tem aulas agendadas:', scheduledClasses.length);
+      console.log(
+        '❌ [USERS] Usuário tem aulas agendadas:',
+        scheduledClasses.length,
+      );
       throw new BadRequestException(
         'Não é possível excluir a conta. Você possui aulas agendadas. ' +
-        'Cancele ou complete todas as aulas antes de excluir sua conta.'
+          'Cancele ou complete todas as aulas antes de excluir sua conta.',
       );
     }
 
     // 3. Deletar usuário permanentemente
     // O histórico de aulas, propostas, avaliações, etc. será mantido
     // pois as foreign keys permitem NULL ou não têm CASCADE DELETE
-    await this.db
-      .delete(users)
-      .where(eq(users.id, userId));
+    await this.db.delete(users).where(eq(users.id, userId));
 
     console.log('✅ [USERS] Conta excluída permanentemente:', userId);
     console.log('ℹ️ [USERS] Histórico de aulas e propostas foi mantido');
@@ -373,7 +395,10 @@ export class UsersService {
             (user as any).profileImageUrl = normalizedUrl;
           } catch (_) {
             // Se parsing falhar, usar fallback simples
-            (user as any).profileImageUrl = file.url.replace('https://api.treinopro.com', baseUrl);
+            (user as any).profileImageUrl = file.url.replace(
+              'https://api.treinopro.com',
+              baseUrl,
+            );
           }
         }
       } catch (e) {
@@ -387,7 +412,10 @@ export class UsersService {
   /**
    * Atualizar perfil do usuário logado
    */
-  async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<UserResponseDto> {
+  async updateProfile(
+    userId: string,
+    updateProfileDto: UpdateProfileDto,
+  ): Promise<UserResponseDto> {
     console.log('👤 [USERS] Atualizando perfil do usuário:', userId);
 
     // Verificar se usuário existe
@@ -407,7 +435,7 @@ export class UsersService {
     };
 
     // Remover campos undefined
-    Object.keys(updateData).forEach(key => {
+    Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key];
       }
@@ -429,7 +457,9 @@ export class UsersService {
   /**
    * Buscar personal trainers
    */
-  async getPersonalTrainers(searchDto: UserSearchDto): Promise<UserListResponseDto> {
+  async getPersonalTrainers(
+    searchDto: UserSearchDto,
+  ): Promise<UserListResponseDto> {
     console.log('👤 [USERS] Buscando personal trainers...');
 
     return this.getUsers({
@@ -453,7 +483,10 @@ export class UsersService {
   /**
    * Buscar usuários por especialidade
    */
-  async getUsersBySpecialty(specialty: string, searchDto: UserSearchDto): Promise<UserListResponseDto> {
+  async getUsersBySpecialty(
+    specialty: string,
+    searchDto: UserSearchDto,
+  ): Promise<UserListResponseDto> {
     console.log('👤 [USERS] Buscando usuários por especialidade:', specialty);
 
     return this.getUsers({
@@ -476,27 +509,40 @@ export class UsersService {
       students,
       personalTrainers,
       verifiedUsers,
-      recentUsers
+      recentUsers,
     ] = await Promise.all([
       // Total de usuários
       this.db.select({ count: count() }).from(users),
-      
+
       // Usuários ativos
-      this.db.select({ count: count() }).from(users).where(eq(users.status, UserStatus.ACTIVE)),
-      
+      this.db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.status, UserStatus.ACTIVE)),
+
       // Alunos
-      this.db.select({ count: count() }).from(users).where(eq(users.userType, UserType.STUDENT)),
-      
+      this.db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.userType, UserType.STUDENT)),
+
       // Personal trainers
-      this.db.select({ count: count() }).from(users).where(eq(users.userType, UserType.PERSONAL)),
-      
+      this.db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.userType, UserType.PERSONAL)),
+
       // Usuários verificados
-      this.db.select({ count: count() }).from(users).where(eq(users.isVerified, true)),
-      
+      this.db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.isVerified, true)),
+
       // Usuários dos últimos 30 dias
-      this.db.select({ count: count() }).from(users).where(
-        sql`${users.createdAt} >= NOW() - INTERVAL '30 days'`
-      ),
+      this.db
+        .select({ count: count() })
+        .from(users)
+        .where(sql`${users.createdAt} >= NOW() - INTERVAL '30 days'`),
     ]);
 
     const stats = {
@@ -520,7 +566,8 @@ export class UsersService {
    */
   private mapUserToResponse(user: any): UserResponseDto {
     // Se houver profileImageId, tentar buscar URL pública do arquivo
-    const profileImageUrl = user.profileImageUrl || user.profileImage?.url || user.imageUrl || null;
+    const profileImageUrl =
+      user.profileImageUrl || user.profileImage?.url || user.imageUrl || null;
     return {
       id: user.id,
       email: user.email,
@@ -577,7 +624,10 @@ export class UsersService {
   /**
    * Salvar token FCM do usuário
    */
-  async saveFcmToken(userId: string, fcmToken: string): Promise<{ success: boolean; message: string }> {
+  async saveFcmToken(
+    userId: string,
+    fcmToken: string,
+  ): Promise<{ success: boolean; message: string }> {
     console.log('🔥 [USERS] Salvando token FCM para usuário:', userId);
 
     // Verificar se usuário existe

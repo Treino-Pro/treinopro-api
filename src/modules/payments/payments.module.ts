@@ -15,26 +15,30 @@ import { PaymentSimulationService } from './payment-simulation.service';
 
 @Module({
   imports: [DatabaseModule, AuthModule],
-  controllers: [PaymentsController, WebhooksController, PaymentsHealthController],
+  controllers: [
+    PaymentsController,
+    WebhooksController,
+    PaymentsHealthController,
+  ],
   providers: [
-    PaymentsService, 
-    MercadoPagoService, 
+    PaymentsService,
+    MercadoPagoService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,
     WebhooksService,
     ErrorHandlerService,
-    PaymentSimulationService
+    PaymentSimulationService,
   ],
   exports: [
-    PaymentsService, 
-    MercadoPagoService, 
+    PaymentsService,
+    MercadoPagoService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,
     WebhooksService,
     ErrorHandlerService,
-    PaymentSimulationService
+    PaymentSimulationService,
   ],
 })
 export class PaymentsModule {}

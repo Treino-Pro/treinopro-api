@@ -10,24 +10,29 @@ describe('AdminController', () => {
     getDashboardSummary: jest.fn().mockResolvedValue({ users: 1 }),
     listUsers: jest.fn().mockResolvedValue([]),
     updateUser: jest.fn().mockResolvedValue({ id: 'u1' }),
-    getFinancialSummary: jest.fn().mockResolvedValue({ summary: {}, latest: [] }),
+    getFinancialSummary: jest
+      .fn()
+      .mockResolvedValue({ summary: {}, latest: [] }),
     listMissions: jest.fn().mockResolvedValue([]),
     updateMission: jest.fn().mockResolvedValue({ id: 'm1' }),
-    getAnalytics: jest.fn().mockResolvedValue({ users: 1, proposals: {}, classes: {}, payments: {} }),
+    getAnalytics: jest.fn().mockResolvedValue({
+      users: 1,
+      proposals: {},
+      classes: {},
+      payments: {},
+    }),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdminController],
-      providers: [
-        { provide: AdminService, useValue: mockService },
-      ],
+      providers: [{ provide: AdminService, useValue: mockService }],
     })
-    .overrideGuard(JwtAuthGuard)
-    .useValue({ canActivate: () => true })
-    .overrideGuard(RolesGuard)
-    .useValue({ canActivate: () => true })
-    .compile();
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AdminController>(AdminController);
   });
@@ -71,5 +76,3 @@ describe('AdminController', () => {
     expect(res).toEqual({ users: 1, proposals: {}, classes: {}, payments: {} });
   });
 });
-
-

@@ -32,12 +32,17 @@ interface AuthenticatedSocket extends Socket {
   },
   namespace: '/chat',
 })
-export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
-  private connectedUsers = new Map<string, { socketId: string; userType: 'student' | 'personal' }>(); // userId -> {socketId, userType}
+  private connectedUsers = new Map<
+    string,
+    { socketId: string; userType: 'student' | 'personal' }
+  >(); // userId -> {socketId, userType}
 
   constructor(
     private readonly jwtService: JwtService,
@@ -54,11 +59,14 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       console.log('🔌 [CHAT_GATEWAY] Headers:', client.handshake.headers);
       console.log('🔌 [CHAT_GATEWAY] Query:', client.handshake.query);
       console.log('🔌 [CHAT_GATEWAY] Auth:', client.handshake.auth);
-      
+
       // Extrair token do handshake
       const token = this.extractTokenFromSocket(client);
-      console.log('🔌 [CHAT_GATEWAY] Token extraído:', token ? 'Presente' : 'Ausente');
-      
+      console.log(
+        '🔌 [CHAT_GATEWAY] Token extraído:',
+        token ? 'Presente' : 'Ausente',
+      );
+
       if (!token) {
         this.logger.warn(`Connection rejected: No token provided`);
         client.disconnect();
@@ -70,10 +78,16 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       client.userId = payload.sub;
       client.userType = payload.userType;
 
-      console.log('🔌 [CHAT_GATEWAY] Usuário autenticado:', { userId: client.userId, userType: client.userType });
+      console.log('🔌 [CHAT_GATEWAY] Usuário autenticado:', {
+        userId: client.userId,
+        userType: client.userType,
+      });
 
       // Armazenar conexão do usuário
-      this.connectedUsers.set(client.userId, { socketId: client.id, userType: client.userType });
+      this.connectedUsers.set(client.userId, {
+        socketId: client.id,
+        userType: client.userType,
+      });
 
       // Notificar que o usuário está online
       this.server.emit('user_online', {
@@ -82,8 +96,13 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         timestamp: new Date(),
       });
 
-      this.logger.log(`User ${client.userId} connected with socket ${client.id}`);
-      console.log('🔌 [CHAT_GATEWAY] Total de usuários conectados:', this.connectedUsers.size);
+      this.logger.log(
+        `User ${client.userId} connected with socket ${client.id}`,
+      );
+      console.log(
+        '🔌 [CHAT_GATEWAY] Total de usuários conectados:',
+        this.connectedUsers.size,
+      );
     } catch (error) {
       this.logger.error(`Connection error: ${error.message}`);
       console.error('❌ [CHAT_GATEWAY] Erro na conexão:', error);
@@ -94,7 +113,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   handleDisconnect(client: AuthenticatedSocket) {
     if (client.userId) {
       this.connectedUsers.delete(client.userId);
-      
+
       // Notificar que o usuário está offline
       this.server.emit('user_offline', {
         userId: client.userId,
@@ -118,7 +137,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       }
 
       // Enviar mensagem via serviço
-      const message = await this.chatService.sendMessage(client.userId, sendMessageDto);
+      const message = await this.chatService.sendMessage(
+        client.userId,
+        sendMessageDto,
+      );
 
       // Criar evento WebSocket
       const wsMessage: WebSocketMessageDto = {
@@ -134,7 +156,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // Enviar para o destinatário se estiver conectado
       const receiverData = this.connectedUsers.get(sendMessageDto.receiverId);
       if (receiverData) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
+        const receiverSocket = this.server.sockets.sockets.get(
+          receiverData.socketId,
+        );
         if (receiverSocket) {
           receiverSocket.emit('message_received', {
             ...wsMessage,
@@ -149,11 +173,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         message,
         timestamp: new Date(),
       });
-
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`);
-      client.emit('error', { 
-        message: error.message || 'Erro ao enviar mensagem' 
+      client.emit('error', {
+        message: error.message || 'Erro ao enviar mensagem',
       });
     }
   }
@@ -171,18 +194,17 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       // Adicionar o cliente à sala da classe
       await client.join(`class_${data.classId}`);
-      
+
       this.logger.log(`User ${client.userId} joined class ${data.classId}`);
-      
-      client.emit('joined_class', { 
+
+      client.emit('joined_class', {
         classId: data.classId,
         timestamp: new Date(),
       });
-
     } catch (error) {
       this.logger.error(`Error joining class: ${error.message}`);
-      client.emit('error', { 
-        message: error.message || 'Erro ao entrar na classe' 
+      client.emit('error', {
+        message: error.message || 'Erro ao entrar na classe',
       });
     }
   }
@@ -200,18 +222,17 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
       // Remover o cliente da sala da classe
       await client.leave(`class_${data.classId}`);
-      
+
       this.logger.log(`User ${client.userId} left class ${data.classId}`);
-      
-      client.emit('left_class', { 
+
+      client.emit('left_class', {
         classId: data.classId,
         timestamp: new Date(),
       });
-
     } catch (error) {
       this.logger.error(`Error leaving class: ${error.message}`);
-      client.emit('error', { 
-        message: error.message || 'Erro ao sair da classe' 
+      client.emit('error', {
+        message: error.message || 'Erro ao sair da classe',
       });
     }
   }
@@ -219,7 +240,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('typing_start')
   async handleTypingStart(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { classId: string, receiverId: string },
+    @MessageBody() data: { classId: string; receiverId: string },
   ) {
     try {
       if (!client.userId) {
@@ -230,7 +251,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // Notificar o destinatário que o usuário está digitando
       const receiverData = this.connectedUsers.get(data.receiverId);
       if (receiverData) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
+        const receiverSocket = this.server.sockets.sockets.get(
+          receiverData.socketId,
+        );
         if (receiverSocket) {
           receiverSocket.emit('typing_start', {
             classId: data.classId,
@@ -240,7 +263,6 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
           });
         }
       }
-
     } catch (error) {
       this.logger.error(`Error handling typing start: ${error.message}`);
     }
@@ -249,7 +271,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('typing_stop')
   async handleTypingStop(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { classId: string, receiverId: string },
+    @MessageBody() data: { classId: string; receiverId: string },
   ) {
     try {
       if (!client.userId) {
@@ -260,7 +282,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       // Notificar o destinatário que o usuário parou de digitar
       const receiverData = this.connectedUsers.get(data.receiverId);
       if (receiverData) {
-        const receiverSocket = this.server.sockets.sockets.get(receiverData.socketId);
+        const receiverSocket = this.server.sockets.sockets.get(
+          receiverData.socketId,
+        );
         if (receiverSocket) {
           receiverSocket.emit('typing_stop', {
             classId: data.classId,
@@ -270,7 +294,6 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
           });
         }
       }
-
     } catch (error) {
       this.logger.error(`Error handling typing stop: ${error.message}`);
     }
@@ -279,7 +302,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('mark_as_read')
   async handleMarkAsRead(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { classId: string, messageId: string },
+    @MessageBody() data: { classId: string; messageId: string },
   ) {
     try {
       if (!client.userId) {
@@ -300,11 +323,10 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         readBy: client.userId,
         timestamp: new Date(),
       });
-
     } catch (error) {
       this.logger.error(`Error marking message as read: ${error.message}`);
-      client.emit('error', { 
-        message: error.message || 'Erro ao marcar mensagem como lida' 
+      client.emit('error', {
+        message: error.message || 'Erro ao marcar mensagem como lida',
       });
     }
   }
@@ -319,7 +341,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   // Método para enviar notificações de início/fim de aula
-  async notifyClassUpdate(classId: string, classData: any, updateType: 'started' | 'completed' | 'cancelled') {
+  async notifyClassUpdate(
+    classId: string,
+    classData: any,
+    updateType: 'started' | 'completed' | 'cancelled',
+  ) {
     this.server.to(`class_${classId}`).emit('class_update', {
       classId,
       class: classData,
@@ -331,12 +357,15 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // Handler para timeout de busca de proposta (3 minutos)
   @SubscribeMessage('proposal_search_timeout')
   async handleProposalSearchTimeout(
-    @MessageBody() data: { proposalId: string; reason: string; timestamp: string },
+    @MessageBody()
+    data: { proposalId: string; reason: string; timestamp: string },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     try {
-      this.logger.log(`⏰ [CHAT_GATEWAY] Timer de busca expirado para proposta ${data.proposalId}`);
-      
+      this.logger.log(
+        `⏰ [CHAT_GATEWAY] Timer de busca expirado para proposta ${data.proposalId}`,
+      );
+
       // Emitir evento de volta para sincronizar com outros clientes
       this.server.emit('proposal_expired', {
         action: 'proposal_expired',
@@ -349,12 +378,15 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         timestamp: new Date(),
       });
 
-      this.logger.log(`📡 [CHAT_GATEWAY] Evento proposal_expired emitido para proposta ${data.proposalId}`);
-      
+      this.logger.log(
+        `📡 [CHAT_GATEWAY] Evento proposal_expired emitido para proposta ${data.proposalId}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ [CHAT_GATEWAY] Erro ao processar timeout de busca: ${error.message}`);
-      client.emit('error', { 
-        message: 'Erro ao processar timeout de busca' 
+      this.logger.error(
+        `❌ [CHAT_GATEWAY] Erro ao processar timeout de busca: ${error.message}`,
+      );
+      client.emit('error', {
+        message: 'Erro ao processar timeout de busca',
       });
     }
   }
@@ -400,13 +432,13 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
    */
   getConnectedPersonals(): Array<{ userId: string; socketId: string }> {
     const personals: Array<{ userId: string; socketId: string }> = [];
-    
+
     for (const [userId, userData] of this.connectedUsers.entries()) {
       if (userData.userType === 'personal') {
         personals.push({ userId, socketId: userData.socketId });
       }
     }
-    
+
     return personals;
   }
 }

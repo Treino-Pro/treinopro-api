@@ -1,7 +1,27 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, CreateAdminDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  ChangePasswordDto,
+  CreateAdminDto,
+} from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -26,7 +46,6 @@ export class AuthController {
     }
   }
 
-
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -34,7 +53,9 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login realizado com sucesso' })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas' })
   async login(@Body() loginDto: LoginDto) {
-    try { console.log('🔐 [AUTH][Controller] HIT /auth/login', loginDto.email); } catch (_) {}
+    try {
+      console.log('🔐 [AUTH][Controller] HIT /auth/login', loginDto.email);
+    } catch (_) {}
     const result = await this.authService.login(loginDto);
     try {
       console.log('🔐 [AUTH][Controller] login result:', {
@@ -76,8 +97,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Redefinir senha com código de verificação' })
   @ApiResponse({ status: 200, description: 'Senha redefinida com sucesso' })
   @ApiResponse({ status: 400, description: 'Código inválido' })
-  async resetPasswordWithCode(@Body() body: { email: string; code: string; newPassword: string }) {
-    return this.authService.resetPasswordWithCode(body.email, body.code, body.newPassword);
+  async resetPasswordWithCode(
+    @Body() body: { email: string; code: string; newPassword: string },
+  ) {
+    return this.authService.resetPasswordWithCode(
+      body.email,
+      body.code,
+      body.newPassword,
+    );
   }
 
   @Post('change-password')
@@ -87,7 +114,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Alterar senha' })
   @ApiResponse({ status: 200, description: 'Senha alterada com sucesso' })
   @ApiResponse({ status: 401, description: 'Não autorizado' })
-  async changePassword(@Request() req: any, @Body() changePasswordDto: ChangePasswordDto) {
+  async changePassword(
+    @Request() req: any,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
     return this.authService.changePassword(req.user.sub, changePasswordDto);
   }
 
@@ -104,9 +134,14 @@ export class AuthController {
   @Post('send-verification-code')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Enviar código de verificação por email (apenas para cadastro)' })
+  @ApiOperation({
+    summary: 'Enviar código de verificação por email (apenas para cadastro)',
+  })
   @ApiResponse({ status: 200, description: 'Código enviado com sucesso' })
-  @ApiResponse({ status: 400, description: 'Email inválido ou usuário não encontrado' })
+  @ApiResponse({
+    status: 400,
+    description: 'Email inválido ou usuário não encontrado',
+  })
   async sendVerificationCode(@Body() body: { email: string }) {
     return this.authService.sendVerificationCode(body.email);
   }
@@ -114,7 +149,9 @@ export class AuthController {
   @Post('verify-code')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verificar código de verificação (apenas para cadastro)' })
+  @ApiOperation({
+    summary: 'Verificar código de verificação (apenas para cadastro)',
+  })
   @ApiResponse({ status: 200, description: 'Código verificado com sucesso' })
   @ApiResponse({ status: 400, description: 'Código inválido ou expirado' })
   async verifyCode(@Body() body: { email: string; code: string }) {
@@ -124,18 +161,26 @@ export class AuthController {
   @Post('send-guardian-authorization')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Enviar email de autorização para responsável de menor de idade' })
-  @ApiResponse({ status: 200, description: 'Email de autorização enviado com sucesso' })
+  @ApiOperation({
+    summary: 'Enviar email de autorização para responsável de menor de idade',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Email de autorização enviado com sucesso',
+  })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
-  async sendGuardianAuthorization(@Body() body: { 
-    guardianName: string; 
-    guardianEmail: string; 
-    studentName: string; 
-  }) {
+  async sendGuardianAuthorization(
+    @Body()
+    body: {
+      guardianName: string;
+      guardianEmail: string;
+      studentName: string;
+    },
+  ) {
     return this.authService.sendGuardianAuthorizationEmail(
-      body.guardianName, 
-      body.guardianEmail, 
-      body.studentName
+      body.guardianName,
+      body.guardianEmail,
+      body.studentName,
     );
   }
 
@@ -145,26 +190,29 @@ export class AuthController {
   @ApiOperation({ summary: 'Verificar OTP de autorização do responsável' })
   @ApiResponse({ status: 200, description: 'OTP verificado com sucesso' })
   @ApiResponse({ status: 400, description: 'OTP inválido ou expirado' })
-  async verifyGuardianOtp(@Body() body: { 
-    guardianEmail: string; 
-    otpCode: string; 
-  }) {
+  async verifyGuardianOtp(
+    @Body() body: { guardianEmail: string; otpCode: string },
+  ) {
     return this.authService.verifyGuardianOtp(body.guardianEmail, body.otpCode);
   }
 
   @Post('create-admin')
   @Public()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Criar usuário admin (MÉTODO INTERNO)',
-    description: 'Endpoint para criação de usuários admin. Deve ser usado apenas em setup inicial ou por outros admins.'
+    description:
+      'Endpoint para criação de usuários admin. Deve ser usado apenas em setup inicial ou por outros admins.',
   })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'Usuário admin criado com sucesso',
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Usuário admin criado com sucesso' },
+        message: {
+          type: 'string',
+          example: 'Usuário admin criado com sucesso',
+        },
         user: {
           type: 'object',
           properties: {
@@ -173,19 +221,19 @@ export class AuthController {
             firstName: { type: 'string', example: 'João' },
             lastName: { type: 'string', example: 'Silva' },
             userType: { type: 'string', example: 'admin' },
-            isVerified: { type: 'boolean', example: true }
-          }
-        }
-      }
-    }
+            isVerified: { type: 'boolean', example: true },
+          },
+        },
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 409, 
-    description: 'Email já está em uso' 
+  @ApiResponse({
+    status: 409,
+    description: 'Email já está em uso',
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'Dados inválidos' 
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos',
   })
   async createAdmin(@Body() createAdminDto: CreateAdminDto) {
     try {
@@ -196,5 +244,4 @@ export class AuthController {
       throw error;
     }
   }
-
 }

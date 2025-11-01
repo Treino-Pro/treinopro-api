@@ -1,5 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsDateString, IsEnum, IsUUID, Min, MaxLength, IsIn, IsBoolean, IsEmail, Length, Matches } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsDateString,
+  IsEnum,
+  IsUUID,
+  Min,
+  MaxLength,
+  IsIn,
+  IsBoolean,
+  IsEmail,
+  Length,
+  Matches,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum ProposalStatus {
@@ -80,7 +94,7 @@ export class CreateProposalDto {
 
   @ApiProperty({
     description: 'Preço da proposta em reais',
-    example: 80.00,
+    example: 80.0,
     minimum: 20,
   })
   @IsNumber()
@@ -97,7 +111,7 @@ export class CreateProposalDto {
   additionalNotes?: string;
 
   // ===== NOVOS CAMPOS PARA PAGAMENTO =====
-  
+
   @ApiProperty({
     description: 'Método de pagamento escolhido',
     example: 'credit_card',
@@ -227,7 +241,7 @@ export class ProposalResponseDto {
       name: 'João Silva',
       email: 'joao@email.com',
       firstName: 'João',
-      lastName: 'Silva'
+      lastName: 'Silva',
     },
   })
   student: {
@@ -277,7 +291,7 @@ export class ProposalResponseDto {
 
   @ApiProperty({
     description: 'Preço da proposta em reais',
-    example: 80.00,
+    example: 80.0,
   })
   price: number;
 
@@ -314,7 +328,7 @@ export class ProposalResponseDto {
   updatedAt: Date;
 
   // ===== CAMPOS DE PAGAMENTO (OPCIONAIS) =====
-  
+
   @ApiProperty({
     description: 'Dados do pagamento processado',
     required: false,

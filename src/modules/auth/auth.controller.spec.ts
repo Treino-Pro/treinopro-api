@@ -127,13 +127,13 @@ describe('AuthController', () => {
           firstName: 'João',
           lastName: 'Silva',
           userType: UserType.STUDENT,
-        documentType: DocumentType.RG,
-        documentNumber: '12345678901',
-        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        isMinor: false,
-        guardianConsent: false,
-        termsAccepted: true,
-        privacyPolicyAccepted: true,
+          documentType: DocumentType.RG,
+          documentNumber: '12345678901',
+          documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          isMinor: false,
+          guardianConsent: false,
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
           isVerified: true,
         },
         accessToken: 'mock-access-token',
@@ -183,7 +183,9 @@ describe('AuthController', () => {
       const result = await controller.forgotPassword(forgotPasswordDto);
 
       // Assert
-      expect(authService.forgotPassword).toHaveBeenCalledWith(forgotPasswordDto);
+      expect(authService.forgotPassword).toHaveBeenCalledWith(
+        forgotPasswordDto,
+      );
       expect(result).toEqual(expectedResult);
     });
   });
@@ -204,10 +206,16 @@ describe('AuthController', () => {
       mockAuthService.changePassword.mockResolvedValue(expectedResult);
 
       // Act
-      const result = await controller.changePassword(mockUser, changePasswordDto);
+      const result = await controller.changePassword(
+        mockUser,
+        changePasswordDto,
+      );
 
       // Assert
-      expect(authService.changePassword).toHaveBeenCalledWith('user-id', changePasswordDto);
+      expect(authService.changePassword).toHaveBeenCalledWith(
+        'user-id',
+        changePasswordDto,
+      );
       expect(result).toEqual(expectedResult);
     });
   });
@@ -230,7 +238,9 @@ describe('AuthController', () => {
       const result = await controller.refreshToken(refreshTokenDto);
 
       // Assert
-      expect(authService.refreshToken).toHaveBeenCalledWith(refreshTokenDto.refreshToken);
+      expect(authService.refreshToken).toHaveBeenCalledWith(
+        refreshTokenDto.refreshToken,
+      );
       expect(result).toEqual(expectedResult);
     });
   });

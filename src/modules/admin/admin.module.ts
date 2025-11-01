@@ -12,5 +12,3 @@ import { PaymentsModule } from '../payments/payments.module';
   providers: [AdminService],
 })
 export class AdminModule {}
-
-

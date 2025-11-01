@@ -1,8 +1,22 @@
-import { pgTable, uuid, varchar, text, timestamp, decimal, integer, pgEnum } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  timestamp,
+  decimal,
+  integer,
+  pgEnum,
+} from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
-export const proposalStatusEnum = pgEnum('proposal_status', ['pending', 'matched', 'completed', 'cancelled']);
+export const proposalStatusEnum = pgEnum('proposal_status', [
+  'pending',
+  'matched',
+  'completed',
+  'cancelled',
+]);
 
 // Proposals table
 export const proposals = pgTable('proposals', {
@@ -19,21 +33,25 @@ export const proposals = pgTable('proposals', {
   price: decimal('price', { precision: 10, scale: 2 }).notNull(),
   additionalNotes: text('additional_notes'),
   status: proposalStatusEnum('status').default('pending'),
-  
+
   // Campos de pagamento
   paymentId: varchar('payment_id', { length: 255 }), // ID do pagamento processado
   paymentMethod: varchar('payment_method', { length: 50 }), // credit_card, debit_card, pix, etc
   paymentStatus: varchar('payment_status', { length: 50 }), // pending, approved, rejected, etc
-  
+
   // Referência à aula criada (quando aceita)
   classId: uuid('class_id'), // ID da aula criada automaticamente
-  
+
   // Campo para recontratação direta
   targetPersonalId: uuid('target_personal_id'), // ID do personal específico para recontratação
-  
+
   // Timestamps
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 // Relations

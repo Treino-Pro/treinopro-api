@@ -19,4 +19,3 @@ import { GamificationProcessor } from './gamification.processor';
   exports: [GamificationService],
 })
 export class GamificationModule {}
-

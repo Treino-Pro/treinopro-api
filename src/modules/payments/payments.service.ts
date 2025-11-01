@@ -1,10 +1,28 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, or, desc, count, sum, sql } from 'drizzle-orm';
-import { payments, paymentDisputes, paymentTransactions, userWallets, users, classes } from '../../database/schema';
-import { withdrawalRequests, withdrawalHistory } from '../../database/schema/payments';
-import { MercadoPagoService, CreatePreferenceData } from './mercadopago.service';
-import { 
+import {
+  payments,
+  paymentDisputes,
+  paymentTransactions,
+  userWallets,
+  users,
+  classes,
+} from '../../database/schema';
+import {
+  withdrawalRequests,
+  withdrawalHistory,
+} from '../../database/schema/payments';
+import {
+  MercadoPagoService,
+  CreatePreferenceData,
+} from './mercadopago.service';
+import {
   CreatePaymentDto,
   CreatePaymentPreferenceDto,
   UpdatePaymentDto,
@@ -29,7 +47,7 @@ import {
   TransferRequestDto,
   ApproveWithdrawalDto,
   RejectWithdrawalDto,
-  WithdrawalResponseDto
+  WithdrawalResponseDto,
 } from './dto/payments.dto';
 
 @Injectable()
@@ -40,10 +58,15 @@ export class PaymentsService {
   ) {}
 
   // Criar preferência de pagamento no Mercado Pago
-  async createPaymentPreference(createDto: CreatePaymentPreferenceDto, userId: string): Promise<any> {
+  async createPaymentPreference(
+    createDto: CreatePaymentPreferenceDto,
+    userId: string,
+  ): Promise<any> {
     // Verificar configuração do Mercado Pago
     if (!this.mercadoPagoService.isConfigured()) {
-      throw new BadRequestException('Mercado Pago não está configurado corretamente');
+      throw new BadRequestException(
+        'Mercado Pago não está configurado corretamente',
+      );
     }
 
     // Verificar se a aula existe e o usuário é o aluno
@@ -60,14 +83,16 @@ export class PaymentsService {
     }
 
     if (classData.studentId !== userId) {
-      throw new ForbiddenException('Apenas o aluno pode criar pagamento para esta aula');
+      throw new ForbiddenException(
+        'Apenas o aluno pode criar pagamento para esta aula',
+      );
     }
 
     // Verificar se já existe pagamento para esta aula
     const existingPayment = await this.db.query.payments.findFirst({
       where: and(
         eq(payments.classId, createDto.classId),
-        eq(payments.studentId, userId)
+        eq(payments.studentId, userId),
       ),
     });
 
@@ -76,7 +101,8 @@ export class PaymentsService {
     }
 
     // Calcular valores usando variável de ambiente
-    const platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
+    const platformFeePercentage =
+      parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
     const platformFee = createDto.totalAmount * platformFeePercentage;
     const personalAmount = createDto.totalAmount - platformFee;
 
@@ -108,7 +134,8 @@ export class PaymentsService {
     };
 
     // Criar preferência no Mercado Pago
-    const mpPreference = await this.mercadoPagoService.createPreference(preferenceData);
+    const mpPreference =
+      await this.mercadoPagoService.createPreference(preferenceData);
 
     // Atualizar registro com ID da preferência
     await this.db
@@ -131,18 +158,24 @@ export class PaymentsService {
   }
 
   // Processar webhook do Mercado Pago
-  async processWebhook(webhookDto: MercadoPagoWebhookDto, headers?: any): Promise<void> {
+  async processWebhook(
+    webhookDto: MercadoPagoWebhookDto,
+    headers?: any,
+  ): Promise<void> {
     const { id, type, action, data } = webhookDto;
 
     // Validar webhook
-    if (headers && !this.mercadoPagoService.validateWebhook(webhookDto, headers)) {
+    if (
+      headers &&
+      !this.mercadoPagoService.validateWebhook(webhookDto, headers)
+    ) {
       throw new BadRequestException('Webhook inválido');
     }
 
     if (type === 'payment') {
       // Buscar informações do pagamento no Mercado Pago
       const mpPaymentData = await this.mercadoPagoService.getPayment(id);
-      
+
       if (!mpPaymentData || !mpPaymentData.external_reference) {
         throw new NotFoundException('Pagamento não encontrado no Mercado Pago');
       }
@@ -158,17 +191,24 @@ export class PaymentsService {
       });
 
       if (!payment) {
-        throw new NotFoundException('Pagamento não encontrado no banco de dados');
+        throw new NotFoundException(
+          'Pagamento não encontrado no banco de dados',
+        );
       }
 
       // Mapear status do MP para nosso sistema
       const newStatus = this.mercadoPagoService.mapPaymentStatus(
         mpPaymentData.status,
-        mpPaymentData.status_detail
+        mpPaymentData.status_detail,
       );
 
       // Atualizar status do pagamento
-      await this.updatePaymentStatus(payment.id, newStatus as PaymentStatus, id, mpPaymentData);
+      await this.updatePaymentStatus(
+        payment.id,
+        newStatus as PaymentStatus,
+        id,
+        mpPaymentData,
+      );
 
       // Log para auditoria
       console.log(`Webhook processado: Payment ${id} -> Status ${newStatus}`);
@@ -176,7 +216,12 @@ export class PaymentsService {
   }
 
   // Atualizar status do pagamento
-  async updatePaymentStatus(paymentId: string, status: PaymentStatus, mpPaymentId?: string, mpData?: any): Promise<void> {
+  async updatePaymentStatus(
+    paymentId: string,
+    status: PaymentStatus,
+    mpPaymentId?: string,
+    mpData?: any,
+  ): Promise<void> {
     const updateData: any = {
       status,
       updatedAt: new Date(),
@@ -208,7 +253,10 @@ export class PaymentsService {
     }
 
     // Aplicar split para pagamentos autorizados ou capturados
-    if (status === PaymentStatus.AUTHORIZED || status === PaymentStatus.CAPTURED) {
+    if (
+      status === PaymentStatus.AUTHORIZED ||
+      status === PaymentStatus.CAPTURED
+    ) {
       console.log(`💳 Pagamento ${paymentId} - aplicando split e repasse`);
       await this.capturePayment(paymentId);
     }
@@ -256,7 +304,9 @@ export class PaymentsService {
 
   // Atualizar carteiras dos usuários
   async updateWallets(payment: any): Promise<void> {
-    console.log('💰 [UPDATE_WALLETS] ===== INÍCIO DO REPASSE PARA O PERSONAL =====');
+    console.log(
+      '💰 [UPDATE_WALLETS] ===== INÍCIO DO REPASSE PARA O PERSONAL =====',
+    );
     console.log('💰 [UPDATE_WALLETS] Payment ID:', payment.id);
     console.log('💰 [UPDATE_WALLETS] Class ID:', payment.classId);
     console.log('💰 [UPDATE_WALLETS] Personal ID:', payment.personalId);
@@ -265,7 +315,7 @@ export class PaymentsService {
       totalAmount: payment.totalAmount,
       platformFee: payment.platformFee,
       personalAmount: payment.personalAmount,
-      status: payment.status
+      status: payment.status,
     });
 
     // Buscar carteira atual do personal
@@ -273,30 +323,38 @@ export class PaymentsService {
     console.log('💰 [UPDATE_WALLETS] Carteira atual do personal:', {
       personalId: payment.personalId,
       availableBalance: personalWallet.availableBalance,
-      totalEarned: personalWallet.totalEarned
+      totalEarned: personalWallet.totalEarned,
     });
-    
+
     // Calcular novos valores
-    const newAvailableBalance = personalWallet.availableBalance + parseFloat(payment.personalAmount);
-    const newTotalEarned = personalWallet.totalEarned + parseFloat(payment.personalAmount);
-    
+    const newAvailableBalance =
+      personalWallet.availableBalance + parseFloat(payment.personalAmount);
+    const newTotalEarned =
+      personalWallet.totalEarned + parseFloat(payment.personalAmount);
+
     console.log('💰 [UPDATE_WALLETS] Novos valores calculados:', {
       valorAdicionado: payment.personalAmount,
       novoSaldoDisponivel: newAvailableBalance,
-      novoTotalGanho: newTotalEarned
+      novoTotalGanho: newTotalEarned,
     });
-    
+
     // Atualizar carteira do personal (somar ganhos)
     await this.updateWallet(payment.personalId, {
       availableBalance: newAvailableBalance,
       totalEarned: newTotalEarned,
     });
 
-    console.log('✅ [UPDATE_WALLETS] Carteira do personal atualizada com sucesso');
-    console.log(`💳 [UPDATE_WALLETS] Personal ${payment.personalId} recebeu: +R$ ${payment.personalAmount}`);
+    console.log(
+      '✅ [UPDATE_WALLETS] Carteira do personal atualizada com sucesso',
+    );
+    console.log(
+      `💳 [UPDATE_WALLETS] Personal ${payment.personalId} recebeu: +R$ ${payment.personalAmount}`,
+    );
 
     // Criar transações
-    console.log('📝 [UPDATE_WALLETS] Criando transação de ganhos do personal...');
+    console.log(
+      '📝 [UPDATE_WALLETS] Criando transação de ganhos do personal...',
+    );
     await this.createTransaction({
       paymentId: payment.id,
       userId: payment.personalId,
@@ -307,7 +365,9 @@ export class PaymentsService {
     });
     console.log('✅ [UPDATE_WALLETS] Transação de ganhos do personal criada');
 
-    console.log('📝 [UPDATE_WALLETS] Criando transação de pagamento do aluno...');
+    console.log(
+      '📝 [UPDATE_WALLETS] Criando transação de pagamento do aluno...',
+    );
     await this.createTransaction({
       paymentId: payment.id,
       userId: payment.studentId,
@@ -317,12 +377,17 @@ export class PaymentsService {
       status: PaymentStatus.CAPTURED,
     });
     console.log('✅ [UPDATE_WALLETS] Transação de pagamento do aluno criada');
-    
-    console.log('💰 [UPDATE_WALLETS] ===== REPASSE CONCLUÍDO COM SUCESSO =====');
+
+    console.log(
+      '💰 [UPDATE_WALLETS] ===== REPASSE CONCLUÍDO COM SUCESSO =====',
+    );
   }
 
   // Criar disputa
-  async createDispute(createDto: CreateDisputeDto, userId: string): Promise<DisputeResponseDto> {
+  async createDispute(
+    createDto: CreateDisputeDto,
+    userId: string,
+  ): Promise<DisputeResponseDto> {
     const payment = await this.db.query.payments.findFirst({
       where: eq(payments.id, createDto.paymentId),
       with: {
@@ -337,19 +402,23 @@ export class PaymentsService {
 
     // Verificar se o usuário pode criar disputa
     if (payment.studentId !== userId && payment.personalId !== userId) {
-      throw new ForbiddenException('Usuário não autorizado a criar disputa para este pagamento');
+      throw new ForbiddenException(
+        'Usuário não autorizado a criar disputa para este pagamento',
+      );
     }
 
     // Verificar se já existe disputa ativa
     const existingDispute = await this.db.query.paymentDisputes.findFirst({
       where: and(
         eq(paymentDisputes.paymentId, createDto.paymentId),
-        eq(paymentDisputes.status, DisputeStatus.PENDING)
+        eq(paymentDisputes.status, DisputeStatus.PENDING),
       ),
     });
 
     if (existingDispute) {
-      throw new BadRequestException('Já existe uma disputa ativa para este pagamento');
+      throw new BadRequestException(
+        'Já existe uma disputa ativa para este pagamento',
+      );
     }
 
     // Calcular expiração (48h)
@@ -360,18 +429,22 @@ export class PaymentsService {
     const studentDisputes = await this.db
       .select({ count: count() })
       .from(paymentDisputes)
-      .where(and(
-        eq(paymentDisputes.reportedBy, payment.studentId),
-        eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_PERSONAL)
-      ));
+      .where(
+        and(
+          eq(paymentDisputes.reportedBy, payment.studentId),
+          eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_PERSONAL),
+        ),
+      );
 
     const personalDisputes = await this.db
       .select({ count: count() })
       .from(paymentDisputes)
-      .where(and(
-        eq(paymentDisputes.reportedBy, payment.personalId),
-        eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_STUDENT)
-      ));
+      .where(
+        and(
+          eq(paymentDisputes.reportedBy, payment.personalId),
+          eq(paymentDisputes.status, DisputeStatus.RESOLVED_PRO_STUDENT),
+        ),
+      );
 
     const [newDispute] = await this.db
       .insert(paymentDisputes)
@@ -394,7 +467,11 @@ export class PaymentsService {
   }
 
   // Submeter evidências
-  async submitEvidence(disputeId: string, evidenceDto: SubmitEvidenceDto, userId: string): Promise<DisputeResponseDto> {
+  async submitEvidence(
+    disputeId: string,
+    evidenceDto: SubmitEvidenceDto,
+    userId: string,
+  ): Promise<DisputeResponseDto> {
     const dispute = await this.db.query.paymentDisputes.findFirst({
       where: eq(paymentDisputes.id, disputeId),
       with: {
@@ -407,8 +484,13 @@ export class PaymentsService {
     }
 
     // Verificar se o usuário pode submeter evidências
-    if (dispute.payment.studentId !== userId && dispute.payment.personalId !== userId) {
-      throw new ForbiddenException('Usuário não autorizado a submeter evidências para esta disputa');
+    if (
+      dispute.payment.studentId !== userId &&
+      dispute.payment.personalId !== userId
+    ) {
+      throw new ForbiddenException(
+        'Usuário não autorizado a submeter evidências para esta disputa',
+      );
     }
 
     // Verificar se a disputa ainda está ativa
@@ -456,7 +538,11 @@ export class PaymentsService {
   }
 
   // Resolver disputa (admin)
-  async resolveDispute(disputeId: string, resolveDto: ResolveDisputeDto, adminId: string): Promise<DisputeResponseDto> {
+  async resolveDispute(
+    disputeId: string,
+    resolveDto: ResolveDisputeDto,
+    adminId: string,
+  ): Promise<DisputeResponseDto> {
     const dispute = await this.db.query.paymentDisputes.findFirst({
       where: eq(paymentDisputes.id, disputeId),
       with: {
@@ -529,11 +615,15 @@ export class PaymentsService {
     if (payment.status === PaymentStatus.CAPTURED) {
       const personalWallet = await this.getUserWallet(payment.personalId);
       await this.updateWallet(payment.personalId, {
-        availableBalance: personalWallet.availableBalance - parseFloat(payment.personalAmount),
-        totalEarned: personalWallet.totalEarned - parseFloat(payment.personalAmount),
+        availableBalance:
+          personalWallet.availableBalance - parseFloat(payment.personalAmount),
+        totalEarned:
+          personalWallet.totalEarned - parseFloat(payment.personalAmount),
       });
-      
-      console.log(`💳 Carteira do personal ${payment.personalId} revertida: -R$ ${payment.personalAmount}`);
+
+      console.log(
+        `💳 Carteira do personal ${payment.personalId} revertida: -R$ ${payment.personalAmount}`,
+      );
     }
 
     // Criar transação de reembolso
@@ -546,15 +636,22 @@ export class PaymentsService {
       status: PaymentStatus.REFUNDED,
     });
 
-    console.log(`✅ Reembolso completo para pagamento ${paymentId}: R$ ${payment.totalAmount}`);
+    console.log(
+      `✅ Reembolso completo para pagamento ${paymentId}: R$ ${payment.totalAmount}`,
+    );
   }
 
   // Capturar pagamento após aula concluída (fluxo normal)
-  async capturePaymentAfterClass(classId: string, reason: string = 'Aula concluída'): Promise<void> {
-    console.log('💰 [CAPTURE_AFTER_CLASS] ===== INICIANDO CAPTURA APÓS AULA =====');
+  async capturePaymentAfterClass(
+    classId: string,
+    reason: string = 'Aula concluída',
+  ): Promise<void> {
+    console.log(
+      '💰 [CAPTURE_AFTER_CLASS] ===== INICIANDO CAPTURA APÓS AULA =====',
+    );
     console.log('💰 [CAPTURE_AFTER_CLASS] Class ID:', classId);
     console.log('💰 [CAPTURE_AFTER_CLASS] Reason:', reason);
-    
+
     const payment = await this.db.query.payments.findFirst({
       where: eq(payments.classId, classId),
       with: {
@@ -565,7 +662,9 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      console.error('❌ [CAPTURE_AFTER_CLASS] Pagamento não encontrado para esta aula');
+      console.error(
+        '❌ [CAPTURE_AFTER_CLASS] Pagamento não encontrado para esta aula',
+      );
       throw new NotFoundException('Pagamento não encontrado para esta aula');
     }
 
@@ -574,51 +673,80 @@ export class PaymentsService {
       status: payment.status,
       totalAmount: payment.totalAmount,
       personalAmount: payment.personalAmount,
-      mpPaymentId: payment.mpPaymentId
+      mpPaymentId: payment.mpPaymentId,
     });
 
     // Aceitar tanto AUTHORIZED (webhook mapeado) quanto PENDING (sem webhook)
-    const canCapture = payment.status === PaymentStatus.AUTHORIZED || payment.status === PaymentStatus.PENDING;
+    const canCapture =
+      payment.status === PaymentStatus.AUTHORIZED ||
+      payment.status === PaymentStatus.PENDING;
     if (!canCapture) {
-      console.error('❌ [CAPTURE_AFTER_CLASS] Pagamento não está em estado capturável. Status atual:', payment.status);
-      throw new BadRequestException(`Pagamento não está em estado capturável. Status atual: ${payment.status}`);
+      console.error(
+        '❌ [CAPTURE_AFTER_CLASS] Pagamento não está em estado capturável. Status atual:',
+        payment.status,
+      );
+      throw new BadRequestException(
+        `Pagamento não está em estado capturável. Status atual: ${payment.status}`,
+      );
     }
     if (payment.status === PaymentStatus.PENDING) {
-      console.warn('⚠️ [CAPTURE_AFTER_CLASS] Pagamento em PENDING (sem webhook AUTHORIZED). Forçando captura e split.');
+      console.warn(
+        '⚠️ [CAPTURE_AFTER_CLASS] Pagamento em PENDING (sem webhook AUTHORIZED). Forçando captura e split.',
+      );
     }
 
     // Capturar no Mercado Pago (com tratamento de erro)
     let mpCaptureSuccess = false;
     if (payment.mpPaymentId) {
       try {
-        console.log('💳 [CAPTURE_AFTER_CLASS] Capturando pagamento no Mercado Pago:', payment.mpPaymentId);
+        console.log(
+          '💳 [CAPTURE_AFTER_CLASS] Capturando pagamento no Mercado Pago:',
+          payment.mpPaymentId,
+        );
         await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
-        console.log(`✅ [CAPTURE_AFTER_CLASS] Captura processada no MP: ${payment.mpPaymentId}`);
+        console.log(
+          `✅ [CAPTURE_AFTER_CLASS] Captura processada no MP: ${payment.mpPaymentId}`,
+        );
         mpCaptureSuccess = true;
       } catch (error) {
-        console.error(`❌ [CAPTURE_AFTER_CLASS] Falha ao capturar no MP: ${error.message}`);
-        console.warn('⚠️ [CAPTURE_AFTER_CLASS] Continuando com split local mesmo com falha no MP');
+        console.error(
+          `❌ [CAPTURE_AFTER_CLASS] Falha ao capturar no MP: ${error.message}`,
+        );
+        console.warn(
+          '⚠️ [CAPTURE_AFTER_CLASS] Continuando com split local mesmo com falha no MP',
+        );
         mpCaptureSuccess = false;
       }
     } else {
-      console.warn('⚠️ [CAPTURE_AFTER_CLASS] Pagamento não tem mpPaymentId - pode ser simulação');
+      console.warn(
+        '⚠️ [CAPTURE_AFTER_CLASS] Pagamento não tem mpPaymentId - pode ser simulação',
+      );
       mpCaptureSuccess = true; // Simulações sempre "funcionam"
     }
 
     // Atualizar status para capturado (isso vai aplicar o split)
     console.log('🔄 [CAPTURE_AFTER_CLASS] Atualizando status para CAPTURED...');
     await this.updatePaymentStatus(payment.id, PaymentStatus.CAPTURED);
-    
+
     if (!mpCaptureSuccess) {
-      console.warn('⚠️ [CAPTURE_AFTER_CLASS] Split aplicado localmente apesar da falha no MP');
+      console.warn(
+        '⚠️ [CAPTURE_AFTER_CLASS] Split aplicado localmente apesar da falha no MP',
+      );
     }
 
-    console.log(`✅ [CAPTURE_AFTER_CLASS] Pagamento capturado após conclusão da aula ${classId}: R$ ${payment.totalAmount}`);
-    console.log('💰 [CAPTURE_AFTER_CLASS] ===== CAPTURA APÓS AULA FINALIZADA =====');
+    console.log(
+      `✅ [CAPTURE_AFTER_CLASS] Pagamento capturado após conclusão da aula ${classId}: R$ ${payment.totalAmount}`,
+    );
+    console.log(
+      '💰 [CAPTURE_AFTER_CLASS] ===== CAPTURA APÓS AULA FINALIZADA =====',
+    );
   }
 
   // Cancelar pagamento (personal cancela antes da aula)
-  async cancelPaymentBeforeClass(classId: string, reason: string = 'Aula cancelada pelo personal'): Promise<void> {
+  async cancelPaymentBeforeClass(
+    classId: string,
+    reason: string = 'Aula cancelada pelo personal',
+  ): Promise<void> {
     const payment = await this.db.query.payments.findFirst({
       where: eq(payments.classId, classId),
     });
@@ -627,18 +755,29 @@ export class PaymentsService {
       throw new NotFoundException('Pagamento não encontrado para esta aula');
     }
 
-    if (payment.status === PaymentStatus.CANCELLED || payment.status === PaymentStatus.REFUNDED) {
-      throw new BadRequestException('Pagamento já foi cancelado ou reembolsado');
+    if (
+      payment.status === PaymentStatus.CANCELLED ||
+      payment.status === PaymentStatus.REFUNDED
+    ) {
+      throw new BadRequestException(
+        'Pagamento já foi cancelado ou reembolsado',
+      );
     }
 
     // Reembolsar totalmente
     await this.refundPayment(payment.id, reason);
 
-    console.log(`❌ Pagamento cancelado antes da aula ${classId} - reembolso total`);
+    console.log(
+      `❌ Pagamento cancelado antes da aula ${classId} - reembolso total`,
+    );
   }
 
   // Processar disputa de no-show
-  async processNoShowDispute(disputeId: string, resolution: 'pro_student' | 'pro_personal', adminNotes?: string): Promise<void> {
+  async processNoShowDispute(
+    disputeId: string,
+    resolution: 'pro_student' | 'pro_personal',
+    adminNotes?: string,
+  ): Promise<void> {
     const dispute = await this.db.query.paymentDisputes.findFirst({
       where: eq(paymentDisputes.id, disputeId),
       with: {
@@ -662,17 +801,26 @@ export class PaymentsService {
       // Personal tinha razão - aluno não compareceu
       // Capturar pagamento (split aplicado)
       if (payment.status === PaymentStatus.AUTHORIZED) {
-        await this.capturePaymentAfterClass(payment.classId, 'No-show confirmado - ausência do aluno');
+        await this.capturePaymentAfterClass(
+          payment.classId,
+          'No-show confirmado - ausência do aluno',
+        );
       }
-      
-      console.log(`⚖️ Disputa resolvida PRÓ-PERSONAL: Pagamento ${payment.id} capturado`);
-      
+
+      console.log(
+        `⚖️ Disputa resolvida PRÓ-PERSONAL: Pagamento ${payment.id} capturado`,
+      );
     } else if (resolution === 'pro_student') {
       // Aluno tinha razão - estava presente
       // Reembolsar totalmente
-      await this.refundPayment(payment.id, 'Disputa resolvida - aluno estava presente');
-      
-      console.log(`⚖️ Disputa resolvida PRÓ-ALUNO: Pagamento ${payment.id} reembolsado`);
+      await this.refundPayment(
+        payment.id,
+        'Disputa resolvida - aluno estava presente',
+      );
+
+      console.log(
+        `⚖️ Disputa resolvida PRÓ-ALUNO: Pagamento ${payment.id} reembolsado`,
+      );
     }
 
     // Atualizar status do pagamento para dispute_resolved
@@ -680,11 +828,14 @@ export class PaymentsService {
   }
 
   // Obter pagamento por ID
-  async getPaymentById(paymentId: string, userId: string): Promise<PaymentResponseDto> {
+  async getPaymentById(
+    paymentId: string,
+    userId: string,
+  ): Promise<PaymentResponseDto> {
     const payment = await this.db.query.payments.findFirst({
       where: and(
         eq(payments.id, paymentId),
-        or(eq(payments.studentId, userId), eq(payments.personalId, userId))
+        or(eq(payments.studentId, userId), eq(payments.personalId, userId)),
       ),
       with: {
         class: true,
@@ -701,9 +852,12 @@ export class PaymentsService {
   }
 
   // Listar pagamentos com filtros
-  async getPayments(filters: PaymentFiltersDto, userId: string): Promise<PaymentResponseDto[]> {
+  async getPayments(
+    filters: PaymentFiltersDto,
+    userId: string,
+  ): Promise<PaymentResponseDto[]> {
     const whereConditions = [
-      or(eq(payments.studentId, userId), eq(payments.personalId, userId))
+      or(eq(payments.studentId, userId), eq(payments.personalId, userId)),
     ];
 
     if (filters.status) {
@@ -719,11 +873,15 @@ export class PaymentsService {
     }
 
     if (filters.minAmount) {
-      whereConditions.push(sql`${payments.totalAmount} >= ${filters.minAmount}`);
+      whereConditions.push(
+        sql`${payments.totalAmount} >= ${filters.minAmount}`,
+      );
     }
 
     if (filters.maxAmount) {
-      whereConditions.push(sql`${payments.totalAmount} <= ${filters.maxAmount}`);
+      whereConditions.push(
+        sql`${payments.totalAmount} <= ${filters.maxAmount}`,
+      );
     }
 
     if (filters.startDate) {
@@ -744,7 +902,7 @@ export class PaymentsService {
       orderBy: [desc(payments.createdAt)],
     });
 
-    return paymentsList.map(payment => this.formatPaymentResponse(payment));
+    return paymentsList.map((payment) => this.formatPaymentResponse(payment));
   }
 
   // Obter carteira do usuário
@@ -776,11 +934,14 @@ export class PaymentsService {
   }
 
   // Atualizar carteira
-  async updateWallet(userId: string, updateDto: UpdateWalletDto): Promise<WalletResponseDto> {
+  async updateWallet(
+    userId: string,
+    updateDto: UpdateWalletDto,
+  ): Promise<WalletResponseDto> {
     console.log('💳 [UPDATE_WALLET] ===== ATUALIZANDO CARTEIRA =====');
     console.log('💳 [UPDATE_WALLET] User ID:', userId);
     console.log('💳 [UPDATE_WALLET] Dados de atualização:', updateDto);
-    
+
     const [updatedWallet] = await this.db
       .update(userWallets)
       .set({
@@ -790,14 +951,22 @@ export class PaymentsService {
       .where(eq(userWallets.userId, userId))
       .returning();
 
-    console.log('✅ [UPDATE_WALLET] Carteira atualizada no banco:', updatedWallet);
-    console.log('💳 [UPDATE_WALLET] ===== CARTEIRA ATUALIZADA COM SUCESSO =====');
+    console.log(
+      '✅ [UPDATE_WALLET] Carteira atualizada no banco:',
+      updatedWallet,
+    );
+    console.log(
+      '💳 [UPDATE_WALLET] ===== CARTEIRA ATUALIZADA COM SUCESSO =====',
+    );
 
     return this.formatWalletResponse(updatedWallet);
   }
 
   // Solicitar saque
-  async requestWithdrawal(userId: string, withdrawDto: WithdrawRequestDto): Promise<TransactionResponseDto> {
+  async requestWithdrawal(
+    userId: string,
+    withdrawDto: WithdrawRequestDto,
+  ): Promise<TransactionResponseDto> {
     const wallet = await this.getUserWallet(userId);
 
     if (wallet.availableBalance < withdrawDto.amount) {
@@ -824,9 +993,15 @@ export class PaymentsService {
   }
 
   // Obter transações da carteira do personal
-  async getPersonalTransactions(userId: string, limit: number = 20, offset: number = 0): Promise<TransactionResponseDto[]> {
-    console.log(`📊 [PERSONAL_TRANSACTIONS] Buscando transações para personal ${userId}`);
-    
+  async getPersonalTransactions(
+    userId: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<TransactionResponseDto[]> {
+    console.log(
+      `📊 [PERSONAL_TRANSACTIONS] Buscando transações para personal ${userId}`,
+    );
+
     const userTransactions = await this.db.query.paymentTransactions.findMany({
       where: eq(paymentTransactions.userId, userId),
       orderBy: [desc(paymentTransactions.createdAt)],
@@ -834,9 +1009,13 @@ export class PaymentsService {
       offset,
     });
 
-    console.log(`📊 [PERSONAL_TRANSACTIONS] Encontradas ${userTransactions.length} transações`);
-    
-    return userTransactions.map(transaction => this.formatTransactionResponse(transaction));
+    console.log(
+      `📊 [PERSONAL_TRANSACTIONS] Encontradas ${userTransactions.length} transações`,
+    );
+
+    return userTransactions.map((transaction) =>
+      this.formatTransactionResponse(transaction),
+    );
   }
 
   // Obter estatísticas financeiras do personal
@@ -847,26 +1026,32 @@ export class PaymentsService {
     pendingWithdrawals: number;
     recentTransactions: TransactionResponseDto[];
   }> {
-    console.log(`📊 [PERSONAL_STATS] Buscando estatísticas para personal ${userId}`);
-    
+    console.log(
+      `📊 [PERSONAL_STATS] Buscando estatísticas para personal ${userId}`,
+    );
+
     // Buscar carteira
     const wallet = await this.getUserWallet(userId);
-    
+
     // Buscar transações recentes (últimas 10)
-    const recentTransactions = await this.getPersonalTransactions(userId, 10, 0);
-    
+    const recentTransactions = await this.getPersonalTransactions(
+      userId,
+      10,
+      0,
+    );
+
     // Calcular totais
     const totalEarnings = parseFloat(wallet.totalEarned.toString());
     const totalWithdrawals = parseFloat(wallet.totalWithdrawn.toString());
     const pendingWithdrawals = parseFloat(wallet.pendingBalance.toString());
-    
+
     console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, {
       totalEarnings,
       totalWithdrawals,
       pendingWithdrawals,
-      availableBalance: wallet.availableBalance
+      availableBalance: wallet.availableBalance,
     });
-    
+
     return {
       wallet,
       totalEarnings,
@@ -878,9 +1063,9 @@ export class PaymentsService {
 
   // Obter estatísticas de pagamentos
   async getPaymentStats(userId?: string): Promise<PaymentStatsDto> {
-    const whereConditions = userId ? [
-      or(eq(payments.studentId, userId), eq(payments.personalId, userId))
-    ] : [];
+    const whereConditions = userId
+      ? [or(eq(payments.studentId, userId), eq(payments.personalId, userId))]
+      : [];
 
     // Total de pagamentos
     const [totalPayments] = await this.db
@@ -921,9 +1106,9 @@ export class PaymentsService {
       type: data.type,
       amount: data.amount,
       description: data.description,
-      status: data.status
+      status: data.status,
     });
-    
+
     const [transaction] = await this.db
       .insert(paymentTransactions)
       .values({
@@ -932,8 +1117,13 @@ export class PaymentsService {
       })
       .returning();
 
-    console.log('✅ [CREATE_TRANSACTION] Transação criada no banco:', transaction);
-    console.log('📝 [CREATE_TRANSACTION] ===== TRANSAÇÃO CRIADA COM SUCESSO =====');
+    console.log(
+      '✅ [CREATE_TRANSACTION] Transação criada no banco:',
+      transaction,
+    );
+    console.log(
+      '📝 [CREATE_TRANSACTION] ===== TRANSAÇÃO CRIADA COM SUCESSO =====',
+    );
 
     return this.formatTransactionResponse(transaction);
   }
@@ -973,12 +1163,23 @@ export class PaymentsService {
     const [monthStats] = await this.db
       .select({ count: count(), sum: sum(payments.totalAmount) })
       .from(payments)
-      .where(and(...whereConditions, sql`${payments.createdAt} >= ${monthAgo}`));
+      .where(
+        and(...whereConditions, sql`${payments.createdAt} >= ${monthAgo}`),
+      );
 
     return {
-      today: { count: todayStats.count, amount: parseFloat(todayStats.sum || '0') },
-      thisWeek: { count: weekStats.count, amount: parseFloat(weekStats.sum || '0') },
-      thisMonth: { count: monthStats.count, amount: parseFloat(monthStats.sum || '0') },
+      today: {
+        count: todayStats.count,
+        amount: parseFloat(todayStats.sum || '0'),
+      },
+      thisWeek: {
+        count: weekStats.count,
+        amount: parseFloat(weekStats.sum || '0'),
+      },
+      thisMonth: {
+        count: monthStats.count,
+        amount: parseFloat(monthStats.sum || '0'),
+      },
     };
   }
 
@@ -996,23 +1197,29 @@ export class PaymentsService {
       status: payment.status,
       type: payment.type,
       splitData: payment.splitData,
-      class: payment.class ? {
-        id: payment.class.id,
-        date: payment.class.date,
-        time: payment.class.time,
-        location: payment.class.location,
-        duration: payment.class.duration,
-      } : undefined,
-      student: payment.student ? {
-        id: payment.student.id,
-        name: payment.student.name,
-        email: payment.student.email,
-      } : undefined,
-      personal: payment.personal ? {
-        id: payment.personal.id,
-        name: payment.personal.name,
-        email: payment.personal.email,
-      } : undefined,
+      class: payment.class
+        ? {
+            id: payment.class.id,
+            date: payment.class.date,
+            time: payment.class.time,
+            location: payment.class.location,
+            duration: payment.class.duration,
+          }
+        : undefined,
+      student: payment.student
+        ? {
+            id: payment.student.id,
+            name: payment.student.name,
+            email: payment.student.email,
+          }
+        : undefined,
+      personal: payment.personal
+        ? {
+            id: payment.personal.id,
+            name: payment.personal.name,
+            email: payment.personal.email,
+          }
+        : undefined,
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
       authorizedAt: payment.authorizedAt,
@@ -1038,13 +1245,17 @@ export class PaymentsService {
       studentDisputeCount: dispute.studentDisputeCount,
       personalDisputeCount: dispute.personalDisputeCount,
       expiresAt: dispute.expiresAt,
-      payment: dispute.payment ? this.formatPaymentResponse(dispute.payment) : undefined,
-      reportedByUser: dispute.reportedByUser ? {
-        id: dispute.reportedByUser.id,
-        name: dispute.reportedByUser.name,
-        email: dispute.reportedByUser.email,
-        role: dispute.reportedByUser.role,
-      } : undefined,
+      payment: dispute.payment
+        ? this.formatPaymentResponse(dispute.payment)
+        : undefined,
+      reportedByUser: dispute.reportedByUser
+        ? {
+            id: dispute.reportedByUser.id,
+            name: dispute.reportedByUser.name,
+            email: dispute.reportedByUser.email,
+            role: dispute.reportedByUser.role,
+          }
+        : undefined,
       createdAt: dispute.createdAt,
       updatedAt: dispute.updatedAt,
     };
@@ -1061,13 +1272,15 @@ export class PaymentsService {
       bankAccount: wallet.bankAccount,
       isActive: wallet.isActive,
       lastWithdrawalAt: wallet.lastWithdrawalAt,
-      user: wallet.user ? {
-        id: wallet.user.id,
-        name: wallet.user.name,
-        email: wallet.user.email,
-        role: wallet.user.role,
-        userType: wallet.user.userType,
-      } : undefined,
+      user: wallet.user
+        ? {
+            id: wallet.user.id,
+            name: wallet.user.name,
+            email: wallet.user.email,
+            role: wallet.user.role,
+            userType: wallet.user.userType,
+          }
+        : undefined,
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt,
     };
@@ -1085,11 +1298,13 @@ export class PaymentsService {
       mpOperationId: transaction.mpOperationId,
       status: transaction.status,
       metadata: transaction.metadata,
-      user: transaction.user ? {
-        id: transaction.user.id,
-        name: transaction.user.name,
-        email: transaction.user.email,
-      } : undefined,
+      user: transaction.user
+        ? {
+            id: transaction.user.id,
+            name: transaction.user.name,
+            email: transaction.user.email,
+          }
+        : undefined,
       createdAt: transaction.createdAt,
       processedAt: transaction.processedAt,
     };
@@ -1098,13 +1313,18 @@ export class PaymentsService {
   // ===== TRANSFERÊNCIA REAL PARA PERSONAL =====
 
   // Processar transferência real para personal
-  async processRealTransfer(transferDto: TransferRequestDto, adminId: string): Promise<{
+  async processRealTransfer(
+    transferDto: TransferRequestDto,
+    adminId: string,
+  ): Promise<{
     success: boolean;
     transferId?: string;
     error?: string;
   }> {
     try {
-      console.log(`💸 [TRANSFER] Processando transferência real para personal ${transferDto.personalId}`);
+      console.log(
+        `💸 [TRANSFER] Processando transferência real para personal ${transferDto.personalId}`,
+      );
 
       // Validar dados de transferência
       const validation = await this.mercadoPagoService.validateTransferData({
@@ -1115,7 +1335,9 @@ export class PaymentsService {
       });
 
       if (!validation.isValid) {
-        throw new BadRequestException(`Dados de transferência inválidos: ${validation.errors.join(', ')}`);
+        throw new BadRequestException(
+          `Dados de transferência inválidos: ${validation.errors.join(', ')}`,
+        );
       }
 
       // Buscar dados do personal
@@ -1133,7 +1355,9 @@ export class PaymentsService {
       });
 
       if (!financialProfile || !financialProfile.canReceivePayments) {
-        throw new BadRequestException('Personal trainer não tem perfil financeiro configurado');
+        throw new BadRequestException(
+          'Personal trainer não tem perfil financeiro configurado',
+        );
       }
 
       // Fazer transferência via Mercado Pago
@@ -1146,7 +1370,9 @@ export class PaymentsService {
       });
 
       if (!transferResult.success) {
-        throw new BadRequestException(`Erro na transferência: ${transferResult.error}`);
+        throw new BadRequestException(
+          `Erro na transferência: ${transferResult.error}`,
+        );
       }
 
       // Atualizar carteira do personal (debitar valor transferido)
@@ -1171,13 +1397,14 @@ export class PaymentsService {
         },
       });
 
-      console.log(`✅ [TRANSFER] Transferência processada com sucesso: ${transferResult.transferId}`);
+      console.log(
+        `✅ [TRANSFER] Transferência processada com sucesso: ${transferResult.transferId}`,
+      );
 
       return {
         success: true,
         transferId: transferResult.transferId,
       };
-
     } catch (error) {
       console.error(`❌ [TRANSFER] Erro ao processar transferência:`, error);
       return {
@@ -1188,7 +1415,10 @@ export class PaymentsService {
   }
 
   // Aprovar solicitação de saque (admin)
-  async approveWithdrawal(approveDto: ApproveWithdrawalDto, adminId: string): Promise<WithdrawalResponseDto> {
+  async approveWithdrawal(
+    approveDto: ApproveWithdrawalDto,
+    adminId: string,
+  ): Promise<WithdrawalResponseDto> {
     try {
       console.log(`✅ [ADMIN] Aprovando saque ${approveDto.withdrawalId}`);
 
@@ -1219,19 +1449,27 @@ export class PaymentsService {
 
       // Preparar dados para transferência
       const transferMethod = approveDto.transferMethod || withdrawal.method;
-      const personalData = this.preparePersonalDataForTransfer(financialProfile, transferMethod);
+      const personalData = this.preparePersonalDataForTransfer(
+        financialProfile,
+        transferMethod,
+      );
 
       // Processar transferência real
-      const transferResult = await this.processRealTransfer({
-        personalId: withdrawal.userId,
-        amount: parseFloat(withdrawal.amount),
-        description: withdrawal.description || 'Saque aprovado',
-        transferMethod,
-        personalData,
-      }, adminId);
+      const transferResult = await this.processRealTransfer(
+        {
+          personalId: withdrawal.userId,
+          amount: parseFloat(withdrawal.amount),
+          description: withdrawal.description || 'Saque aprovado',
+          transferMethod,
+          personalData,
+        },
+        adminId,
+      );
 
       if (!transferResult.success) {
-        throw new BadRequestException(`Erro na transferência: ${transferResult.error}`);
+        throw new BadRequestException(
+          `Erro na transferência: ${transferResult.error}`,
+        );
       }
 
       // Atualizar status da solicitação
@@ -1260,10 +1498,11 @@ export class PaymentsService {
         },
       });
 
-      console.log(`✅ [ADMIN] Saque aprovado e transferência processada: ${transferResult.transferId}`);
+      console.log(
+        `✅ [ADMIN] Saque aprovado e transferência processada: ${transferResult.transferId}`,
+      );
 
       return this.formatWithdrawalResponse(updatedWithdrawal);
-
     } catch (error) {
       console.error(`❌ [ADMIN] Erro ao aprovar saque:`, error);
       throw error;
@@ -1271,7 +1510,10 @@ export class PaymentsService {
   }
 
   // Rejeitar solicitação de saque (admin)
-  async rejectWithdrawal(rejectDto: RejectWithdrawalDto, adminId: string): Promise<WithdrawalResponseDto> {
+  async rejectWithdrawal(
+    rejectDto: RejectWithdrawalDto,
+    adminId: string,
+  ): Promise<WithdrawalResponseDto> {
     try {
       console.log(`❌ [ADMIN] Rejeitando saque ${rejectDto.withdrawalId}`);
 
@@ -1304,8 +1546,10 @@ export class PaymentsService {
       // Devolver saldo para a carteira
       const personalWallet = await this.getUserWallet(withdrawal.userId);
       await this.updateWallet(withdrawal.userId, {
-        availableBalance: personalWallet.availableBalance + parseFloat(withdrawal.amount),
-        pendingBalance: personalWallet.pendingBalance - parseFloat(withdrawal.amount),
+        availableBalance:
+          personalWallet.availableBalance + parseFloat(withdrawal.amount),
+        pendingBalance:
+          personalWallet.pendingBalance - parseFloat(withdrawal.amount),
       });
 
       // Criar histórico
@@ -1324,7 +1568,6 @@ export class PaymentsService {
       console.log(`❌ [ADMIN] Saque rejeitado: ${rejectDto.reason}`);
 
       return this.formatWithdrawalResponse(updatedWithdrawal);
-
     } catch (error) {
       console.error(`❌ [ADMIN] Erro ao rejeitar saque:`, error);
       throw error;
@@ -1341,11 +1584,15 @@ export class PaymentsService {
       orderBy: [desc(withdrawalRequests.createdAt)],
     });
 
-    return withdrawals.map(withdrawal => this.formatWithdrawalResponse(withdrawal));
+    return withdrawals.map((withdrawal) =>
+      this.formatWithdrawalResponse(withdrawal),
+    );
   }
 
   // Obter histórico de saques de um usuário
-  async getUserWithdrawalHistory(userId: string): Promise<WithdrawalResponseDto[]> {
+  async getUserWithdrawalHistory(
+    userId: string,
+  ): Promise<WithdrawalResponseDto[]> {
     const withdrawals = await this.db.query.withdrawalRequests.findMany({
       where: eq(withdrawalRequests.userId, userId),
       with: {
@@ -1354,11 +1601,16 @@ export class PaymentsService {
       orderBy: [desc(withdrawalRequests.createdAt)],
     });
 
-    return withdrawals.map(withdrawal => this.formatWithdrawalResponse(withdrawal));
+    return withdrawals.map((withdrawal) =>
+      this.formatWithdrawalResponse(withdrawal),
+    );
   }
 
   // Métodos auxiliares privados
-  private preparePersonalDataForTransfer(financialProfile: any, transferMethod: string): any {
+  private preparePersonalDataForTransfer(
+    financialProfile: any,
+    transferMethod: string,
+  ): any {
     switch (transferMethod) {
       case 'pix':
         return {
@@ -1385,12 +1637,10 @@ export class PaymentsService {
     adminId?: string;
     metadata?: any;
   }): Promise<void> {
-    await this.db
-      .insert(withdrawalHistory)
-      .values({
-        ...data,
-        createdAt: new Date(),
-      });
+    await this.db.insert(withdrawalHistory).values({
+      ...data,
+      createdAt: new Date(),
+    });
   }
 
   private formatWithdrawalResponse(withdrawal: any): WithdrawalResponseDto {
@@ -1408,13 +1658,15 @@ export class PaymentsService {
       mpTransferId: withdrawal.mpTransferId,
       createdAt: withdrawal.createdAt,
       processedAt: withdrawal.processedAt,
-      user: withdrawal.user ? {
-        id: withdrawal.user.id,
-        name: withdrawal.user.name,
-        email: withdrawal.user.email,
-        role: withdrawal.user.role,
-        userType: withdrawal.user.userType,
-      } : undefined,
+      user: withdrawal.user
+        ? {
+            id: withdrawal.user.id,
+            name: withdrawal.user.name,
+            email: withdrawal.user.email,
+            role: withdrawal.user.role,
+            userType: withdrawal.user.userType,
+          }
+        : undefined,
     };
   }
 }

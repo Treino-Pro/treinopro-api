@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
@@ -45,15 +57,15 @@ export class PaymentsController {
   @Public()
   async publicTest() {
     console.log('🌐 [PUBLIC TEST] Endpoint público chamado');
-    
+
     try {
       if (!db) {
         return { error: 'Conexão com banco não disponível' };
       }
-      
+
       // Teste simples de query
       const userCount = await db.select().from(users).limit(1);
-      
+
       return {
         success: true,
         message: 'Endpoint público funcionando',
@@ -74,10 +86,10 @@ export class PaymentsController {
   @Get('student/methods/simple-service')
   async simpleServiceTest(@Request() req) {
     console.log('🧪 [SIMPLE SERVICE] Request user:', req.user);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
     console.log('🧪 [SIMPLE SERVICE] User ID:', userId);
-    
+
     if (!userId) {
       return {
         success: false,
@@ -85,18 +97,20 @@ export class PaymentsController {
         user: req.user,
       };
     }
-    
-    return await this.studentPaymentMethodsService.getStudentPaymentMethodsSimple(userId);
+
+    return await this.studentPaymentMethodsService.getStudentPaymentMethodsSimple(
+      userId,
+    );
   }
 
   @Get('student/methods/simple')
   async simpleTest(@Request() req) {
     console.log('🧪 [SIMPLE TEST] Request user:', req.user);
     console.log('🧪 [SIMPLE TEST] Request headers:', req.headers);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
     console.log('🧪 [SIMPLE TEST] User ID:', userId);
-    
+
     if (!userId) {
       return {
         success: false,
@@ -104,7 +118,7 @@ export class PaymentsController {
         user: req.user,
       };
     }
-    
+
     return {
       success: true,
       userId,
@@ -117,10 +131,10 @@ export class PaymentsController {
   async testStudentPaymentMethods(@Request() req) {
     console.log('🧪 [TEST ENDPOINT] Request user:', req.user);
     console.log('🧪 [TEST ENDPOINT] Request headers:', req.headers);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
     console.log('🧪 [TEST ENDPOINT] Testando endpoint com userId:', userId);
-    
+
     if (!userId) {
       return {
         success: false,
@@ -129,18 +143,18 @@ export class PaymentsController {
         headers: req.headers,
       };
     }
-    
+
     try {
       // Teste simples de conexão
       if (!db) {
         return { error: 'Conexão com banco não disponível' };
       }
-      
+
       // Teste de query simples
       const user = await db.query.users.findFirst({
         where: eq(users.id, userId),
       });
-      
+
       return {
         success: true,
         userId,
@@ -162,32 +176,40 @@ export class PaymentsController {
   async getStudentPaymentMethods(@Request() req) {
     console.log('🔍 [CONTROLLER] Request user:', req.user);
     console.log('🔍 [CONTROLLER] Request headers:', req.headers);
-    console.log('🔍 [CONTROLLER] Authorization header:', req.headers.authorization);
-    
+    console.log(
+      '🔍 [CONTROLLER] Authorization header:',
+      req.headers.authorization,
+    );
+
     const userId = req.user?.id ?? req.user?.sub;
     console.log('🔍 [CONTROLLER] User ID extraído:', userId);
     console.log('🔍 [CONTROLLER] req.user.id:', req.user?.id);
     console.log('🔍 [CONTROLLER] req.user.sub:', req.user?.sub);
-    
+
     if (!userId) {
       console.error('❌ [CONTROLLER] User ID não encontrado na requisição');
-      console.error('❌ [CONTROLLER] req.user completo:', JSON.stringify(req.user, null, 2));
+      console.error(
+        '❌ [CONTROLLER] req.user completo:',
+        JSON.stringify(req.user, null, 2),
+      );
       throw new Error('Usuário não autenticado');
     }
-    
+
     console.log('✅ [CONTROLLER] User ID encontrado:', userId);
     console.log('✅ [CONTROLLER] Chamando service com userId:', userId);
-    
-    const result = await this.studentPaymentMethodsService.getStudentPaymentMethods(userId);
+
+    const result =
+      await this.studentPaymentMethodsService.getStudentPaymentMethods(userId);
     console.log('✅ [CONTROLLER] Service retornou resultado');
-    
+
     return result;
   }
 
   @Put('student/methods')
   async updateStudentPaymentMethods(
     @Request() req,
-    @Body() updateData: {
+    @Body()
+    updateData: {
       preferredMethod?: string;
       enableAutoPayment?: boolean;
       mercadoPagoAccount?: {
@@ -197,7 +219,10 @@ export class PaymentsController {
     },
   ) {
     const userId = req.user?.id ?? req.user?.sub;
-    return await this.studentPaymentMethodsService.updateStudentPaymentMethods(userId, updateData);
+    return await this.studentPaymentMethodsService.updateStudentPaymentMethods(
+      userId,
+      updateData,
+    );
   }
 
   // ===== CARD MANAGEMENT =====
@@ -215,22 +240,26 @@ export class PaymentsController {
     @Body() updateData: UpdateCardDto,
   ) {
     const userId = req.user.id;
-    return await this.studentPaymentMethodsService.updateCard(userId, cardId, updateData);
+    return await this.studentPaymentMethodsService.updateCard(
+      userId,
+      cardId,
+      updateData,
+    );
   }
 
   @Delete('cards/:cardId')
-  async removeCard(
-    @Request() req,
-    @Param('cardId') cardId: string,
-  ) {
+  async removeCard(@Request() req, @Param('cardId') cardId: string) {
     const userId = req.user.id;
-    return await this.studentPaymentMethodsService.removeCard(userId, { cardId });
+    return await this.studentPaymentMethodsService.removeCard(userId, {
+      cardId,
+    });
   }
 
   @Post('student/cards/save')
   async saveStudentCard(
     @Request() req,
-    @Body() saveCardDto: {
+    @Body()
+    saveCardDto: {
       cardNumber: string;
       cardHolderName: string;
       expirationDate: string;
@@ -246,32 +275,34 @@ export class PaymentsController {
       cardType: saveCardDto.cardType,
     });
     console.log('🔍 [SAVE STUDENT CARD] User:', req.user);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
-    
+
     if (!userId) {
       console.error('❌ [SAVE STUDENT CARD] User ID não encontrado');
       throw new Error('Usuário não autenticado');
     }
-    
+
     console.log('✅ [SAVE STUDENT CARD] User ID encontrado:', userId);
-    
+
     // Converter cardType string para enum
-    const cardTypeEnum = saveCardDto.cardType === 'credit' ? CardType.CREDIT : CardType.DEBIT;
-    
+    const cardTypeEnum =
+      saveCardDto.cardType === 'credit' ? CardType.CREDIT : CardType.DEBIT;
+
     const result = await this.studentPaymentMethodsService.saveCard(userId, {
       ...saveCardDto,
       cardType: cardTypeEnum,
     });
     console.log('✅ [SAVE STUDENT CARD] Cartão salvo com sucesso');
-    
+
     return result;
   }
 
   @Post('student/cards/validate')
   async validateStudentCard(
     @Request() req,
-    @Body() validateCardDto: {
+    @Body()
+    validateCardDto: {
       cardNumber: string;
       cardHolderName: string;
       expiryMonth: string;
@@ -287,62 +318,58 @@ export class PaymentsController {
       expiryYear: validateCardDto.expiryYear,
     });
     console.log('🔍 [VALIDATE STUDENT CARD] User:', req.user);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
-    
+
     if (!userId) {
       console.error('❌ [VALIDATE STUDENT CARD] User ID não encontrado');
       throw new Error('Usuário não autenticado');
     }
-    
+
     console.log('✅ [VALIDATE STUDENT CARD] User ID encontrado:', userId);
-    
+
     // Converter dados para o formato esperado pelo service
     const expirationDate = `${validateCardDto.expiryMonth.padStart(2, '0')}/${validateCardDto.expiryYear}`;
-    
+
     const result = await this.studentPaymentMethodsService.validateCard({
       cardNumber: validateCardDto.cardNumber,
       cardHolderName: validateCardDto.cardHolderName,
       expirationDate: expirationDate,
       cvv: validateCardDto.cvv,
     });
-    
+
     console.log('✅ [VALIDATE STUDENT CARD] Cartão validado:', result);
-    
+
     return { isValid: result.isValid };
   }
 
   @Delete('student/cards/:cardId')
-  async removeStudentCard(
-    @Request() req,
-    @Param('cardId') cardId: string,
-  ) {
+  async removeStudentCard(@Request() req, @Param('cardId') cardId: string) {
     console.log('🗑️ [REMOVE STUDENT CARD] Iniciando remoção...');
     console.log('🔍 [REMOVE STUDENT CARD] Card ID:', cardId);
     console.log('🔍 [REMOVE STUDENT CARD] User:', req.user);
-    
+
     const userId = req.user?.id ?? req.user?.sub;
-    
+
     if (!userId) {
       console.error('❌ [REMOVE STUDENT CARD] User ID não encontrado');
       throw new Error('Usuário não autenticado');
     }
-    
+
     console.log('✅ [REMOVE STUDENT CARD] User ID encontrado:', userId);
-    
-    const result = await this.studentPaymentMethodsService.removeCard(userId, { cardId });
+
+    const result = await this.studentPaymentMethodsService.removeCard(userId, {
+      cardId,
+    });
     console.log('✅ [REMOVE STUDENT CARD] Cartão removido com sucesso');
-    
+
     return result;
   }
 
   // ===== REFUNDS =====
 
   @Post('refunds')
-  async createRefund(
-    @Request() req,
-    @Body() refundDto: CreateRefundDto,
-  ) {
+  async createRefund(@Request() req, @Body() refundDto: CreateRefundDto) {
     const userId = req.user.id;
     return await this.refundsService.createRefund(userId, refundDto);
   }
@@ -354,7 +381,11 @@ export class PaymentsController {
     @Query('offset') offset?: number,
   ) {
     const userId = req.user.id;
-    return await this.refundsService.getUserRefunds(userId, limit || 50, offset || 0);
+    return await this.refundsService.getUserRefunds(
+      userId,
+      limit || 50,
+      offset || 0,
+    );
   }
 
   @Get('payments/:paymentId/refunds')
@@ -382,12 +413,14 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async getPersonalWalletBalance(@Request() req) {
     const userId = req.user.sub;
-    console.log(`💰 [PERSONAL_BALANCE] Consultando saldo da carteira para personal ${userId}`);
-    
+    console.log(
+      `💰 [PERSONAL_BALANCE] Consultando saldo da carteira para personal ${userId}`,
+    );
+
     try {
       const wallet = await this.paymentsService.getUserWallet(userId);
       console.log(`💰 [PERSONAL_BALANCE] Saldo encontrado:`, wallet);
-      
+
       return {
         success: true,
         data: wallet,
@@ -408,13 +441,21 @@ export class PaymentsController {
     const userId = req.user.sub;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     const offsetNum = offset ? parseInt(offset, 10) : 0;
-    
-    console.log(`📊 [PERSONAL_TRANSACTIONS] Consultando transações para personal ${userId}`);
-    
+
+    console.log(
+      `📊 [PERSONAL_TRANSACTIONS] Consultando transações para personal ${userId}`,
+    );
+
     try {
-      const transactions = await this.paymentsService.getPersonalTransactions(userId, limitNum, offsetNum);
-      console.log(`📊 [PERSONAL_TRANSACTIONS] Encontradas ${transactions.length} transações`);
-      
+      const transactions = await this.paymentsService.getPersonalTransactions(
+        userId,
+        limitNum,
+        offsetNum,
+      );
+      console.log(
+        `📊 [PERSONAL_TRANSACTIONS] Encontradas ${transactions.length} transações`,
+      );
+
       return {
         success: true,
         data: transactions,
@@ -425,7 +466,10 @@ export class PaymentsController {
         },
       };
     } catch (error) {
-      console.error(`❌ [PERSONAL_TRANSACTIONS] Erro ao buscar transações:`, error);
+      console.error(
+        `❌ [PERSONAL_TRANSACTIONS] Erro ao buscar transações:`,
+        error,
+      );
       throw new BadRequestException('Erro ao buscar transações da carteira');
     }
   }
@@ -434,12 +478,15 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async getPersonalFinancialStats(@Request() req) {
     const userId = req.user.sub;
-    console.log(`📊 [PERSONAL_STATS] Consultando estatísticas financeiras para personal ${userId}`);
-    
+    console.log(
+      `📊 [PERSONAL_STATS] Consultando estatísticas financeiras para personal ${userId}`,
+    );
+
     try {
-      const stats = await this.paymentsService.getPersonalFinancialStats(userId);
+      const stats =
+        await this.paymentsService.getPersonalFinancialStats(userId);
       console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, stats);
-      
+
       return {
         success: true,
         data: stats,
@@ -461,23 +508,30 @@ export class PaymentsController {
     const userId = req.user.sub;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     const offsetNum = offset ? parseInt(offset, 10) : 0;
-    
-    console.log(`💳 [PERSONAL_PAYMENTS] Consultando pagamentos para personal ${userId}`);
-    
+
+    console.log(
+      `💳 [PERSONAL_PAYMENTS] Consultando pagamentos para personal ${userId}`,
+    );
+
     try {
       const filters: any = {
         limit: limitNum,
         offset: offsetNum,
       };
-      
+
       // Só adicionar status se for válido
-      if (status && Object.values(PaymentStatus).includes(status as PaymentStatus)) {
+      if (
+        status &&
+        Object.values(PaymentStatus).includes(status as PaymentStatus)
+      ) {
         filters.status = status as PaymentStatus;
       }
-      
+
       const payments = await this.paymentsService.getPayments(filters, userId);
-      console.log(`💳 [PERSONAL_PAYMENTS] Encontrados ${payments.length} pagamentos`);
-      
+      console.log(
+        `💳 [PERSONAL_PAYMENTS] Encontrados ${payments.length} pagamentos`,
+      );
+
       return {
         success: true,
         data: payments,
@@ -500,11 +554,16 @@ export class PaymentsController {
     @Param('classId') classId: string,
   ) {
     const userId = req.user.sub;
-    console.log(`🧪 [TEST_CAPTURE] Testando captura manual para aula ${classId}`);
-    
+    console.log(
+      `🧪 [TEST_CAPTURE] Testando captura manual para aula ${classId}`,
+    );
+
     try {
-      await this.paymentsService.capturePaymentAfterClass(classId, 'Teste manual de captura');
-      
+      await this.paymentsService.capturePaymentAfterClass(
+        classId,
+        'Teste manual de captura',
+      );
+
       return {
         success: true,
         message: 'Pagamento capturado com sucesso',
@@ -512,7 +571,9 @@ export class PaymentsController {
       };
     } catch (error) {
       console.error(`❌ [TEST_CAPTURE] Erro ao capturar pagamento:`, error);
-      throw new BadRequestException(`Erro ao capturar pagamento: ${error.message}`);
+      throw new BadRequestException(
+        `Erro ao capturar pagamento: ${error.message}`,
+      );
     }
   }
 
@@ -566,12 +627,15 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async getFinancialProfile(@Request() req) {
     const userId = req.user.sub;
-    console.log(`📋 [FINANCIAL_PROFILE] Consultando perfil financeiro para personal ${userId}`);
-    
+    console.log(
+      `📋 [FINANCIAL_PROFILE] Consultando perfil financeiro para personal ${userId}`,
+    );
+
     try {
-      const profile = await this.financialProfileService.getFinancialProfile(userId);
+      const profile =
+        await this.financialProfileService.getFinancialProfile(userId);
       console.log(`📋 [FINANCIAL_PROFILE] Perfil encontrado:`, profile);
-      
+
       return {
         success: true,
         data: profile,
@@ -586,12 +650,17 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async updateFinancialProfile(@Request() req, @Body() updateDto: any) {
     const userId = req.user.sub;
-    console.log(`📋 [FINANCIAL_PROFILE] Atualizando perfil financeiro para personal ${userId}`);
-    
+    console.log(
+      `📋 [FINANCIAL_PROFILE] Atualizando perfil financeiro para personal ${userId}`,
+    );
+
     try {
-      const profile = await this.financialProfileService.updateFinancialProfile(userId, updateDto);
+      const profile = await this.financialProfileService.updateFinancialProfile(
+        userId,
+        updateDto,
+      );
       console.log(`📋 [FINANCIAL_PROFILE] Perfil atualizado:`, profile);
-      
+
       return {
         success: true,
         data: profile,

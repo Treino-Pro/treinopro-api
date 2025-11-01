@@ -1,7 +1,19 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Inject,
+} from '@nestjs/common';
 import { messages, users, classes } from '../../database/schema';
 import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
-import { SendMessageDto, GetMessagesDto, MarkAsReadDto, MessageResponseDto, ChatStatsDto } from './dto/chat.dto';
+import {
+  SendMessageDto,
+  GetMessagesDto,
+  MarkAsReadDto,
+  MessageResponseDto,
+  ChatStatsDto,
+} from './dto/chat.dto';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 
 @Injectable()
@@ -11,7 +23,10 @@ export class ChatService {
     private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
-  async sendMessage(userId: string, sendMessageDto: SendMessageDto): Promise<MessageResponseDto> {
+  async sendMessage(
+    userId: string,
+    sendMessageDto: SendMessageDto,
+  ): Promise<MessageResponseDto> {
     const { classId, receiverId, messageText } = sendMessageDto;
 
     // Verificar se a classe existe e se o usuário tem acesso
@@ -33,7 +48,10 @@ export class ChatService {
     }
 
     // Verificar se o destinatário é o outro participante da classe
-    const otherParticipantId = classData.studentId === userId ? classData.personalId : classData.studentId;
+    const otherParticipantId =
+      classData.studentId === userId
+        ? classData.personalId
+        : classData.studentId;
     if (receiverId !== otherParticipantId) {
       throw new BadRequestException('Destinatário inválido para esta classe');
     }
@@ -73,7 +91,9 @@ export class ChatService {
         createdAt: messages.createdAt,
         sender: {
           id: users.id,
-          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
+          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
+            'name',
+          ),
           profilePicture: users.profileImageId,
         },
       })
@@ -87,8 +107,11 @@ export class ChatService {
     // Enviar notificação push para destinatário
     try {
       const senderName = (messageResponse.sender as any)?.name || 'Alguém';
-      const messagePreview = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
-      
+      const messagePreview =
+        messageText.length > 50
+          ? messageText.substring(0, 50) + '...'
+          : messageText;
+
       await this.firebaseNotificationService.sendToUser(receiverId, {
         title: `💬 ${senderName}`,
         body: messagePreview,
@@ -99,7 +122,7 @@ export class ChatService {
           senderName: senderName,
           messageId: newMessage.id,
           messagePreview,
-        }
+        },
       });
     } catch (error) {
       console.error('❌ Erro ao enviar notificação push de mensagem:', error);
@@ -109,7 +132,10 @@ export class ChatService {
     return messageResponse;
   }
 
-  async getMessages(userId: string, getMessagesDto: GetMessagesDto): Promise<{
+  async getMessages(
+    userId: string,
+    getMessagesDto: GetMessagesDto,
+  ): Promise<{
     messages: MessageResponseDto[];
     total: number;
     page: number;
@@ -152,7 +178,9 @@ export class ChatService {
         createdAt: messages.createdAt,
         sender: {
           id: users.id,
-          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
+          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
+            'name',
+          ),
           profilePicture: users.profileImageId,
         },
       })
@@ -181,7 +209,10 @@ export class ChatService {
     };
   }
 
-  async markAsRead(userId: string, markAsReadDto: MarkAsReadDto): Promise<{ success: boolean }> {
+  async markAsRead(
+    userId: string,
+    markAsReadDto: MarkAsReadDto,
+  ): Promise<{ success: boolean }> {
     const { classId, messageId } = markAsReadDto;
 
     // Verificar se a mensagem existe e se pertence ao usuário
@@ -192,13 +223,15 @@ export class ChatService {
         and(
           eq(messages.id, messageId),
           eq(messages.classId, classId),
-          eq(messages.receiverId, userId)
-        )
+          eq(messages.receiverId, userId),
+        ),
       )
       .limit(1);
 
     if (messageExists.length === 0) {
-      throw new NotFoundException('Mensagem não encontrada ou você não é o destinatário');
+      throw new NotFoundException(
+        'Mensagem não encontrada ou você não é o destinatário',
+      );
     }
 
     // Marcar como lida
@@ -210,7 +243,10 @@ export class ChatService {
     return { success: true };
   }
 
-  async markAllAsRead(userId: string, classId: string): Promise<{ success: boolean; updatedCount: number }> {
+  async markAllAsRead(
+    userId: string,
+    classId: string,
+  ): Promise<{ success: boolean; updatedCount: number }> {
     // Verificar se a classe existe e se o usuário tem acesso
     const classExists = await this.db
       .select()
@@ -237,14 +273,14 @@ export class ChatService {
         and(
           eq(messages.classId, classId),
           eq(messages.receiverId, userId),
-          eq(messages.isRead, false)
-        )
+          eq(messages.isRead, false),
+        ),
       )
       .returning({ id: messages.id });
 
-    return { 
-      success: true, 
-      updatedCount: result.length 
+    return {
+      success: true,
+      updatedCount: result.length,
     };
   }
 
@@ -254,32 +290,21 @@ export class ChatService {
       .select({ count: count() })
       .from(messages)
       .where(
-        or(
-          eq(messages.senderId, userId),
-          eq(messages.receiverId, userId)
-        )
+        or(eq(messages.senderId, userId), eq(messages.receiverId, userId)),
       );
 
     // Mensagens não lidas recebidas pelo usuário
     const [unreadMessagesResult] = await this.db
       .select({ count: count() })
       .from(messages)
-      .where(
-        and(
-          eq(messages.receiverId, userId),
-          eq(messages.isRead, false)
-        )
-      );
+      .where(and(eq(messages.receiverId, userId), eq(messages.isRead, false)));
 
     // Total de conversas (classes únicas onde o usuário participou)
     const [totalConversationsResult] = await this.db
       .select({ count: count(sql`DISTINCT ${messages.classId}`) })
       .from(messages)
       .where(
-        or(
-          eq(messages.senderId, userId),
-          eq(messages.receiverId, userId)
-        )
+        or(eq(messages.senderId, userId), eq(messages.receiverId, userId)),
       );
 
     // Conversas ativas (com mensagens nos últimos 7 dias)
@@ -291,12 +316,9 @@ export class ChatService {
       .from(messages)
       .where(
         and(
-          or(
-            eq(messages.senderId, userId),
-            eq(messages.receiverId, userId)
-          ),
-          sql`${messages.sentAt} >= ${sevenDaysAgo}`
-        )
+          or(eq(messages.senderId, userId), eq(messages.receiverId, userId)),
+          sql`${messages.sentAt} >= ${sevenDaysAgo}`,
+        ),
       );
 
     return {
@@ -307,21 +329,23 @@ export class ChatService {
     };
   }
 
-  async getConversations(userId: string): Promise<Array<{
-    classId: string;
-    otherParticipant: {
-      id: string;
-      name: string;
-      profilePicture?: string;
-    };
-    lastMessage?: {
-      id: string;
-      messageText: string;
-      sentAt: Date;
-      isRead: boolean;
-    };
-    unreadCount: number;
-  }>> {
+  async getConversations(userId: string): Promise<
+    Array<{
+      classId: string;
+      otherParticipant: {
+        id: string;
+        name: string;
+        profilePicture?: string;
+      };
+      lastMessage?: {
+        id: string;
+        messageText: string;
+        sentAt: Date;
+        isRead: boolean;
+      };
+      unreadCount: number;
+    }>
+  > {
     // Buscar todas as classes onde o usuário participou
     const userClasses = await this.db
       .select({
@@ -330,31 +354,31 @@ export class ChatService {
         personalId: classes.personalId,
         student: {
           id: users.id,
-          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
+          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
+            'name',
+          ),
           profilePicture: users.profileImageId,
         },
       })
       .from(classes)
       .leftJoin(users, eq(classes.studentId, users.id))
-      .where(
-        or(
-          eq(classes.studentId, userId),
-          eq(classes.personalId, userId)
-        )
-      );
+      .where(or(eq(classes.studentId, userId), eq(classes.personalId, userId)));
 
     const conversations = [];
 
     for (const classData of userClasses) {
-      const otherParticipantId = classData.studentId === userId 
-        ? classData.personalId 
-        : classData.studentId;
+      const otherParticipantId =
+        classData.studentId === userId
+          ? classData.personalId
+          : classData.studentId;
 
       // Buscar dados do outro participante
       const [otherParticipant] = await this.db
         .select({
           id: users.id,
-          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('name'),
+          name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
+            'name',
+          ),
           profilePicture: users.profileImageId,
         })
         .from(users)
@@ -382,13 +406,16 @@ export class ChatService {
           and(
             eq(messages.classId, classData.classId),
             eq(messages.receiverId, userId),
-            eq(messages.isRead, false)
-          )
+            eq(messages.isRead, false),
+          ),
         );
 
       conversations.push({
         classId: classData.classId,
-        otherParticipant: otherParticipant || { id: otherParticipantId, name: 'Usuário' },
+        otherParticipant: otherParticipant || {
+          id: otherParticipantId,
+          name: 'Usuário',
+        },
         lastMessage: lastMessage || undefined,
         unreadCount: unreadCountResult.count,
       });
@@ -399,7 +426,10 @@ export class ChatService {
       if (!a.lastMessage && !b.lastMessage) return 0;
       if (!a.lastMessage) return 1;
       if (!b.lastMessage) return -1;
-      return new Date(b.lastMessage.sentAt).getTime() - new Date(a.lastMessage.sentAt).getTime();
+      return (
+        new Date(b.lastMessage.sentAt).getTime() -
+        new Date(a.lastMessage.sentAt).getTime()
+      );
     });
 
     return conversations;

@@ -9,5 +9,3 @@ export class GamificationProcessor {
     // job.data contém o payload emitido
   }
 }
-
-

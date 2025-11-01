@@ -31,12 +31,17 @@ interface AuthenticatedSocket extends Socket {
   },
   namespace: '/proposals',
 })
-export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class ProposalsGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(ProposalsGateway.name);
-  private connectedUsers = new Map<string, { socketId: string; userType: 'student' | 'personal' }>();
+  private connectedUsers = new Map<
+    string,
+    { socketId: string; userType: 'student' | 'personal' }
+  >();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -50,8 +55,10 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
   async handleConnection(client: AuthenticatedSocket) {
     try {
       // Autenticar usuário via token JWT
-      const token = client.handshake.auth?.token || client.handshake.headers?.authorization?.replace('Bearer ', '');
-      
+      const token =
+        client.handshake.auth?.token ||
+        client.handshake.headers?.authorization?.replace('Bearer ', '');
+
       if (!token) {
         this.logger.warn(`Cliente ${client.id} conectado sem token`);
         client.disconnect();
@@ -68,15 +75,16 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
         userType: client.userType,
       });
 
-      this.logger.log(`Usuário ${client.userId} (${client.userType}) conectado ao namespace /proposals`);
-      
+      this.logger.log(
+        `Usuário ${client.userId} (${client.userType}) conectado ao namespace /proposals`,
+      );
+
       // Notificar que o usuário está online
       client.emit('connected', {
         userId: client.userId,
         userType: client.userType,
         message: 'Conectado ao sistema de propostas',
       });
-
     } catch (error) {
       this.logger.error(`Erro na autenticação do cliente ${client.id}:`, error);
       client.disconnect();
@@ -86,7 +94,9 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
   handleDisconnect(client: AuthenticatedSocket) {
     if (client.userId) {
       this.connectedUsers.delete(client.userId);
-      this.logger.log(`Usuário ${client.userId} desconectado do namespace /proposals`);
+      this.logger.log(
+        `Usuário ${client.userId} desconectado do namespace /proposals`,
+      );
     }
   }
 
@@ -98,32 +108,41 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     student: any;
     nearbyPersonals: string[]; // Array de IDs dos personals próximos
   }) {
-    this.logger.log(`Enviando evento proposal_created para ${proposalData.nearbyPersonals.length} personals`);
+    this.logger.log(
+      `Enviando evento proposal_created para ${proposalData.nearbyPersonals.length} personals`,
+    );
 
     for (const personalId of proposalData.nearbyPersonals) {
       const userConnection = this.connectedUsers.get(personalId);
-      
+
       if (userConnection) {
         // Enviar via WebSocket se o personal estiver conectado
         this.server.to(userConnection.socketId).emit('proposal_created', {
           proposal: proposalData.proposal,
           student: proposalData.student,
         });
-        this.logger.log(`Evento proposal_created enviado via WebSocket para personal ${personalId}`);
+        this.logger.log(
+          `Evento proposal_created enviado via WebSocket para personal ${personalId}`,
+        );
       }
 
       // Enviar notificação push sempre (mesmo se não estiver conectado)
       if (this.firebaseNotificationService.isConfigured()) {
-        await this.firebaseNotificationService.sendProposalNotification(personalId, {
-          id: proposalData.proposal.id,
-          studentName: proposalData.student.name || `${proposalData.student.firstName} ${proposalData.student.lastName}`,
-          location: proposalData.proposal.locationName,
-          time: proposalData.proposal.trainingTime,
-          date: proposalData.proposal.trainingDate,
-          modality: proposalData.proposal.modality,
-          price: proposalData.proposal.price || 0,
-          expiresIn: 30,
-        });
+        await this.firebaseNotificationService.sendProposalNotification(
+          personalId,
+          {
+            id: proposalData.proposal.id,
+            studentName:
+              proposalData.student.name ||
+              `${proposalData.student.firstName} ${proposalData.student.lastName}`,
+            location: proposalData.proposal.locationName,
+            time: proposalData.proposal.trainingTime,
+            date: proposalData.proposal.trainingDate,
+            modality: proposalData.proposal.modality,
+            price: proposalData.proposal.price || 0,
+            expiresIn: 30,
+          },
+        );
         this.logger.log(`Notificação push enviada para personal ${personalId}`);
       }
     }
@@ -137,29 +156,42 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     personal: any;
     studentId: string;
   }) {
-    this.logger.log(`Enviando evento proposal_accepted para aluno ${proposalData.studentId}`);
+    this.logger.log(
+      `Enviando evento proposal_accepted para aluno ${proposalData.studentId}`,
+    );
 
     const userConnection = this.connectedUsers.get(proposalData.studentId);
-    
+
     if (userConnection) {
       // Enviar via WebSocket se o aluno estiver conectado
       this.server.to(userConnection.socketId).emit('proposal_accepted', {
         proposal: proposalData.proposal,
         personal: proposalData.personal,
       });
-      this.logger.log(`Evento proposal_accepted enviado via WebSocket para aluno ${proposalData.studentId}`);
+      this.logger.log(
+        `Evento proposal_accepted enviado via WebSocket para aluno ${proposalData.studentId}`,
+      );
     }
 
     // Enviar notificação push sempre
     if (this.firebaseNotificationService.isConfigured()) {
-      await this.firebaseNotificationService.sendProposalAcceptedNotification(proposalData.studentId, {
-        id: proposalData.proposal.id,
-        personalName: proposalData.personal.name || `${proposalData.personal.firstName} ${proposalData.personal.lastName}`,
-        personalPhoto: proposalData.personal.photo || proposalData.personal.profileImageUrl,
-        location: proposalData.proposal.locationName,
-        classId: proposalData.proposal.classId,
-      });
-      this.logger.log(`Notificação push enviada para aluno ${proposalData.studentId}`);
+      await this.firebaseNotificationService.sendProposalAcceptedNotification(
+        proposalData.studentId,
+        {
+          id: proposalData.proposal.id,
+          personalName:
+            proposalData.personal.name ||
+            `${proposalData.personal.firstName} ${proposalData.personal.lastName}`,
+          personalPhoto:
+            proposalData.personal.photo ||
+            proposalData.personal.profileImageUrl,
+          location: proposalData.proposal.locationName,
+          classId: proposalData.proposal.classId,
+        },
+      );
+      this.logger.log(
+        `Notificação push enviada para aluno ${proposalData.studentId}`,
+      );
     }
   }
 
@@ -172,7 +204,9 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     student: any;
     classId?: string;
   }) {
-    this.logger.log(`Enviando evento match_confirmed para personal ${matchData.personal.id} e aluno ${matchData.student.id}`);
+    this.logger.log(
+      `Enviando evento match_confirmed para personal ${matchData.personal.id} e aluno ${matchData.student.id}`,
+    );
 
     // Enviar para o personal
     const personalConnection = this.connectedUsers.get(matchData.personal.id);
@@ -205,7 +239,9 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     personal: any;
     student: any;
   }) {
-    this.logger.log(`Enviando evento class_created para personal ${classData.personal.id} e aluno ${classData.student.id}`);
+    this.logger.log(
+      `Enviando evento class_created para personal ${classData.personal.id} e aluno ${classData.student.id}`,
+    );
 
     // Enviar para o personal
     const personalConnection = this.connectedUsers.get(classData.personal.id);
@@ -231,7 +267,10 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
   /**
    * Obter usuários conectados
    */
-  getConnectedUsers(): Map<string, { socketId: string; userType: 'student' | 'personal' }> {
+  getConnectedUsers(): Map<
+    string,
+    { socketId: string; userType: 'student' | 'personal' }
+  > {
     return this.connectedUsers;
   }
 
@@ -242,4 +281,3 @@ export class ProposalsGateway implements OnGatewayInit, OnGatewayConnection, OnG
     return this.connectedUsers.has(userId);
   }
 }
-

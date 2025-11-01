@@ -1,11 +1,23 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
-import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, CreateAdminDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  ChangePasswordDto,
+  CreateAdminDto,
+} from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
 import { EmailVerificationService } from './services/email-verification.service';
 import { GamificationService } from '../gamification/gamification.service';
@@ -25,20 +37,23 @@ export class AuthService {
 
   async register(registerDto: RegisterDto) {
     console.log('🚀 [AUTH] Iniciando processo de registro...');
-    console.log('📝 [AUTH] Dados recebidos:', JSON.stringify(registerDto, null, 2));
-    
+    console.log(
+      '📝 [AUTH] Dados recebidos:',
+      JSON.stringify(registerDto, null, 2),
+    );
+
     try {
-      const { 
-        email, 
-        password, 
-        firstName, 
-        lastName, 
-        birthDate, 
-        userType, 
+      const {
+        email,
+        password,
+        firstName,
+        lastName,
+        birthDate,
+        userType,
         documentType,
         documentNumber,
         documentImageId,
-        cref, 
+        cref,
         crefImageId,
         specialties,
         isMinor,
@@ -46,7 +61,7 @@ export class AuthService {
         guardianEmail,
         guardianConsent,
         termsAccepted,
-        privacyPolicyAccepted
+        privacyPolicyAccepted,
       } = registerDto;
 
       console.log('🔍 [AUTH] Verificando se usuário já existe...');
@@ -58,7 +73,10 @@ export class AuthService {
         where: eq(users.email, email),
       });
 
-      console.log('🔍 [AUTH] Resultado da busca:', existingUser ? 'Usuário encontrado' : 'Usuário não encontrado');
+      console.log(
+        '🔍 [AUTH] Resultado da busca:',
+        existingUser ? 'Usuário encontrado' : 'Usuário não encontrado',
+      );
 
       if (existingUser) {
         console.log('❌ [AUTH] Email já está em uso:', email);
@@ -70,7 +88,9 @@ export class AuthService {
       // Validar CREF para Personal Trainers
       if (userType === 'personal' && !cref) {
         console.log('❌ [AUTH] CREF obrigatório para Personal Trainers');
-        throw new BadRequestException('CREF é obrigatório para Personal Trainers');
+        throw new BadRequestException(
+          'CREF é obrigatório para Personal Trainers',
+        );
       }
 
       // CREF deve ser null para estudantes
@@ -84,15 +104,18 @@ export class AuthService {
       // Validar idade e campos para menores
       const birthDateObj = new Date(birthDate);
       const today = new Date();
-      
+
       // Calcular idade de forma mais precisa
       let age = today.getFullYear() - birthDateObj.getFullYear();
       const monthDiff = today.getMonth() - birthDateObj.getMonth();
-      
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDateObj.getDate())) {
+
+      if (
+        monthDiff < 0 ||
+        (monthDiff === 0 && today.getDate() < birthDateObj.getDate())
+      ) {
         age--;
       }
-      
+
       const isActuallyMinor = age < 18;
 
       // Se isMinor não foi fornecido, usar o valor calculado
@@ -101,41 +124,55 @@ export class AuthService {
       // Validar apenas se isMinor foi explicitamente fornecido e não confere
       // Permitir uma margem de tolerância para casos limítrofes
       if (isMinor !== undefined && isActuallyMinor !== isMinor) {
-        console.log(`🔍 [AUTH] Validação de idade: calculado=${isActuallyMinor} (${age} anos), informado=${isMinor}`);
+        console.log(
+          `🔍 [AUTH] Validação de idade: calculado=${isActuallyMinor} (${age} anos), informado=${isMinor}`,
+        );
         // Só validar se a diferença for significativa (mais de 1 ano)
         if (Math.abs(age - (isMinor ? 17 : 18)) > 1) {
-          throw new BadRequestException('A idade informada não confere com a data de nascimento');
+          throw new BadRequestException(
+            'A idade informada não confere com a data de nascimento',
+          );
         }
       }
 
       if (finalIsMinor) {
         if (!guardianName || !guardianEmail) {
-          throw new BadRequestException('Nome e email do responsável são obrigatórios para menores de idade');
+          throw new BadRequestException(
+            'Nome e email do responsável são obrigatórios para menores de idade',
+          );
         }
         if (!guardianConsent) {
-          throw new BadRequestException('Consentimento do responsável é obrigatório para menores de idade');
+          throw new BadRequestException(
+            'Consentimento do responsável é obrigatório para menores de idade',
+          );
         }
       }
 
       // Validar termos e políticas
       if (!termsAccepted || !privacyPolicyAccepted) {
-        throw new BadRequestException('Aceite dos Termos de Uso e Política de Privacidade é obrigatório');
+        throw new BadRequestException(
+          'Aceite dos Termos de Uso e Política de Privacidade é obrigatório',
+        );
       }
 
       // Validar CREF para Personal Trainers
       let crefValidation = null;
       let crefParsed = null;
-      
+
       if (userType === 'personal') {
         if (!cref) {
-          throw new BadRequestException('CREF é obrigatório para Personal Trainers');
+          throw new BadRequestException(
+            'CREF é obrigatório para Personal Trainers',
+          );
         }
         if (!crefImageId) {
-          throw new BadRequestException('Imagem da carteirinha do CREF é obrigatória para Personal Trainers');
+          throw new BadRequestException(
+            'Imagem da carteirinha do CREF é obrigatória para Personal Trainers',
+          );
         }
-        
+
         console.log('🔍 [AUTH] Validando CREF:', cref);
-        
+
         // Validar CREF via API do CONFEF
         try {
           crefValidation = await this.crefService.validateCref(cref);
@@ -143,7 +180,9 @@ export class AuthService {
           console.log('✅ [AUTH] CREF validado com sucesso:', crefValidation);
         } catch (error) {
           console.error('❌ [AUTH] Erro na validação do CREF:', error.message);
-          throw new BadRequestException(`Erro na validação do CREF: ${error.message}`);
+          throw new BadRequestException(
+            `Erro na validação do CREF: ${error.message}`,
+          );
         }
       }
 
@@ -166,34 +205,47 @@ export class AuthService {
         specialties,
       });
 
-      const [newUser] = await this.db.insert(users).values({
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        birthDate: new Date(birthDate),
-        userType,
-        documentType,
-        documentNumber,
-        documentImageId,
-        cref,
-        crefUf: userType === 'personal' && crefParsed ? crefParsed.uf : null,
-        crefNumber: userType === 'personal' && crefParsed ? crefParsed.numero : null,
-        crefImageId,
-        crefValidated: userType === 'personal' && crefValidation ? true : false,
-        crefValidatedAt: userType === 'personal' && crefValidation ? new Date() : null,
-        crefValidatedName: userType === 'personal' && crefValidation ? crefValidation.nome : null,
-        crefValidatedSituation: userType === 'personal' && crefValidation ? crefValidation.categoria : null,
-        specialties,
-        isMinor: finalIsMinor,
-        guardianName: finalIsMinor ? guardianName : null,
-        guardianEmail: finalIsMinor ? guardianEmail : null,
-        guardianConsent: finalIsMinor ? guardianConsent : false,
-        guardianConsentDate: finalIsMinor && guardianConsent ? new Date() : null,
-        termsAccepted,
-        privacyPolicyAccepted,
-        termsAcceptedDate: new Date(),
-      }).returning();
+      const [newUser] = await this.db
+        .insert(users)
+        .values({
+          email,
+          passwordHash,
+          firstName,
+          lastName,
+          birthDate: new Date(birthDate),
+          userType,
+          documentType,
+          documentNumber,
+          documentImageId,
+          cref,
+          crefUf: userType === 'personal' && crefParsed ? crefParsed.uf : null,
+          crefNumber:
+            userType === 'personal' && crefParsed ? crefParsed.numero : null,
+          crefImageId,
+          crefValidated:
+            userType === 'personal' && crefValidation ? true : false,
+          crefValidatedAt:
+            userType === 'personal' && crefValidation ? new Date() : null,
+          crefValidatedName:
+            userType === 'personal' && crefValidation
+              ? crefValidation.nome
+              : null,
+          crefValidatedSituation:
+            userType === 'personal' && crefValidation
+              ? crefValidation.categoria
+              : null,
+          specialties,
+          isMinor: finalIsMinor,
+          guardianName: finalIsMinor ? guardianName : null,
+          guardianEmail: finalIsMinor ? guardianEmail : null,
+          guardianConsent: finalIsMinor ? guardianConsent : false,
+          guardianConsentDate:
+            finalIsMinor && guardianConsent ? new Date() : null,
+          termsAccepted,
+          privacyPolicyAccepted,
+          termsAcceptedDate: new Date(),
+        })
+        .returning();
 
       console.log('✅ [AUTH] Usuário criado com sucesso:', {
         id: newUser.id,
@@ -207,20 +259,23 @@ export class AuthService {
         await this.gamificationService.getUserProfile(newUser.id);
         console.log('✅ [AUTH] Perfil de gamificação criado com sucesso');
       } catch (error) {
-        console.error('⚠️ [AUTH] Erro ao criar perfil de gamificação (não crítico):', error.message);
+        console.error(
+          '⚠️ [AUTH] Erro ao criar perfil de gamificação (não crítico):',
+          error.message,
+        );
         // Não falha o registro se houver erro na gamificação
       }
 
       // Gerar tokens
       console.log('🎫 [AUTH] Gerando tokens JWT...');
       const tokens = await this.generateTokens(
-        newUser.id, 
-        newUser.email, 
+        newUser.id,
+        newUser.email,
         newUser.userType,
         firstName,
         lastName,
         documentNumber,
-        crefParsed
+        crefParsed,
       );
       console.log('✅ [AUTH] Tokens gerados com sucesso');
 
@@ -237,7 +292,10 @@ export class AuthService {
       };
 
       console.log('🎉 [AUTH] Registro concluído com sucesso!');
-      console.log('📤 [AUTH] Resposta final:', JSON.stringify(response, null, 2));
+      console.log(
+        '📤 [AUTH] Resposta final:',
+        JSON.stringify(response, null, 2),
+      );
 
       return response;
     } catch (error) {
@@ -246,7 +304,6 @@ export class AuthService {
       throw error;
     }
   }
-
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
@@ -265,7 +322,7 @@ export class AuthService {
 
     // Verificar senha
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    
+
     if (!isPasswordValid) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
@@ -274,13 +331,13 @@ export class AuthService {
 
     // Gerar tokens
     const tokens = await this.generateTokens(
-      user.id, 
-      user.email, 
+      user.id,
+      user.email,
       user.userType,
       user.firstName,
       user.lastName,
       user.document,
-      user.cref
+      user.cref,
     );
     return {
       user: {
@@ -299,7 +356,9 @@ export class AuthService {
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     const { email } = forgotPasswordDto;
 
-    console.log(`🔐 [AUTH] Iniciando processo de recuperação de senha para: ${email}`);
+    console.log(
+      `🔐 [AUTH] Iniciando processo de recuperação de senha para: ${email}`,
+    );
 
     const user = await this.db.query.users.findFirst({
       where: eq(users.email, email),
@@ -308,26 +367,40 @@ export class AuthService {
     if (!user) {
       console.log(`❌ [AUTH] Usuário não encontrado para email: ${email}`);
       // Por segurança, não revelar se o email existe ou não
-      return { message: 'Se o email existir, você receberá instruções para redefinir sua senha' };
+      return {
+        message:
+          'Se o email existir, você receberá instruções para redefinir sua senha',
+      };
     }
 
-    console.log(`✅ [AUTH] Usuário encontrado: ${user.firstName} ${user.lastName}`);
+    console.log(
+      `✅ [AUTH] Usuário encontrado: ${user.firstName} ${user.lastName}`,
+    );
 
     try {
       // Usar o método específico para recuperação de senha
-      const result = await this.emailVerificationService.sendPasswordResetCode(email, user.firstName);
-      
+      const result = await this.emailVerificationService.sendPasswordResetCode(
+        email,
+        user.firstName,
+      );
+
       console.log(`📧 [AUTH] Código de recuperação enviado para ${email}`);
       console.log(`⏰ [AUTH] Expira em: ${result.expiresAt}`);
-      
-      return { 
+
+      return {
         message: 'Código de recuperação enviado para seu email',
-        expiresAt: result.expiresAt
+        expiresAt: result.expiresAt,
       };
     } catch (error) {
-      console.error(`❌ [AUTH] Erro ao enviar código de recuperação para ${email}:`, error);
+      console.error(
+        `❌ [AUTH] Erro ao enviar código de recuperação para ${email}:`,
+        error,
+      );
       // Por segurança, não revelar o erro específico
-      return { message: 'Se o email existir, você receberá instruções para redefinir sua senha' };
+      return {
+        message:
+          'Se o email existir, você receberá instruções para redefinir sua senha',
+      };
     }
   }
 
@@ -338,19 +411,28 @@ export class AuthService {
 
     // TODO: Implementar validação de token de reset
     // Por enquanto, apenas retornar erro
-    throw new BadRequestException('Funcionalidade de reset de senha ainda não implementada');
+    throw new BadRequestException(
+      'Funcionalidade de reset de senha ainda não implementada',
+    );
   }
 
-  async resetPasswordWithCode(email: string, code: string, newPassword: string) {
+  async resetPasswordWithCode(
+    email: string,
+    code: string,
+    newPassword: string,
+  ) {
     console.log(`🔐 [AUTH] Iniciando reset de senha para: ${email}`);
 
     try {
       // Verificar se o código já foi verificado anteriormente
-      const isVerified = await this.emailVerificationService.isCodeVerified(email);
-      
+      const isVerified =
+        await this.emailVerificationService.isCodeVerified(email);
+
       if (!isVerified) {
         console.log(`❌ [AUTH] Código não foi verificado para ${email}`);
-        throw new BadRequestException('Código não foi verificado. Complete a verificação primeiro');
+        throw new BadRequestException(
+          'Código não foi verificado. Complete a verificação primeiro',
+        );
       }
 
       console.log(`✅ [AUTH] Código já verificado para ${email}`);
@@ -369,7 +451,8 @@ export class AuthService {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       // Atualizar senha no banco
-      await this.db.update(users)
+      await this.db
+        .update(users)
         .set({ passwordHash: hashedPassword, updatedAt: new Date() })
         .where(eq(users.email, email));
 
@@ -395,7 +478,10 @@ export class AuthService {
     }
 
     // Verificar senha atual
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash,
+    );
     if (!isCurrentPasswordValid) {
       throw new UnauthorizedException('Senha atual incorreta');
     }
@@ -404,7 +490,8 @@ export class AuthService {
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
     // Atualizar senha
-    await this.db.update(users)
+    await this.db
+      .update(users)
       .set({ passwordHash: newPasswordHash, updatedAt: new Date() })
       .where(eq(users.id, userId));
 
@@ -426,13 +513,13 @@ export class AuthService {
       }
 
       const tokens = await this.generateTokens(
-        user.id, 
-        user.email, 
+        user.id,
+        user.email,
         user.userType,
         user.firstName,
         user.lastName,
         user.document,
-        user.cref
+        user.cref,
       );
 
       return {
@@ -451,15 +538,23 @@ export class AuthService {
     }
   }
 
-  private async generateTokens(userId: string, email: string, userType: string, firstName?: string, lastName?: string, document?: string, cref?: string) {
-    const payload = { 
-      sub: userId, 
-      email, 
+  private async generateTokens(
+    userId: string,
+    email: string,
+    userType: string,
+    firstName?: string,
+    lastName?: string,
+    document?: string,
+    cref?: string,
+  ) {
+    const payload = {
+      sub: userId,
+      email,
       userType,
       firstName: firstName || '',
       lastName: lastName || '',
       document: document || '',
-      cref: cref || ''
+      cref: cref || '',
     };
 
     // Usar explicitamente o secret do .env para access token
@@ -467,7 +562,7 @@ export class AuthService {
       secret: this.configService.get('JWT_SECRET'),
       expiresIn: this.configService.get('JWT_EXPIRES_IN') || '24h',
     });
-    
+
     // Para refresh token, usar configurações específicas
     const refreshToken = await this.jwtService.signAsync(payload, {
       secret: this.configService.get('JWT_REFRESH_SECRET'),
@@ -480,7 +575,9 @@ export class AuthService {
     };
   }
 
-  async sendVerificationCode(email: string): Promise<{ message: string; expiresAt: Date }> {
+  async sendVerificationCode(
+    email: string,
+  ): Promise<{ message: string; expiresAt: Date }> {
     console.log('📧 [AUTH] Enviando código de verificação para:', email);
 
     // Validar formato do email
@@ -495,18 +592,25 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new BadRequestException('Este email já está em uso. Use outro email ou faça login.');
+      throw new BadRequestException(
+        'Este email já está em uso. Use outro email ou faça login.',
+      );
     }
 
     // Enviar código de verificação (usar email como firstName temporariamente)
-    return this.emailVerificationService.sendVerificationCode(email, email.split('@')[0]);
+    return this.emailVerificationService.sendVerificationCode(
+      email,
+      email.split('@')[0],
+    );
   }
 
-  async verifyCode(email: string, code: string): Promise<{ message: string; verified: boolean }> {
+  async verifyCode(
+    email: string,
+    code: string,
+  ): Promise<{ message: string; verified: boolean }> {
     console.log('🔍 [AUTH] Verificando código para:', email, 'Código:', code);
     return this.emailVerificationService.verifyCode(email, code);
   }
-
 
   async isEmailVerified(email: string): Promise<boolean> {
     return this.emailVerificationService.isEmailVerified(email);
@@ -553,7 +657,10 @@ export class AuthService {
     };
 
     // Inserir admin
-    const [newAdmin] = await this.db.insert(users).values(adminData).returning();
+    const [newAdmin] = await this.db
+      .insert(users)
+      .values(adminData)
+      .returning();
 
     console.log('✅ [AUTH] Admin criado com sucesso:', newAdmin.id);
 
@@ -566,11 +673,15 @@ export class AuthService {
         lastName: newAdmin.lastName,
         userType: newAdmin.userType,
         isVerified: newAdmin.isVerified,
-      }
+      },
     };
   }
 
-  async sendGuardianAuthorizationEmail(guardianName: string, guardianEmail: string, studentName: string) {
+  async sendGuardianAuthorizationEmail(
+    guardianName: string,
+    guardianEmail: string,
+    studentName: string,
+  ) {
     console.log('📧 [AUTH] Enviando email de autorização para responsável...');
     console.log(`📧 [AUTH] Responsável: ${guardianName} (${guardianEmail})`);
     console.log(`📧 [AUTH] Aluno: ${studentName}`);
@@ -578,18 +689,18 @@ export class AuthService {
     try {
       // Gerar OTP de 6 dígitos
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      
+
       // Armazenar OTP temporariamente (em produção, usar Redis ou banco de dados)
       // Por enquanto, vamos usar um Map em memória
       if (!this.guardianOtpStorage) {
         this.guardianOtpStorage = new Map();
       }
-      
+
       this.guardianOtpStorage.set(guardianEmail, {
         code: otpCode,
         createdAt: new Date(),
         studentName: studentName,
-        guardianName: guardianName
+        guardianName: guardianName,
       });
 
       // Enviar email usando o serviço de notificações
@@ -599,17 +710,18 @@ export class AuthService {
         {
           guardianName: guardianName,
           studentName: studentName,
-          otpCode: otpCode
-        }
+          otpCode: otpCode,
+        },
       );
 
-      console.log(`✅ [AUTH] Email de autorização enviado para ${guardianEmail}`);
+      console.log(
+        `✅ [AUTH] Email de autorização enviado para ${guardianEmail}`,
+      );
 
       return {
         message: 'Email de autorização enviado com sucesso',
-        otpCode: otpCode // Apenas para desenvolvimento/teste
+        otpCode: otpCode, // Apenas para desenvolvimento/teste
       };
-
     } catch (error) {
       console.error('❌ [AUTH] Erro ao enviar email de autorização:', error);
       throw new BadRequestException('Erro ao enviar email de autorização');
@@ -627,7 +739,7 @@ export class AuthService {
       }
 
       const storedData = this.guardianOtpStorage.get(guardianEmail);
-      
+
       if (!storedData) {
         throw new BadRequestException('Código não encontrado ou expirado');
       }
@@ -639,7 +751,9 @@ export class AuthService {
 
       if (hoursDiff > 24) {
         this.guardianOtpStorage.delete(guardianEmail);
-        throw new BadRequestException('Código expirado. Solicite um novo código.');
+        throw new BadRequestException(
+          'Código expirado. Solicite um novo código.',
+        );
       }
 
       if (storedData.code !== otpCode) {
@@ -653,9 +767,8 @@ export class AuthService {
 
       return {
         message: 'Autorização confirmada com sucesso',
-        verified: true
+        verified: true,
       };
-
     } catch (error) {
       console.error('❌ [AUTH] Erro ao verificar OTP do responsável:', error);
       throw error;
@@ -663,10 +776,13 @@ export class AuthService {
   }
 
   // Map temporário para armazenar OTPs (em produção, usar Redis)
-  private guardianOtpStorage: Map<string, {
-    code: string;
-    createdAt: Date;
-    studentName: string;
-    guardianName: string;
-  }> | null = null;
+  private guardianOtpStorage: Map<
+    string,
+    {
+      code: string;
+      createdAt: Date;
+      studentName: string;
+      guardianName: string;
+    }
+  > | null = null;
 }

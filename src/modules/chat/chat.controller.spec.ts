@@ -46,21 +46,23 @@ describe('ChatController', () => {
     activeConversations: 2,
   };
 
-  const mockConversations = [{
-    classId: 'class-1',
-    otherParticipant: {
-      id: 'personal-1',
-      name: 'Maria Santos',
-      profilePicture: null,
+  const mockConversations = [
+    {
+      classId: 'class-1',
+      otherParticipant: {
+        id: 'personal-1',
+        name: 'Maria Santos',
+        profilePicture: null,
+      },
+      lastMessage: {
+        id: 'message-1',
+        messageText: 'Última mensagem',
+        sentAt: new Date(),
+        isRead: false,
+      },
+      unreadCount: 2,
     },
-    lastMessage: {
-      id: 'message-1',
-      messageText: 'Última mensagem',
-      sentAt: new Date(),
-      isRead: false,
-    },
-    unreadCount: 2,
-  }];
+  ];
 
   beforeEach(async () => {
     const mockChatService = {
@@ -116,7 +118,10 @@ describe('ChatController', () => {
 
       const result = await controller.sendMessage(mockRequest, sendMessageDto);
 
-      expect(service.sendMessage).toHaveBeenCalledWith('user-1', sendMessageDto);
+      expect(service.sendMessage).toHaveBeenCalledWith(
+        'user-1',
+        sendMessageDto,
+      );
       expect(result).toEqual(mockMessage);
     });
   });
@@ -130,11 +135,16 @@ describe('ChatController', () => {
       };
 
       const mockRequest = { user: mockUser };
-      jest.spyOn(service, 'getMessages').mockResolvedValue(mockMessagesResponse);
+      jest
+        .spyOn(service, 'getMessages')
+        .mockResolvedValue(mockMessagesResponse);
 
       const result = await controller.getMessages(mockRequest, getMessagesDto);
 
-      expect(service.getMessages).toHaveBeenCalledWith('user-1', getMessagesDto);
+      expect(service.getMessages).toHaveBeenCalledWith(
+        'user-1',
+        getMessagesDto,
+      );
       expect(result).toEqual(mockMessagesResponse);
     });
   });
@@ -150,7 +160,7 @@ describe('ChatController', () => {
       const result = await controller.markAsRead(
         mockRequest,
         'message-1',
-        markAsReadDto
+        markAsReadDto,
       );
 
       expect(service.markAsRead).toHaveBeenCalledWith('user-1', {
@@ -190,7 +200,9 @@ describe('ChatController', () => {
   describe('getConversations', () => {
     it('should return user conversations', async () => {
       const mockRequest = { user: mockUser };
-      jest.spyOn(service, 'getConversations').mockResolvedValue(mockConversations);
+      jest
+        .spyOn(service, 'getConversations')
+        .mockResolvedValue(mockConversations);
 
       const result = await controller.getConversations(mockRequest);
 
@@ -202,13 +214,15 @@ describe('ChatController', () => {
   describe('getClassMessages', () => {
     it('should return messages for a specific class', async () => {
       const mockRequest = { user: mockUser };
-      jest.spyOn(service, 'getMessages').mockResolvedValue(mockMessagesResponse);
+      jest
+        .spyOn(service, 'getMessages')
+        .mockResolvedValue(mockMessagesResponse);
 
       const result = await controller.getClassMessages(
         mockRequest,
         'class-1',
         1,
-        50
+        50,
       );
 
       expect(service.getMessages).toHaveBeenCalledWith('user-1', {
@@ -221,7 +235,9 @@ describe('ChatController', () => {
 
     it('should use default pagination values when not provided', async () => {
       const mockRequest = { user: mockUser };
-      jest.spyOn(service, 'getMessages').mockResolvedValue(mockMessagesResponse);
+      jest
+        .spyOn(service, 'getMessages')
+        .mockResolvedValue(mockMessagesResponse);
 
       const result = await controller.getClassMessages(mockRequest, 'class-1');
 

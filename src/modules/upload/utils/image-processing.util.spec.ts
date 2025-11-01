@@ -8,13 +8,13 @@ const mockSharpInstance = {
   metadata: jest.fn().mockResolvedValue({
     width: 1920,
     height: 1080,
-    format: 'jpeg'
+    format: 'jpeg',
   }),
   resize: jest.fn().mockReturnThis(),
   jpeg: jest.fn().mockReturnThis(),
   png: jest.fn().mockReturnThis(),
   webp: jest.fn().mockReturnThis(),
-  toBuffer: jest.fn().mockResolvedValue(Buffer.from('processed image'))
+  toBuffer: jest.fn().mockResolvedValue(Buffer.from('processed image')),
 };
 
 jest.mock('sharp', () => {
@@ -43,13 +43,13 @@ describe('ImageProcessingUtil', () => {
 
     service = module.get<ImageProcessingUtil>(ImageProcessingUtil);
     mockFileStorageUtil = module.get(FileStorageUtil);
-    
+
     // Get reference to the mocked sharp function
     mockSharp = require('sharp');
-    
+
     // Reset sharp mock to default behavior
     mockSharp.mockImplementation(() => mockSharpInstance);
-    
+
     // Mock console methods
     jest.spyOn(console, 'log').mockImplementation();
     jest.spyOn(console, 'error').mockImplementation();
@@ -68,30 +68,35 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: true,
         thumbnailSizes: [
           { name: 'small', width: 150, height: 150 },
-          { name: 'medium', width: 300, height: 300 }
+          { name: 'medium', width: 300, height: 300 },
         ],
         quality: 85,
-        format: 'jpeg'
+        format: 'jpeg',
       };
 
       mockFileStorageUtil.saveFile
         .mockResolvedValueOnce({
           storedName: 'main-file.jpg',
           path: '/path/main-file.jpg',
-          url: 'https://api.treinopro.com/static/images/profiles/main-file.jpg'
+          url: 'https://api.treinopro.com/static/images/profiles/main-file.jpg',
         })
         .mockResolvedValueOnce({
           storedName: 'small_test.jpg',
           path: '/path/small_test.jpg',
-          url: 'https://api.treinopro.com/static/thumbnails/small_test.jpg'
+          url: 'https://api.treinopro.com/static/thumbnails/small_test.jpg',
         })
         .mockResolvedValueOnce({
           storedName: 'medium_test.jpg',
           path: '/path/medium_test.jpg',
-          url: 'https://api.treinopro.com/static/thumbnails/medium_test.jpg'
+          url: 'https://api.treinopro.com/static/thumbnails/medium_test.jpg',
         });
 
-      const result = await service.processImage(buffer, originalName, category, options);
+      const result = await service.processImage(
+        buffer,
+        originalName,
+        category,
+        options,
+      );
 
       expect(result).toHaveProperty('mainFile');
       expect(result).toHaveProperty('thumbnails');
@@ -107,16 +112,21 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: false,
         thumbnailSizes: [],
         quality: 85,
-        format: 'jpeg'
+        format: 'jpeg',
       };
 
       mockFileStorageUtil.saveFile.mockResolvedValueOnce({
         storedName: 'main-file.jpg',
         path: '/path/main-file.jpg',
-        url: 'https://api.treinopro.com/static/temp/main-file.jpg'
+        url: 'https://api.treinopro.com/static/temp/main-file.jpg',
       });
 
-      const result = await service.processImage(buffer, originalName, category, options);
+      const result = await service.processImage(
+        buffer,
+        originalName,
+        category,
+        options,
+      );
 
       expect(result).toHaveProperty('mainFile');
       expect(result.thumbnails).toHaveLength(0);
@@ -131,13 +141,14 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: true,
         thumbnailSizes: [{ name: 'small', width: 150, height: 150 }],
         quality: 85,
-        format: 'jpeg'
+        format: 'jpeg',
       };
 
       mockFileStorageUtil.saveFile.mockRejectedValue(new Error('Save failed'));
 
-      await expect(service.processImage(buffer, originalName, category, options))
-        .rejects.toThrow('Falha no processamento de imagem');
+      await expect(
+        service.processImage(buffer, originalName, category, options),
+      ).rejects.toThrow('Falha no processamento de imagem');
     });
   });
 
@@ -148,7 +159,7 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: false,
         thumbnailSizes: [],
         quality: 85,
-        format: 'jpeg'
+        format: 'jpeg',
       };
 
       const result = await service.optimizeImage(buffer, options);
@@ -163,7 +174,7 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: false,
         thumbnailSizes: [],
         quality: 90,
-        format: 'png'
+        format: 'png',
       };
 
       const result = await service.optimizeImage(buffer, options);
@@ -177,7 +188,7 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: false,
         thumbnailSizes: [],
         quality: 80,
-        format: 'webp'
+        format: 'webp',
       };
 
       const result = await service.optimizeImage(buffer, options);
@@ -191,7 +202,7 @@ describe('ImageProcessingUtil', () => {
         generateThumbnails: false,
         thumbnailSizes: [],
         quality: 85,
-        format: 'jpeg'
+        format: 'jpeg',
       };
 
       // Mock sharp to throw error
@@ -199,8 +210,9 @@ describe('ImageProcessingUtil', () => {
         throw new Error('Sharp error');
       });
 
-      await expect(service.optimizeImage(buffer, options))
-        .rejects.toThrow('Falha na otimização da imagem');
+      await expect(service.optimizeImage(buffer, options)).rejects.toThrow(
+        'Falha na otimização da imagem',
+      );
     });
   });
 
@@ -211,7 +223,12 @@ describe('ImageProcessingUtil', () => {
       const height = 150;
       const quality = 85;
 
-      const result = await service.generateThumbnail(buffer, width, height, quality);
+      const result = await service.generateThumbnail(
+        buffer,
+        width,
+        height,
+        quality,
+      );
 
       expect(result).toBeInstanceOf(Buffer);
       expect(result.toString()).toBe('processed image');
@@ -228,8 +245,9 @@ describe('ImageProcessingUtil', () => {
         throw new Error('Sharp error');
       });
 
-      await expect(service.generateThumbnail(buffer, width, height, quality))
-        .rejects.toThrow('Falha na geração de thumbnail');
+      await expect(
+        service.generateThumbnail(buffer, width, height, quality),
+      ).rejects.toThrow('Falha na geração de thumbnail');
     });
   });
 
@@ -242,7 +260,7 @@ describe('ImageProcessingUtil', () => {
       expect(result).toEqual({
         width: 1920,
         height: 1080,
-        format: 'jpeg'
+        format: 'jpeg',
       });
     });
 
@@ -254,8 +272,9 @@ describe('ImageProcessingUtil', () => {
         throw new Error('Sharp error');
       });
 
-      await expect(service.getImageMetadata(buffer))
-        .rejects.toThrow('Falha na extração de metadados');
+      await expect(service.getImageMetadata(buffer)).rejects.toThrow(
+        'Falha na extração de metadados',
+      );
     });
   });
 });

@@ -46,7 +46,7 @@ describe('CrefCacheService', () => {
         uf: 'SP',
         naturezaTitulo: 'LICENCIADO/BACHAREL',
         validatedAt: new Date(),
-        details: 'Validação bem-sucedida'
+        details: 'Validação bem-sucedida',
       };
 
       mockCacheManager.get.mockResolvedValue(mockValidation);
@@ -88,7 +88,7 @@ describe('CrefCacheService', () => {
         uf: 'SP',
         naturezaTitulo: 'LICENCIADO/BACHAREL',
         validatedAt: new Date(),
-        details: 'Validação bem-sucedida'
+        details: 'Validação bem-sucedida',
       };
 
       mockCacheManager.set.mockResolvedValue(undefined);
@@ -98,7 +98,7 @@ describe('CrefCacheService', () => {
       expect(mockCacheManager.set).toHaveBeenCalledWith(
         'cref:SP-123456',
         mockValidation,
-        3600000 // 1 hora em ms
+        3600000, // 1 hora em ms
       );
     });
 
@@ -112,13 +112,15 @@ describe('CrefCacheService', () => {
         uf: 'SP',
         naturezaTitulo: 'LICENCIADO/BACHAREL',
         validatedAt: new Date(),
-        details: 'Validação bem-sucedida'
+        details: 'Validação bem-sucedida',
       };
 
       mockCacheManager.set.mockRejectedValue(new Error('Cache error'));
 
       // Should not throw
-      await expect(service.set(crefNumber, mockValidation)).resolves.toBeUndefined();
+      await expect(
+        service.set(crefNumber, mockValidation),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -144,7 +146,10 @@ describe('CrefCacheService', () => {
   describe('healthCheck', () => {
     it('should return true when cache is working', async () => {
       mockCacheManager.set.mockResolvedValue(undefined);
-      mockCacheManager.get.mockResolvedValue({ test: true, timestamp: new Date() });
+      mockCacheManager.get.mockResolvedValue({
+        test: true,
+        timestamp: new Date(),
+      });
       mockCacheManager.del.mockResolvedValue(undefined);
 
       const result = await service.healthCheck();
@@ -168,7 +173,7 @@ describe('CrefCacheService', () => {
       expect(result).toEqual({
         hits: 0,
         misses: 0,
-        keys: 0
+        keys: 0,
       });
     });
   });

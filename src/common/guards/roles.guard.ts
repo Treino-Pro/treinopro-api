@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY, Role } from '../decorators/roles.decorator';
 
@@ -19,8 +24,12 @@ export class RolesGuard implements CanActivate {
     const user = request.user;
 
     // Espera-se que o JWT inclua claim userType='admin' ou roles: string[] no futuro
-    const roles: string[] = Array.isArray(user?.roles) ? user.roles : (user?.userType ? [user.userType] : []);
-    const hasRole = requiredRoles.some(role => roles.includes(role));
+    const roles: string[] = Array.isArray(user?.roles)
+      ? user.roles
+      : user?.userType
+        ? [user.userType]
+        : [];
+    const hasRole = requiredRoles.some((role) => roles.includes(role));
 
     if (!hasRole) {
       throw new ForbiddenException('Insufficient permissions');
@@ -28,5 +37,3 @@ export class RolesGuard implements CanActivate {
     return true;
   }
 }
-
-

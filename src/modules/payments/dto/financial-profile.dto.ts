@@ -1,14 +1,22 @@
-import { IsString, IsEnum, IsOptional, IsNotEmpty, IsEmail, Matches, Length } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsNotEmpty,
+  IsEmail,
+  Matches,
+  Length,
+} from 'class-validator';
 
 // Enums
 export enum PaymentMethod {
-  BANK_TRANSFER = 'bank_transfer',    // Transferência bancária
-  MERCADO_PAGO = 'mercado_pago',      // Direto no MP
+  BANK_TRANSFER = 'bank_transfer', // Transferência bancária
+  MERCADO_PAGO = 'mercado_pago', // Direto no MP
 }
 
 export enum AccountType {
-  CHECKING = 'checking',  // Conta corrente
-  SAVINGS = 'savings',    // Conta poupança
+  CHECKING = 'checking', // Conta corrente
+  SAVINGS = 'savings', // Conta poupança
 }
 
 // DTO para dados bancários
@@ -83,7 +91,7 @@ export class FinancialProfileResponseDto {
   userId: string;
   preferredMethod: PaymentMethod;
   isComplete: boolean; // Se o perfil está completo para receber pagamentos
-  
+
   // Dados bancários (mascarados para segurança)
   bankAccount?: {
     bankCode: string;
@@ -168,7 +176,7 @@ export class WithdrawalHistoryDto {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   description?: string;
   urgency: string;
-  
+
   // Dados da transferência
   transactionId?: string; // ID da transação bancária/MP
   processedAt?: Date;

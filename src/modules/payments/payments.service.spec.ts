@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoService } from './mercadopago.service';
 import { PaymentStatus, PaymentType, DisputeStatus } from './dto/payments.dto';
@@ -39,10 +43,10 @@ const mockDb = {
     },
   },
   insert: jest.fn(),
-  update: jest.fn(() => ({ 
-    set: jest.fn().mockReturnThis(), 
-    where: jest.fn().mockReturnThis(), 
-    returning: jest.fn().mockResolvedValue([]) 
+  update: jest.fn(() => ({
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    returning: jest.fn().mockResolvedValue([]),
   })),
   select: jest.fn(),
 };
@@ -119,19 +123,21 @@ describe('PaymentsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: 'payment-1',
-            classId: 'class-1',
-            studentId: 'student-1',
-            personalId: 'personal-1',
-            totalAmount: '100.00',
-            platformFee: '10.00',
-            personalAmount: '90.00',
-            status: PaymentStatus.PENDING,
-            type: PaymentType.CLASS_PAYMENT,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: 'payment-1',
+              classId: 'class-1',
+              studentId: 'student-1',
+              personalId: 'personal-1',
+              totalAmount: '100.00',
+              platformFee: '10.00',
+              personalAmount: '90.00',
+              status: PaymentStatus.PENDING,
+              type: PaymentType.CLASS_PAYMENT,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]),
         }),
       });
       mockDb.update.mockReturnValue({
@@ -141,7 +147,10 @@ describe('PaymentsService', () => {
       });
 
       // Act
-      const result = await service.createPaymentPreference(createDto, 'student-1');
+      const result = await service.createPaymentPreference(
+        createDto,
+        'student-1',
+      );
 
       // Assert
       expect(result).toBeDefined();
@@ -158,8 +167,9 @@ describe('PaymentsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createPaymentPreference(createDto, 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.createPaymentPreference(createDto, 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando usuário não é o aluno', async () => {
@@ -167,8 +177,9 @@ describe('PaymentsService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
       // Act & Assert
-      await expect(service.createPaymentPreference(createDto, 'personal-1'))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.createPaymentPreference(createDto, 'personal-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -209,7 +220,7 @@ describe('PaymentsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      
+
       jest.spyOn(service, 'updateWallet').mockResolvedValue({
         id: 'wallet-1',
         userId: 'personal-1',
@@ -226,7 +237,9 @@ describe('PaymentsService', () => {
       await service.processWebhook(webhookDto);
 
       // Assert
-      expect(mockMercadoPagoService.getPayment).toHaveBeenCalledWith('mp_payment_123');
+      expect(mockMercadoPagoService.getPayment).toHaveBeenCalledWith(
+        'mp_payment_123',
+      );
     });
 
     it('deve lançar erro quando pagamento não existe', async () => {
@@ -234,8 +247,9 @@ describe('PaymentsService', () => {
       mockDb.query.payments.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.processWebhook(webhookDto))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.processWebhook(webhookDto)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -265,19 +279,21 @@ describe('PaymentsService', () => {
       });
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: 'dispute-1',
-            paymentId: 'payment-1',
-            reportedBy: 'student-1',
-            reason: 'no_show',
-            description: 'Aluno não compareceu',
-            status: DisputeStatus.PENDING,
-            expiresAt: new Date(),
-            studentDisputeCount: 0,
-            personalDisputeCount: 0,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: 'dispute-1',
+              paymentId: 'payment-1',
+              reportedBy: 'student-1',
+              reason: 'no_show',
+              description: 'Aluno não compareceu',
+              status: DisputeStatus.PENDING,
+              expiresAt: new Date(),
+              studentDisputeCount: 0,
+              personalDisputeCount: 0,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]),
         }),
       });
       mockDb.update.mockReturnValue({
@@ -304,8 +320,9 @@ describe('PaymentsService', () => {
       mockDb.query.payments.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.createDispute(createDto, 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.createDispute(createDto, 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando usuário não autorizado', async () => {
@@ -313,8 +330,9 @@ describe('PaymentsService', () => {
       mockDb.query.payments.findFirst.mockResolvedValue(mockPayment);
 
       // Act & Assert
-      await expect(service.createDispute(createDto, 'other-user'))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.createDispute(createDto, 'other-user'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('deve lançar erro quando disputa já existe', async () => {
@@ -326,8 +344,9 @@ describe('PaymentsService', () => {
       });
 
       // Act & Assert
-      await expect(service.createDispute(createDto, 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.createDispute(createDto, 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -354,15 +373,21 @@ describe('PaymentsService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockResolvedValue([{
-          ...mockDispute,
-          studentEvidence: evidenceDto.evidence,
-          updatedAt: new Date(),
-        }]),
+        returning: jest.fn().mockResolvedValue([
+          {
+            ...mockDispute,
+            studentEvidence: evidenceDto.evidence,
+            updatedAt: new Date(),
+          },
+        ]),
       });
 
       // Act
-      const result = await service.submitEvidence('dispute-1', evidenceDto, 'student-1');
+      const result = await service.submitEvidence(
+        'dispute-1',
+        evidenceDto,
+        'student-1',
+      );
 
       // Assert
       expect(result).toBeDefined();
@@ -377,8 +402,9 @@ describe('PaymentsService', () => {
       mockDb.query.paymentDisputes.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.submitEvidence('dispute-1', evidenceDto, 'student-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.submitEvidence('dispute-1', evidenceDto, 'student-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando usuário não autorizado', async () => {
@@ -386,8 +412,9 @@ describe('PaymentsService', () => {
       mockDb.query.paymentDisputes.findFirst.mockResolvedValue(mockDispute);
 
       // Act & Assert
-      await expect(service.submitEvidence('dispute-1', evidenceDto, 'other-user'))
-        .rejects.toThrow(ForbiddenException);
+      await expect(
+        service.submitEvidence('dispute-1', evidenceDto, 'other-user'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('deve lançar erro quando disputa expirada', async () => {
@@ -404,8 +431,9 @@ describe('PaymentsService', () => {
       });
 
       // Act & Assert
-      await expect(service.submitEvidence('dispute-1', evidenceDto, 'student-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.submitEvidence('dispute-1', evidenceDto, 'student-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -434,20 +462,22 @@ describe('PaymentsService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockResolvedValue([{
-          ...mockDispute,
-          status: DisputeStatus.RESOLVED_PRO_PERSONAL,
-          resolution: DisputeStatus.RESOLVED_PRO_PERSONAL,
-          adminNotes: resolveDto.adminNotes,
-          resolvedBy: 'admin-1',
-          resolvedAt: new Date(),
-          updatedAt: new Date(),
-        }]),
+        returning: jest.fn().mockResolvedValue([
+          {
+            ...mockDispute,
+            status: DisputeStatus.RESOLVED_PRO_PERSONAL,
+            resolution: DisputeStatus.RESOLVED_PRO_PERSONAL,
+            adminNotes: resolveDto.adminNotes,
+            resolvedBy: 'admin-1',
+            resolvedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ]),
       });
 
       // Mock para capturePayment
       jest.spyOn(service, 'capturePayment').mockResolvedValue(undefined);
-      
+
       // Mock para getUserWallet (usado em updateWallets)
       jest.spyOn(service, 'getUserWallet').mockResolvedValue({
         id: 'wallet-1',
@@ -462,7 +492,11 @@ describe('PaymentsService', () => {
       });
 
       // Act
-      const result = await service.resolveDispute('dispute-1', resolveDto, 'admin-1');
+      const result = await service.resolveDispute(
+        'dispute-1',
+        resolveDto,
+        'admin-1',
+      );
 
       // Assert
       expect(result).toBeDefined();
@@ -475,8 +509,9 @@ describe('PaymentsService', () => {
       mockDb.query.paymentDisputes.findFirst.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.resolveDispute('dispute-1', resolveDto, 'admin-1'))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.resolveDispute('dispute-1', resolveDto, 'admin-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('deve lançar erro quando disputa não está em análise', async () => {
@@ -485,11 +520,14 @@ describe('PaymentsService', () => {
         ...mockDispute,
         status: DisputeStatus.PENDING,
       };
-      mockDb.query.paymentDisputes.findFirst.mockResolvedValue(mockDisputeNotUnderReview);
+      mockDb.query.paymentDisputes.findFirst.mockResolvedValue(
+        mockDisputeNotUnderReview,
+      );
 
       // Act & Assert
-      await expect(service.resolveDispute('dispute-1', resolveDto, 'admin-1'))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.resolveDispute('dispute-1', resolveDto, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -535,17 +573,19 @@ describe('PaymentsService', () => {
       mockDb.query.userWallets.findFirst.mockResolvedValue(null);
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([{
-            id: 'wallet-1',
-            userId: 'user-1',
-            availableBalance: '0.00',
-            pendingBalance: '0.00',
-            totalEarned: '0.00',
-            totalWithdrawn: '0.00',
-            isActive: 'true',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }]),
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: 'wallet-1',
+              userId: 'user-1',
+              availableBalance: '0.00',
+              pendingBalance: '0.00',
+              totalEarned: '0.00',
+              totalWithdrawn: '0.00',
+              isActive: 'true',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]),
         }),
       });
 

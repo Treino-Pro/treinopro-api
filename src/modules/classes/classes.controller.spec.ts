@@ -1,7 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClassesController } from './classes.controller';
 import { ClassesService } from './classes.service';
-import { CreateClassDto, UpdateClassDto, GetClassesDto, ClassStatus, StartClassDto, CompleteClassDto } from './dto/classes.dto';
+import {
+  CreateClassDto,
+  UpdateClassDto,
+  GetClassesDto,
+  ClassStatus,
+  StartClassDto,
+  CompleteClassDto,
+} from './dto/classes.dto';
 
 describe('ClassesController', () => {
   let controller: ClassesController;
@@ -46,9 +53,9 @@ describe('ClassesController', () => {
         },
       ],
     })
-    .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
-    .useValue({ canActivate: () => true })
-    .compile();
+      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<ClassesController>(ClassesController);
     service = module.get<ClassesService>(ClassesService);
@@ -74,11 +81,16 @@ describe('ClassesController', () => {
       jest.spyOn(service, 'createClass').mockResolvedValue(mockClass);
 
       // Act
-      const result = await controller.createClass(createClassDto, { user: mockUser });
+      const result = await controller.createClass(createClassDto, {
+        user: mockUser,
+      });
 
       // Assert
       expect(result).toBe(mockClass);
-      expect(service.createClass).toHaveBeenCalledWith(createClassDto, mockUser.sub);
+      expect(service.createClass).toHaveBeenCalledWith(
+        createClassDto,
+        mockUser.sub,
+      );
     });
   });
 
@@ -101,11 +113,16 @@ describe('ClassesController', () => {
       jest.spyOn(service, 'getClasses').mockResolvedValue(mockResponse);
 
       // Act
-      const result = await controller.getClasses(getClassesDto, { user: mockUser });
+      const result = await controller.getClasses(getClassesDto, {
+        user: mockUser,
+      });
 
       // Assert
       expect(result).toBe(mockResponse);
-      expect(service.getClasses).toHaveBeenCalledWith(getClassesDto, mockUser.sub);
+      expect(service.getClasses).toHaveBeenCalledWith(
+        getClassesDto,
+        mockUser.sub,
+      );
     });
   });
 
@@ -133,19 +150,25 @@ describe('ClassesController', () => {
         duration: 90,
       };
 
-      const updatedClass = { 
-        ...mockClass, 
+      const updatedClass = {
+        ...mockClass,
         ...updateClassDto,
-        date: new Date('2024-01-15')
+        date: new Date('2024-01-15'),
       };
       jest.spyOn(service, 'updateClass').mockResolvedValue(updatedClass);
 
       // Act
-      const result = await controller.updateClass(classId, updateClassDto, { user: mockUser });
+      const result = await controller.updateClass(classId, updateClassDto, {
+        user: mockUser,
+      });
 
       // Assert
       expect(result).toBe(updatedClass);
-      expect(service.updateClass).toHaveBeenCalledWith(classId, updateClassDto, mockUser.sub);
+      expect(service.updateClass).toHaveBeenCalledWith(
+        classId,
+        updateClassDto,
+        mockUser.sub,
+      );
     });
   });
 
@@ -166,11 +189,17 @@ describe('ClassesController', () => {
       jest.spyOn(service, 'startClass').mockResolvedValue(startedClass);
 
       // Act
-      const result = await controller.startClass(classId, startClassDto, { user: mockUser });
+      const result = await controller.startClass(classId, startClassDto, {
+        user: mockUser,
+      });
 
       // Assert
       expect(result).toBe(startedClass);
-      expect(service.startClass).toHaveBeenCalledWith(classId, startClassDto, mockUser.sub);
+      expect(service.startClass).toHaveBeenCalledWith(
+        classId,
+        startClassDto,
+        mockUser.sub,
+      );
     });
   });
 
@@ -192,11 +221,17 @@ describe('ClassesController', () => {
       jest.spyOn(service, 'completeClass').mockResolvedValue(completedClass);
 
       // Act
-      const result = await controller.completeClass(classId, completeClassDto, { user: mockUser });
+      const result = await controller.completeClass(classId, completeClassDto, {
+        user: mockUser,
+      });
 
       // Assert
       expect(result).toBe(completedClass);
-      expect(service.completeClass).toHaveBeenCalledWith(classId, completeClassDto, mockUser.sub);
+      expect(service.completeClass).toHaveBeenCalledWith(
+        classId,
+        completeClassDto,
+        mockUser.sub,
+      );
     });
   });
 

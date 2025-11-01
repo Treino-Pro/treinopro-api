@@ -18,12 +18,20 @@ export class PushNotificationService {
       if (admin.apps.length === 0) {
         const firebaseConfig = {
           projectId: this.configService.get<string>('FIREBASE_PROJECT_ID'),
-          privateKey: this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
+          privateKey: this.configService
+            .get<string>('FIREBASE_PRIVATE_KEY')
+            ?.replace(/\\n/g, '\n'),
           clientEmail: this.configService.get<string>('FIREBASE_CLIENT_EMAIL'),
         };
 
-        if (!firebaseConfig.projectId || !firebaseConfig.privateKey || !firebaseConfig.clientEmail) {
-          this.logger.warn('❌ Firebase Admin não configurado - variáveis de ambiente ausentes no PushNotificationService');
+        if (
+          !firebaseConfig.projectId ||
+          !firebaseConfig.privateKey ||
+          !firebaseConfig.clientEmail
+        ) {
+          this.logger.warn(
+            '❌ Firebase Admin não configurado - variáveis de ambiente ausentes no PushNotificationService',
+          );
           return;
         }
 
@@ -32,27 +40,40 @@ export class PushNotificationService {
           projectId: firebaseConfig.projectId,
         });
 
-        this.logger.log('🔥 PushNotificationService: Firebase Admin inicializado com sucesso');
+        this.logger.log(
+          '🔥 PushNotificationService: Firebase Admin inicializado com sucesso',
+        );
         this.isFirebaseInitialized = true;
       } else {
-        this.logger.log('🔥 PushNotificationService: Firebase Admin já estava inicializado');
+        this.logger.log(
+          '🔥 PushNotificationService: Firebase Admin já estava inicializado',
+        );
         this.isFirebaseInitialized = true;
       }
     } catch (error) {
-      this.logger.error('❌ Erro ao inicializar Firebase Admin no PushNotificationService:', error);
+      this.logger.error(
+        '❌ Erro ao inicializar Firebase Admin no PushNotificationService:',
+        error,
+      );
       this.isFirebaseInitialized = false;
     }
   }
 
-  async sendToToken(token: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendToToken(
+    token: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     if (!this.isFirebaseInitialized) {
-      this.logger.warn('📱 [MOCK] Push notification enviado (Firebase não configurado)');
+      this.logger.warn(
+        '📱 [MOCK] Push notification enviado (Firebase não configurado)',
+      );
       return;
     }
 
     try {
       const notification = this.getNotificationTemplate(template, data);
-      
+
       const message = {
         token: token,
         notification: {
@@ -83,27 +104,37 @@ export class PushNotificationService {
 
       const response = await admin.messaging().send(message);
       this.logger.log(`📱 Push notification enviado com sucesso: ${response}`);
-
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar push notification para token ${token}:`, error);
+      this.logger.error(
+        `❌ Erro ao enviar push notification para token ${token}:`,
+        error,
+      );
       throw error;
     }
   }
 
-  async sendToTokens(tokens: string[], template: string, data: Record<string, any>): Promise<void> {
+  async sendToTokens(
+    tokens: string[],
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     if (!this.isFirebaseInitialized) {
-      this.logger.warn(`📱 [MOCK] ${tokens.length} push notifications enviados (Firebase não configurado)`);
+      this.logger.warn(
+        `📱 [MOCK] ${tokens.length} push notifications enviados (Firebase não configurado)`,
+      );
       return;
     }
 
     if (tokens.length === 0) {
-      this.logger.warn('⚠️ Nenhum token fornecido para envio de push notification');
+      this.logger.warn(
+        '⚠️ Nenhum token fornecido para envio de push notification',
+      );
       return;
     }
 
     try {
       const notification = this.getNotificationTemplate(template, data);
-      
+
       const message = {
         tokens: tokens,
         notification: {
@@ -133,32 +164,44 @@ export class PushNotificationService {
       };
 
       const response = await admin.messaging().sendEachForMulticast(message);
-      
-      this.logger.log(`📱 Push notifications enviados: ${response.successCount}/${tokens.length} com sucesso`);
-      
+
+      this.logger.log(
+        `📱 Push notifications enviados: ${response.successCount}/${tokens.length} com sucesso`,
+      );
+
       if (response.failureCount > 0) {
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
-            this.logger.error(`❌ Falha no token ${tokens[idx]}: ${resp.error?.message}`);
+            this.logger.error(
+              `❌ Falha no token ${tokens[idx]}: ${resp.error?.message}`,
+            );
           }
         });
       }
-
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar push notifications para ${tokens.length} tokens:`, error);
+      this.logger.error(
+        `❌ Erro ao enviar push notifications para ${tokens.length} tokens:`,
+        error,
+      );
       throw error;
     }
   }
 
-  async sendToTopic(topic: string, template: string, data: Record<string, any>): Promise<void> {
+  async sendToTopic(
+    topic: string,
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     if (!this.isFirebaseInitialized) {
-      this.logger.warn(`📱 [MOCK] Push notification para tópico ${topic} enviado (Firebase não configurado)`);
+      this.logger.warn(
+        `📱 [MOCK] Push notification para tópico ${topic} enviado (Firebase não configurado)`,
+      );
       return;
     }
 
     try {
       const notification = this.getNotificationTemplate(template, data);
-      
+
       const message = {
         topic: topic,
         notification: {
@@ -172,15 +215,22 @@ export class PushNotificationService {
       };
 
       const response = await admin.messaging().send(message);
-      this.logger.log(`📱 Push notification enviado para tópico ${topic}: ${response}`);
-
+      this.logger.log(
+        `📱 Push notification enviado para tópico ${topic}: ${response}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar push notification para tópico ${topic}:`, error);
+      this.logger.error(
+        `❌ Erro ao enviar push notification para tópico ${topic}:`,
+        error,
+      );
       throw error;
     }
   }
 
-  private getNotificationTemplate(template: string, data: Record<string, any>): { title: string; body: string } {
+  private getNotificationTemplate(
+    template: string,
+    data: Record<string, any>,
+  ): { title: string; body: string } {
     switch (template) {
       case 'proposal-match':
         return {
@@ -196,10 +246,14 @@ export class PushNotificationService {
 
       case 'payment-reminder':
         return {
-          title: data.reminderType === 'final' ? '🚨 Último Aviso!' : '⏰ Finalize seu Pagamento',
-          body: data.reminderType === 'final' 
-            ? 'Sua proposta expira em 5 minutos!'
-            : 'Finalize seu pagamento para garantir sua aula',
+          title:
+            data.reminderType === 'final'
+              ? '🚨 Último Aviso!'
+              : '⏰ Finalize seu Pagamento',
+          body:
+            data.reminderType === 'final'
+              ? 'Sua proposta expira em 5 minutos!'
+              : 'Finalize seu pagamento para garantir sua aula',
         };
 
       case 'class-reminder':
@@ -258,15 +312,18 @@ export class PushNotificationService {
     }
   }
 
-  private stringifyDataValues(data: Record<string, any>): Record<string, string> {
+  private stringifyDataValues(
+    data: Record<string, any>,
+  ): Record<string, string> {
     const stringified: Record<string, string> = {};
-    
+
     for (const [key, value] of Object.entries(data)) {
       if (value !== null && value !== undefined) {
-        stringified[key] = typeof value === 'string' ? value : JSON.stringify(value);
+        stringified[key] =
+          typeof value === 'string' ? value : JSON.stringify(value);
       }
     }
-    
+
     return stringified;
   }
 
@@ -274,7 +331,9 @@ export class PushNotificationService {
 
   async subscribeToTopic(token: string, topic: string): Promise<void> {
     if (!this.isFirebaseInitialized) {
-      this.logger.warn(`📱 [MOCK] Token inscrito no tópico ${topic} (Firebase não configurado)`);
+      this.logger.warn(
+        `📱 [MOCK] Token inscrito no tópico ${topic} (Firebase não configurado)`,
+      );
       return;
     }
 
@@ -282,14 +341,19 @@ export class PushNotificationService {
       await admin.messaging().subscribeToTopic([token], topic);
       this.logger.log(`📱 Token inscrito no tópico ${topic}`);
     } catch (error) {
-      this.logger.error(`❌ Erro ao inscrever token no tópico ${topic}:`, error);
+      this.logger.error(
+        `❌ Erro ao inscrever token no tópico ${topic}:`,
+        error,
+      );
       throw error;
     }
   }
 
   async unsubscribeFromTopic(token: string, topic: string): Promise<void> {
     if (!this.isFirebaseInitialized) {
-      this.logger.warn(`📱 [MOCK] Token desinscrito do tópico ${topic} (Firebase não configurado)`);
+      this.logger.warn(
+        `📱 [MOCK] Token desinscrito do tópico ${topic} (Firebase não configurado)`,
+      );
       return;
     }
 
@@ -297,7 +361,10 @@ export class PushNotificationService {
       await admin.messaging().unsubscribeFromTopic([token], topic);
       this.logger.log(`📱 Token desinscrito do tópico ${topic}`);
     } catch (error) {
-      this.logger.error(`❌ Erro ao desinscrever token do tópico ${topic}:`, error);
+      this.logger.error(
+        `❌ Erro ao desinscrever token do tópico ${topic}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -327,33 +394,54 @@ export class PushNotificationService {
 
   // ===== TEMPLATES ESPECÍFICOS =====
 
-  async sendProposalMatchNotification(tokens: string[], proposalData: any): Promise<void> {
+  async sendProposalMatchNotification(
+    tokens: string[],
+    proposalData: any,
+  ): Promise<void> {
     await this.sendToTokens(tokens, 'proposal-match', proposalData);
   }
 
-  async sendPaymentReminderNotification(tokens: string[], reminderData: any): Promise<void> {
+  async sendPaymentReminderNotification(
+    tokens: string[],
+    reminderData: any,
+  ): Promise<void> {
     await this.sendToTokens(tokens, 'payment-reminder', reminderData);
   }
 
-  async sendClassStartedNotification(tokens: string[], classData: any): Promise<void> {
+  async sendClassStartedNotification(
+    tokens: string[],
+    classData: any,
+  ): Promise<void> {
     await this.sendToTokens(tokens, 'class-started', classData);
   }
 
-  async sendNewMessageNotification(tokens: string[], messageData: any): Promise<void> {
+  async sendNewMessageNotification(
+    tokens: string[],
+    messageData: any,
+  ): Promise<void> {
     await this.sendToTokens(tokens, 'new-message', messageData);
   }
 
   // ===== NOTIFICAÇÕES POR TÓPICO =====
 
-  async sendToAllUsers(template: string, data: Record<string, any>): Promise<void> {
+  async sendToAllUsers(
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     await this.sendToTopic('all-users', template, data);
   }
 
-  async sendToStudents(template: string, data: Record<string, any>): Promise<void> {
+  async sendToStudents(
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     await this.sendToTopic('students', template, data);
   }
 
-  async sendToPersonalTrainers(template: string, data: Record<string, any>): Promise<void> {
+  async sendToPersonalTrainers(
+    template: string,
+    data: Record<string, any>,
+  ): Promise<void> {
     await this.sendToTopic('personal-trainers', template, data);
   }
 }
