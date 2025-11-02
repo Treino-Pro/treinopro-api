@@ -339,23 +339,49 @@ export class ProposalsService {
         student,
       );
 
-      // ===== NOTIFICAR PERSONALS ONLINE (COM FILTRO DE CONFLITO) =====
+      // ===== NOTIFICAR PERSONALS (FCM INDEPENDENTE DE WEBSOCKET) =====
       try {
-        // Buscar personals conectados
-        const connectedPersonals = this.chatGateway.getConnectedPersonals();
-        console.log(
-          `📢 [PROPOSALS] Enviando proposta para ${connectedPersonals.length} personals online`,
-        );
-
-        // Filtrar personals que NÃO têm conflito de horário
         console.log(
           `🔍 [PROPOSALS] Proposta: data=${proposalResponse.trainingDate}, hora=${proposalResponse.trainingTime}, duração=${proposalResponse.durationMinutes}min`,
         );
 
-        const nearbyPersonals: string[] = [];
+        // 1. Buscar personals conectados (para WebSocket em foreground)
+        const connectedPersonals = this.chatGateway.getConnectedPersonals();
+        console.log(
+          `📢 [PROPOSALS] ${connectedPersonals.length} personals conectados via WebSocket`,
+        );
 
-        for (const { userId: personalId, socketId } of connectedPersonals) {
+        // 2. CRÍTICO: Buscar TODOS os personals ativos que têm fcmToken do BANCO DE DADOS
+        // Isso permite que FCM funcione mesmo quando app está em background (WebSocket desconectado)
+        const allPersonalsWithFcm = await this.db
+          .select({
+            id: users.id,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            fcmToken: users.fcmToken,
+          })
+          .from(users)
+          .where(
+            and(
+              eq(users.userType, 'personal'),
+              eq(users.status, 'active'),
+              sql`${users.fcmToken} IS NOT NULL`,
+            ),
+          );
+
+        console.log(
+          `📱 [PROPOSALS] Encontrados ${allPersonalsWithFcm.length} personals com token FCM no banco`,
+        );
+
+        // 3. Separar: conectados (WebSocket) vs todos (FCM)
+        const nearbyPersonalsForFCM: string[] = []; // TODOS para FCM
+        const nearbyPersonalsForWS: string[] = []; // Apenas conectados para WebSocket
+
+        // 4. Processar TODOS os personals com fcmToken (do banco)
+        for (const personal of allPersonalsWithFcm) {
           try {
+            const personalId = personal.id;
+
             console.log(
               `🔍 [PROPOSALS] Verificando conflito para personal ${personalId}...`,
             );
@@ -375,45 +401,54 @@ export class ProposalsService {
               continue; // Pular este personal
             }
 
-            // Enviar proposta apenas para personals sem conflito
+            // Adicionar para FCM (TODOS que têm token e sem conflito)
+            nearbyPersonalsForFCM.push(personalId);
             console.log(
-              `✅ [PROPOSALS] Personal ${personalId} SEM conflito, enviando proposta`,
+              `✅ [PROPOSALS] Personal ${personalId} SEM conflito, será notificado via FCM`,
             );
-            this.chatGateway.server.to(socketId).emit('new_proposal', {
-              action: 'proposal_created',
-              proposal: proposalResponse,
-              student: {
-                id: student?.id,
-                name: student?.name,
-                profileImageUrl: student?.profileImageUrl,
-              },
-              timestamp: new Date(),
-            });
 
-            nearbyPersonals.push(personalId);
+            // Se estiver conectado, também enviar via WebSocket (foreground)
+            const isConnected = connectedPersonals.some(
+              (p) => p.userId === personalId,
+            );
+            if (isConnected) {
+              const connection = connectedPersonals.find(
+                (p) => p.userId === personalId,
+              );
+              if (connection) {
+                this.chatGateway.server
+                  .to(connection.socketId)
+                  .emit('new_proposal', {
+                    action: 'proposal_created',
+                    proposal: proposalResponse,
+                    student: {
+                      id: student?.id,
+                      name: student?.name,
+                      profileImageUrl: student?.profileImageUrl,
+                    },
+                    timestamp: new Date(),
+                  });
+                nearbyPersonalsForWS.push(personalId);
+                console.log(
+                  `📡 [PROPOSALS] Personal ${personalId} também recebeu via WebSocket (foreground)`,
+                );
+              }
+            }
           } catch (error) {
             console.error(
-              `❌ [PROPOSALS] Erro ao verificar conflito para personal ${personalId}:`,
+              `❌ [PROPOSALS] Erro ao verificar conflito para personal ${personal.id}:`,
               error,
             );
-            // Em caso de erro, enviar a proposta (fail-safe)
-            this.chatGateway.server.to(socketId).emit('new_proposal', {
-              action: 'proposal_created',
-              proposal: proposalResponse,
-              student: {
-                id: student?.id,
-                name: student?.name,
-                profileImageUrl: student?.profileImageUrl,
-              },
-              timestamp: new Date(),
-            });
-
-            nearbyPersonals.push(personalId);
+            // Em caso de erro, não adicionar para não enviar notificação incorreta
           }
         }
 
-        // Enviar notificações Firebase para personals próximos
-        if (nearbyPersonals.length > 0) {
+        // 5. Enviar notificações Firebase para TODOS os personals (conectados OU não)
+        // CRÍTICO: FCM deve funcionar independente de WebSocket estar conectado
+        if (nearbyPersonalsForFCM.length > 0) {
+          console.log(
+            `🔥 [PROPOSALS] Enviando FCM para ${nearbyPersonalsForFCM.length} personals (independente de conexão WebSocket)`,
+          );
           await this.proposalsGateway.sendProposalCreated({
             proposal: proposalResponse,
             student: {
@@ -423,8 +458,12 @@ export class ProposalsService {
               lastName: student?.lastName,
               profileImageUrl: student?.profileImageUrl,
             },
-            nearbyPersonals,
+            nearbyPersonals: nearbyPersonalsForFCM, // TODOS, não apenas conectados
           });
+        } else {
+          console.log(
+            `⚠️ [PROPOSALS] Nenhum personal sem conflito encontrado para receber notificação`,
+          );
         }
       } catch (error) {
         console.error(
