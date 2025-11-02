@@ -102,16 +102,22 @@ export class FirebaseNotificationService {
         }
       }
 
-      // SOLUÇÃO: Enviar apenas DATA, sem 'notification' no payload
-      // Isso evita conflito entre notificação automática do Firebase e manual do app
-      // O app vai criar a notificação localmente com controle total (canal, importância, etc)
+      // ESTRATÉGIA HÍBRIDA: Enviar notification E data
+      // - notification: Sistema Android/iOS exibe automaticamente quando app está FECHADO/hibernando
+      // - data: App usa para criar notificação local quando aberto (com controle total)
+      // Isso garante funcionamento em TODOS os cenários: app aberto, background ou fechado
       const message = {
-        // ❌ REMOVIDO: notification - causa conflito com notificação local manual
-        // ✅ SOLUÇÃO: Enviar title e body dentro de data
+        // ✅ ADICIONAR notification para funcionar quando app está FECHADO/hibernando
+        // Sistema Android/iOS exibe automaticamente (como Uber, YouTube, 99)
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        // ✅ Manter data para quando app está ABERTO (app cria notificação local)
         data: {
           ...sanitizedData,
-          title: notification.title, // Título nos dados para mostrar localmente
-          body: notification.body,   // Corpo nos dados para mostrar localmente
+          title: notification.title, // Manter para compatibilidade
+          body: notification.body,   // Manter para compatibilidade
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -119,8 +125,8 @@ export class FirebaseNotificationService {
           priority: 'high' as const,
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
-          // ❌ REMOVIDO: notification aqui também - não é mais necessário
-          // O app vai criar notificação localmente com configurações corretas
+          // Configurações específicas do Android
+          // O canal 'proposals_urgent' já deve estar criado no app com Importance.max
         },
         apns: {
           payload: {
@@ -130,7 +136,11 @@ export class FirebaseNotificationService {
               // Para iOS, garantir que notificação aparece mesmo em hibernação
               interruptionLevel: 'timeSensitive' as const,
               badge: 1,
-              // Para iOS, também enviar alert nos dados (app vai mostrar localmente)
+              // Alert para iOS (sistema exibe automaticamente)
+              alert: {
+                title: notification.title,
+                body: notification.body,
+              },
             },
           },
         },
