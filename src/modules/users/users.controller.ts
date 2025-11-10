@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -411,16 +412,24 @@ export class UsersController {
   // ===== ENDPOINT PARA TOKEN FCM =====
 
   @Post(':id/fcm-token')
-  @Public() // Endpoint público para permitir envio de token FCM sem autenticação
+  @UseGuards(JwtAuthGuard) // ✅ Exigir autenticação
   @ApiOperation({
     summary: 'Salvar token FCM do usuário',
     description:
-      'Salva o token Firebase Cloud Messaging do usuário para receber notificações push',
+      'Salva o token Firebase Cloud Messaging do usuário para receber notificações push. Usuário só pode atualizar seu próprio token.',
   })
   @ApiParam({ name: 'id', description: 'ID do usuário' })
   @ApiResponse({
     status: 200,
     description: 'Token FCM salvo com sucesso',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Não autenticado',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Não autorizado - só pode atualizar seu próprio token',
   })
   @ApiResponse({
     status: 404,
@@ -430,7 +439,15 @@ export class UsersController {
   async saveFcmToken(
     @Param('id') userId: string,
     @Body() body: { token: string },
+    @Request() req: any,
   ) {
+    // ✅ Validar que usuário só pode atualizar seu próprio token
+    if (req.user.sub !== userId) {
+      throw new ForbiddenException(
+        'Você só pode atualizar seu próprio token FCM',
+      );
+    }
+
     return this.usersService.saveFcmToken(userId, body.token);
   }
 }

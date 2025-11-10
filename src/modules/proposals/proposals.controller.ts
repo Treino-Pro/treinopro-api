@@ -455,16 +455,21 @@ export class ProposalsController {
     status: 403,
     description: 'Apenas personal trainers podem aceitar propostas',
   })
+  @ApiResponse({
+    status: 409,
+    description: 'Proposta já foi aceita ou nonce já foi usado',
+  })
   async acceptProposal(
     @Param('id', ParseUUIDPipe) id: string,
     @Request() req: any,
+    @Body('nonce') nonce?: string,
   ): Promise<ProposalResponseDto> {
     // Verificar se o usuário é um personal trainer
     if (req.user.userType !== 'personal') {
       throw new Error('Apenas personal trainers podem aceitar propostas');
     }
 
-    return this.proposalsService.acceptProposal(id, req.user.sub);
+    return this.proposalsService.acceptProposal(id, req.user.sub, nonce);
   }
 
   // ===== WEBHOOK PARA PAGAMENTOS =====

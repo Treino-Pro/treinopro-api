@@ -5,6 +5,7 @@ import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { FirebaseNotificationService } from './services/firebase-notification.service';
+import { NonceService } from './services/nonce.service';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
@@ -18,6 +19,7 @@ import { ConfigModule } from '@nestjs/config';
     InAppNotificationService,
     PushNotificationService,
     FirebaseNotificationService,
+    NonceService,
   ],
   exports: [
     NotificationsService,
@@ -25,6 +27,7 @@ import { ConfigModule } from '@nestjs/config';
     InAppNotificationService,
     PushNotificationService,
     FirebaseNotificationService,
+    NonceService,
   ],
 })
 export class NotificationsModule {}

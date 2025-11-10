@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
 import { users } from '../../../database/schema';
 import { eq } from 'drizzle-orm';
+import { NonceService } from './nonce.service';
 
 @Injectable()
 export class FirebaseNotificationService {
@@ -13,6 +14,7 @@ export class FirebaseNotificationService {
   constructor(
     private configService: ConfigService,
     @Inject('DATABASE_CONNECTION') private readonly db: any,
+    private nonceService: NonceService,
   ) {
     this.initializeFirebase();
   }
@@ -106,7 +108,7 @@ export class FirebaseNotificationService {
       // - notification: Sistema Android/iOS exibe automaticamente quando app está FECHADO/hibernando
       // - data: App usa para criar notificação local quando aberto (com controle total)
       // Isso garante funcionamento em TODOS os cenários: app aberto, background ou fechado
-      const message = {
+      const message: admin.messaging.Message = {
         // ✅ ADICIONAR notification para funcionar quando app está FECHADO/hibernando
         // Sistema Android/iOS exibe automaticamente (como Uber, YouTube, 99)
         notification: {
@@ -123,10 +125,16 @@ export class FirebaseNotificationService {
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
+          // ✅ TTL: 120 segundos (2 minutos) - notificações expiram após esse tempo
+          ttl: 120 * 1000, // 120 segundos em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
           // Configurações específicas do Android
-          // O canal 'proposals_urgent' já deve estar criado no app com Importance.max
+          notification: {
+            sound: 'default',
+            channelId: 'high_importance_channel', // DEVE corresponder ao canal criado no Flutter
+            priority: 'high' as const,
+          },
         },
         apns: {
           payload: {
@@ -136,12 +144,22 @@ export class FirebaseNotificationService {
               // Para iOS, garantir que notificação aparece mesmo em hibernação
               interruptionLevel: 'timeSensitive' as const,
               badge: 1,
+              // ✅ Categoria para ações de notificação (Aceitar/Ignorar)
+              category: sanitizedData.type === 'new_proposal' ? 'PROPOSTA_ACOES' : undefined,
               // Alert para iOS (sistema exibe automaticamente)
               alert: {
                 title: notification.title,
                 body: notification.body,
               },
             },
+            // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
+            threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
+          },
+          headers: {
+            // ✅ APNS Expiration: 120 segundos a partir de agora
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
+            // ✅ APNS Priority: 10 (alta prioridade)
+            'apns-priority': '10',
           },
         },
       };
@@ -172,21 +190,101 @@ export class FirebaseNotificationService {
       expiresIn: number;
     },
   ): Promise<string | null> {
-    return this.sendToUser(personalId, {
-      title: '🎯 Nova Proposta de Treino!',
-      body: `${proposal.studentName} em ${proposal.location}`,
-      data: {
-        type: 'new_proposal',
-        proposalId: proposal.id,
-        studentName: proposal.studentName,
-        location: proposal.location,
-        time: proposal.time,
-        date: proposal.date || '',
-        modality: proposal.modality,
-        price: proposal.price.toString(),
-        expiresIn: proposal.expiresIn.toString(),
-      },
-    });
+    // ✅ Gerar nonce assinado para prevenir replay attacks
+    const nonce = this.nonceService.generateNonce(proposal.id, personalId);
+
+    // Buscar token FCM do usuário para adicionar collapse_key
+    const user = await this.getUserFcmToken(personalId);
+    if (!user?.fcmToken) {
+      this.logger.log(`Usuário ${personalId} não tem token FCM`);
+      return null;
+    }
+
+    // Sanitizar dados
+    const sanitizedData: Record<string, string> = {
+      type: 'new_proposal',
+      proposalId: proposal.id,
+      studentName: proposal.studentName,
+      location: proposal.location,
+      time: proposal.time,
+      date: proposal.date || '',
+      modality: proposal.modality,
+      price: proposal.price.toString(),
+      expiresIn: proposal.expiresIn.toString(),
+      nonce: nonce, // ✅ Adicionar nonce ao payload
+    };
+
+    const title = '🎯 Nova Proposta de Treino!';
+    const body = `${proposal.studentName} em ${proposal.location}`;
+
+    try {
+      if (!this.app) {
+        this.logger.warn('Firebase Admin não inicializado');
+        return null;
+      }
+
+      const message: admin.messaging.Message = {
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          ...sanitizedData,
+          title,
+          body,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+        token: user.fcmToken,
+        android: {
+          priority: 'high' as const,
+          // ✅ TTL: 120 segundos (2 minutos)
+          ttl: 120 * 1000,
+          // ✅ Collapse Key: agrupa notificações da mesma proposta
+          collapseKey: `proposta_${proposal.id}`,
+          directBootOk: true,
+          notification: {
+            sound: 'default',
+            channelId: 'high_importance_channel',
+            priority: 'high' as const,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'alert_proposal.mp3',
+              contentAvailable: true,
+              interruptionLevel: 'timeSensitive' as const,
+              badge: 1,
+              // ✅ Categoria para ações de notificação iOS
+              category: 'PROPOSTA_ACOES',
+              alert: {
+                title,
+                body,
+              },
+            },
+            // ✅ Thread-ID para iOS (equivalente ao collapse_key)
+            threadId: `proposta_${proposal.id}`,
+          },
+          headers: {
+            // ✅ APNS Expiration: 120 segundos
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
+            'apns-priority': '10',
+          },
+        },
+      };
+
+      const response = await admin.messaging().send(message);
+      this.logger.log(
+        `✅ Notificação de proposta enviada para ${personalId}: ${response}`,
+      );
+      return response;
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao enviar notificação de proposta para ${personalId}:`,
+        error,
+      );
+      return null;
+    }
   }
 
   /**

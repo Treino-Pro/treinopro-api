@@ -13,6 +13,7 @@ import {
   ratings,
   files,
   locations,
+  usedNonces,
 } from '../../database/schema';
 import {
   eq,
@@ -41,6 +42,8 @@ import { PaymentsService } from '../payments/payments.service';
 import { JobsService } from '../jobs/jobs.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsGateway } from './proposals.gateway';
+import { NonceService } from '../notifications/services/nonce.service';
+import { ConflictException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
@@ -53,6 +56,7 @@ export class ProposalsService {
     private readonly jobsService: JobsService,
     private readonly chatGateway: ChatGateway,
     private readonly proposalsGateway: ProposalsGateway,
+    private readonly nonceService: NonceService,
   ) {}
 
   async createProposal(
@@ -985,24 +989,57 @@ export class ProposalsService {
   async acceptProposal(
     id: string,
     personalId: string,
+    nonce?: string,
   ): Promise<ProposalResponseDto> {
-    // Buscar a proposta
-    const [proposal] = await this.db
-      .select()
-      .from(proposals)
-      .where(eq(proposals.id, id))
-      .limit(1);
+    // ✅ Usar transação com lock para garantir idempotência
+    const result = await this.db.transaction(async (tx) => {
+      // ✅ Buscar proposta dentro da transação (lock automático pela transação)
+      const [proposal] = await tx
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, id))
+        .limit(1);
 
-    if (!proposal) {
-      throw new NotFoundException('Proposta não encontrada');
-    }
+      if (!proposal) {
+        throw new NotFoundException('Proposta não encontrada');
+      }
 
-    // Verificar se a proposta está pendente
-    if (proposal.status !== ProposalStatus.PENDING) {
-      throw new BadRequestException(
-        'Apenas propostas pendentes podem ser aceitas',
-      );
-    }
+      // Verificar se a proposta está pendente
+      if (proposal.status !== ProposalStatus.PENDING) {
+        throw new ConflictException(
+          'Proposta já foi aceita ou cancelada por outro personal trainer',
+        );
+      }
+
+      // ✅ Validar nonce se fornecido
+      if (nonce) {
+        // Verificar se nonce já foi usado
+        const [usedNonce] = await tx
+          .select()
+          .from(usedNonces)
+          .where(eq(usedNonces.nonce, nonce))
+          .limit(1);
+
+        if (usedNonce) {
+          throw new ConflictException(
+            'Esta notificação já foi processada. A proposta pode ter sido aceita por outro personal trainer.',
+          );
+        }
+
+        // Validar assinatura do nonce
+        if (!this.nonceService.validateNonce(nonce, id, personalId, 300)) {
+          throw new BadRequestException(
+            'Nonce inválido ou expirado. Por favor, recarregue a notificação.',
+          );
+        }
+
+        // Registrar nonce como usado
+        await tx.insert(usedNonces).values({
+          nonce,
+          proposalId: id,
+          personalId,
+        });
+      }
 
     // ===== VALIDAR CONFLITOS DE HORÁRIO =====
     try {
@@ -1015,7 +1052,7 @@ export class ProposalsService {
 
       // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
       // Buscar aulas do personal no mesmo dia com status relevantes
-      const existingClasses = await this.db
+      const existingClasses = await tx
         .select()
         .from(classes)
         .where(
@@ -1037,7 +1074,7 @@ export class ProposalsService {
 
       // 2. VALIDAR CONFLITOS DO ALUNO
       // Buscar propostas existentes do aluno para o mesmo dia
-      let existingProposals = await this.db
+      let existingProposals = await tx
         .select()
         .from(proposals)
         .where(
@@ -1059,7 +1096,7 @@ export class ProposalsService {
       );
 
       // Ignorar propostas matched cujas aulas estão em disputa de no-show
-      const disputedClasses = await this.db.query.classes.findMany({
+      const disputedClasses = await tx.query.classes.findMany({
         where: and(
           sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
           eq(classes.studentId, proposal.studentId as any),
@@ -1180,100 +1217,100 @@ export class ProposalsService {
       );
     }
 
-    // Aceitar a proposta (mudar status para matched)
-    const [acceptedProposal] = await this.db
-      .update(proposals)
-      .set({
-        status: ProposalStatus.MATCHED,
-        updatedAt: new Date(),
-      })
-      .where(eq(proposals.id, id))
-      .returning();
-
-    // ===== PAGAMENTO SERÁ CAPTURADO APÓS CRIAÇÃO DA AULA =====
-    console.log(
-      '💰 [PROPOSALS] Pagamento será capturado após criação da aula...',
-    );
-
-    // ===== CRIAR AULA AUTOMATICAMENTE =====
-
-    // Verificar se já existe uma aula para esta proposta
-    const existingClass = await this.db
-      .select()
-      .from(classes)
-      .where(eq(classes.proposalId, id))
-      .limit(1);
-
-    if (existingClass.length > 0) {
-      // Buscar dados do usuário para incluir na resposta
-      const [student] = await this.db
-        .select()
-        .from(users)
-        .where(eq(users.id, acceptedProposal.studentId))
-        .limit(1);
-      return await this.mapToResponseDto(acceptedProposal, student);
-    }
-
-    let newClass;
-    try {
-      [newClass] = await this.db
-        .insert(classes)
-        .values({
-          studentId: proposal.studentId,
-          personalId: personalId,
-          proposalId: id, // Vincular à proposta
-          location: proposal.locationName,
-          address: proposal.locationAddress,
-          date: proposal.trainingDate,
-          time: proposal.trainingTime,
-          duration: proposal.durationMinutes,
-          modality: proposal.modalityName,
-          price: proposal.price,
-          status: 'scheduled',
-          notes: proposal.additionalNotes,
-        })
-        .returning();
-
-      // Atualizar proposta para incluir o ID da aula criada
-      await this.db
+      // Aceitar a proposta (mudar status para matched)
+      const [acceptedProposal] = await tx
         .update(proposals)
         .set({
-          classId: newClass.id, // Adicionar referência à aula
+          status: ProposalStatus.MATCHED,
           updatedAt: new Date(),
         })
-        .where(eq(proposals.id, id));
+        .where(eq(proposals.id, id))
+        .returning();
 
-      // ===== CAPTURAR PAGAMENTO APÓS CRIAÇÃO DA AULA =====
+      // ===== PAGAMENTO SERÁ CAPTURADO APÓS CRIAÇÃO DA AULA =====
+      console.log(
+        '💰 [PROPOSALS] Pagamento será capturado após criação da aula...',
+      );
+
+      // ===== CRIAR AULA AUTOMATICAMENTE =====
+
+      // Verificar se já existe uma aula para esta proposta
+      const existingClass = await tx
+        .select()
+        .from(classes)
+        .where(eq(classes.proposalId, id))
+        .limit(1);
+
+      if (existingClass.length > 0) {
+        // Buscar dados do usuário para incluir na resposta
+        const [student] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, acceptedProposal.studentId))
+          .limit(1);
+        return await this.mapToResponseDto(acceptedProposal, student);
+      }
+
+      let newClass;
       try {
-        console.log(
-          '💰 [PROPOSALS] Capturando pagamento após criação da aula...',
-        );
-        console.log('🔍 [PROPOSALS] Buscando pagamento para proposta ID:', id);
+        [newClass] = await tx
+          .insert(classes)
+          .values({
+            studentId: proposal.studentId,
+            personalId: personalId,
+            proposalId: id, // Vincular à proposta
+            location: proposal.locationName,
+            address: proposal.locationAddress,
+            date: proposal.trainingDate,
+            time: proposal.trainingTime,
+            duration: proposal.durationMinutes,
+            modality: proposal.modalityName,
+            price: proposal.price,
+            status: 'scheduled',
+            notes: proposal.additionalNotes,
+          })
+          .returning();
 
-        // Buscar pagamento da proposta
-        const payment = await this.db.query.payments.findFirst({
-          where: eq(payments.proposalId, id), // Busca direta por ID da proposta
-        });
+        // Atualizar proposta para incluir o ID da aula criada
+        await tx
+          .update(proposals)
+          .set({
+            classId: newClass.id, // Adicionar referência à aula
+            updatedAt: new Date(),
+          })
+          .where(eq(proposals.id, id));
 
-        console.log('💰 [PROPOSALS] Pagamento encontrado:', {
-          paymentId: payment?.id,
-          proposalId: payment?.proposalId,
-          classId: payment?.classId,
-          status: payment?.status,
-          totalAmount: payment?.totalAmount,
-          personalAmount: payment?.personalAmount,
-        });
+        // ===== CAPTURAR PAGAMENTO APÓS CRIAÇÃO DA AULA =====
+        try {
+          console.log(
+            '💰 [PROPOSALS] Capturando pagamento após criação da aula...',
+          );
+          console.log('🔍 [PROPOSALS] Buscando pagamento para proposta ID:', id);
 
-        if (payment && payment.status === 'authorized') {
-          // Atualizar pagamento com classId e personalId
-          await this.db
-            .update(payments)
-            .set({
-              classId: newClass.id,
-              personalId: personalId, // Definir personalId quando aceitar
-              updatedAt: new Date(),
-            })
-            .where(eq(payments.id, payment.id));
+          // Buscar pagamento da proposta
+          const payment = await tx.query.payments.findFirst({
+            where: eq(payments.proposalId, id), // Busca direta por ID da proposta
+          });
+
+          console.log('💰 [PROPOSALS] Pagamento encontrado:', {
+            paymentId: payment?.id,
+            proposalId: payment?.proposalId,
+            classId: payment?.classId,
+            status: payment?.status,
+            totalAmount: payment?.totalAmount,
+            personalAmount: payment?.personalAmount,
+          });
+
+          if (payment && payment.status === 'authorized') {
+            // Atualizar pagamento com classId e personalId
+            await tx
+              .update(payments)
+              .set({
+                classId: newClass.id,
+                personalId: personalId, // Definir personalId quando aceitar
+                updatedAt: new Date(),
+              })
+              .where(eq(payments.id, payment.id));
 
           // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
           console.log(
@@ -1293,10 +1330,20 @@ export class ProposalsService {
         // Não falhar a operação se a captura de pagamento falhar
         // Mas logar o erro para investigação
       }
+
+      // Buscar dados do usuário para incluir na resposta (dentro da transação)
+      const [student] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.id, acceptedProposal.studentId))
+        .limit(1);
+
+      // Retornar resultado da transação
+      return await this.mapToResponseDto(acceptedProposal, student);
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
-      // Se falhar, reverter status da proposta
-      await this.db
+      // Se falhar, reverter status da proposta dentro da transação
+      await tx
         .update(proposals)
         .set({
           status: ProposalStatus.PENDING,
@@ -1307,14 +1354,27 @@ export class ProposalsService {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar aula';
       throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
     }
+    },
+    );
 
-    // ===== EMITIR EVENTOS WEBSOCKET =====
+    // ===== EMITIR EVENTOS WEBSOCKET (fora da transação) =====
+    // Buscar novamente os dados para eventos WebSocket após transação
     try {
+      const [proposalForEvents] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, id))
+        .limit(1);
+
+      if (!proposalForEvents) {
+        return;
+      }
+
       // Buscar informações do aluno para enviar no evento
-      const [student] = await this.db
+      const [studentForEvents] = await this.db
         .select()
         .from(users)
-        .where(eq(users.id, proposal.studentId))
+        .where(eq(users.id, proposalForEvents.studentId))
         .limit(1);
 
       // Buscar informações do personal para enviar no evento
@@ -1347,26 +1407,26 @@ export class ProposalsService {
       }
 
       // Evento para o aluno (proposta foi aceita)
-      if (student) {
+      if (studentForEvents) {
         this.chatGateway.server.emit('proposal_update', {
           action: 'proposal_accepted',
-          proposal: await this.mapToResponseDto(acceptedProposal),
+          proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
           personal: {
             id: personal?.id,
             name: personal?.name,
             profileImageUrl: personal?.profileImageUrl,
             rating: personalRating,
           },
-          userId: student.id,
+          userId: studentForEvents.id,
           timestamp: new Date(),
         });
       }
 
       // Enviar notificação push para o aluno (proposta aceita)
-      if (student && personal) {
+      if (studentForEvents && personal) {
         try {
           await this.proposalsGateway.sendProposalAccepted({
-            proposal: await this.mapToResponseDto(acceptedProposal),
+            proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
             personal: {
               id: personal.id,
               name: personal.name || `${personal.firstName} ${personal.lastName}`,
@@ -1375,7 +1435,7 @@ export class ProposalsService {
               photo: personal.profileImageUrl,
               profileImageUrl: personal.profileImageUrl,
             },
-            studentId: student.id,
+            studentId: studentForEvents.id,
           });
           console.log('✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita');
         } catch (error) {
@@ -1384,14 +1444,21 @@ export class ProposalsService {
         }
       }
 
+      // Buscar aula criada para eventos
+      const [newClass] = await this.db
+        .select()
+        .from(classes)
+        .where(eq(classes.proposalId, id))
+        .limit(1);
+
       // Evento de match confirmado para ambos
       const matchData = {
         action: 'match_confirmed',
-        proposal: await this.mapToResponseDto(acceptedProposal),
+        proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
         student: {
-          id: student?.id,
-          name: student?.name,
-          profileImageUrl: student?.profileImageUrl,
+          id: studentForEvents?.id,
+          name: studentForEvents?.name,
+          profileImageUrl: studentForEvents?.profileImageUrl,
         },
         personal: {
           id: personal?.id,
@@ -1405,44 +1472,47 @@ export class ProposalsService {
       this.chatGateway.server.emit('match_confirmed', matchData);
 
       // Evento de aula criada para ambos os usuários
-      const classData = {
-        action: 'class_created',
-        class: {
-          id: newClass.id,
-          proposalId: id,
-          studentId: proposal.studentId,
+      if (newClass) {
+        const classData = {
+          action: 'class_created',
+          class: {
+            id: newClass.id,
+            proposalId: id,
+            studentId: proposalForEvents.studentId,
+            personalId: personalId,
+            location: proposalForEvents.locationName,
+            date: proposalForEvents.trainingDate,
+            time: proposalForEvents.trainingTime,
+            duration: proposalForEvents.durationMinutes,
+            status: 'scheduled',
+            // Garantir que a modalidade esteja presente no payload em tempo real
+            proposalModality: proposalForEvents.modalityName,
+            student: {
+              id: studentForEvents?.id,
+              firstName: studentForEvents?.firstName,
+              lastName: studentForEvents?.lastName,
+              profileImageUrl: studentForEvents?.profileImageUrl,
+            },
+            personal: {
+              id: personal?.id,
+              firstName: personal?.firstName,
+              lastName: personal?.lastName,
+              profileImageUrl: personal?.profileImageUrl,
+            },
+          },
           personalId: personalId,
-          location: proposal.locationName,
-          date: proposal.trainingDate,
-          time: proposal.trainingTime,
-          duration: proposal.durationMinutes,
-          status: 'scheduled',
-          // Garantir que a modalidade esteja presente no payload em tempo real
-          proposalModality: proposal.modalityName,
-          student: {
-            id: student?.id,
-            firstName: student?.firstName,
-            lastName: student?.lastName,
-            profileImageUrl: student?.profileImageUrl,
-          },
-          personal: {
-            id: personal?.id,
-            firstName: personal?.firstName,
-            lastName: personal?.lastName,
-            profileImageUrl: personal?.profileImageUrl,
-          },
-        },
-        personalId: personalId,
-        studentId: proposal.studentId,
-        timestamp: new Date(),
-      };
+          studentId: proposalForEvents.studentId,
+          timestamp: new Date(),
+        };
 
-      console.log(
-        '📡 [PROPOSALS] Emitindo evento class_update:',
-        JSON.stringify(classData, null, 2),
-      );
-      this.chatGateway.server.emit('class_update', classData);
-      console.log('✅ [PROPOSALS] Evento WebSocket emitido: class_created');
+        console.log(
+          '📡 [PROPOSALS] Emitindo evento class_update:',
+          JSON.stringify(classData, null, 2),
+        );
+        this.chatGateway.server.emit('class_update', classData);
+        console.log('✅ [PROPOSALS] Evento WebSocket emitido: class_created');
+      }
+
       console.log(
         '🔌 [PROPOSALS] ChatGateway server disponível:',
         !!this.chatGateway.server,
@@ -1462,14 +1532,7 @@ export class ProposalsService {
       // Não falhar a operação por causa de problemas de WebSocket
     }
 
-    // Buscar dados do usuário para incluir na resposta
-    const [student] = await this.db
-      .select()
-      .from(users)
-      .where(eq(users.id, acceptedProposal.studentId))
-      .limit(1);
-
-    return await this.mapToResponseDto(acceptedProposal, student);
+    return result;
   }
 
   // ===== MÉTODOS PARA WEBHOOK DE PAGAMENTO =====
