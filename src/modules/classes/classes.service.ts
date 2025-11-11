@@ -1842,23 +1842,26 @@ export class ClassesService {
 
       try {
         // Buscar ratings dos personals (onde eles são avaliados - ratedId)
-        const personalRatings = await this.db
-          .select({
-            personalId: ratings.ratedId,
-            avgRating: sql<number>`AVG(${ratings.rating})`,
-          })
-          .from(ratings)
-          .where(
-            and(
-              inArray(ratings.ratedId, uniquePersonalIds as string[]),
-              eq(ratings.type, 'student_to_personal'),
-            ),
-          )
-          .groupBy(ratings.ratedId);
+        // Só buscar se houver personals para buscar
+        if (uniquePersonalIds.length > 0) {
+          const personalRatings = await this.db
+            .select({
+              personalId: ratings.ratedId,
+              avgRating: sql<number>`AVG(${ratings.rating})`,
+            })
+            .from(ratings)
+            .where(
+              and(
+                inArray(ratings.ratedId, uniquePersonalIds as string[]),
+                eq(ratings.type, 'student_to_personal'),
+              ),
+            )
+            .groupBy(ratings.ratedId);
 
-        personalRatings.forEach((r: any) => {
-          personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
-        });
+          personalRatings.forEach((r: any) => {
+            personalRatingsMap[r.personalId] = parseFloat(r.avgRating) || 0;
+          });
+        }
 
         // Buscar rating ESPECÍFICO por aula para personal (student -> personal)
         if (classIds.length > 0) {
