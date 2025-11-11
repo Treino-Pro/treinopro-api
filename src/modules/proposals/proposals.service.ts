@@ -1265,7 +1265,8 @@ export class ProposalsService {
         })
         .where(eq(proposals.id, id));
 
-      throw new BadRequestException(`Erro ao criar aula: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar aula';
+      throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
     }
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
