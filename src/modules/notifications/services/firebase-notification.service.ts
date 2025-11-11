@@ -214,8 +214,37 @@ export class FirebaseNotificationService {
       nonce: nonce, // ✅ Adicionar nonce ao payload
     };
 
+    // ✅ Formatar body com mais informações de forma visualmente atraente
     const title = '🎯 Nova Proposta de Treino!';
-    const body = `${proposal.studentName} em ${proposal.location}`;
+    
+    // Formatar valores
+    const timeFormatted = proposal.time || 'Horário não informado';
+    const priceFormatted = `R$ ${parseFloat(proposal.price.toString()).toFixed(2).replace('.', ',')}`;
+    const expiresInMinutes = Math.floor(proposal.expiresIn / 60);
+    const expiresInSeconds = proposal.expiresIn % 60;
+    const expiresText = expiresInMinutes > 0 
+      ? `${expiresInMinutes}min` 
+      : `${expiresInSeconds}s`;
+    
+    // ✅ Garantir que studentName e location não sejam vazios
+    const studentName = proposal.studentName || 'Aluno não informado';
+    const location = proposal.location || 'Local não informado';
+    
+    // ✅ Body formatado de forma mais visual e organizada
+    // Versão com quebras de linha (suportado em Android/iOS modernos)
+    // Formato multi-linha:
+    // "👤 João Silva
+    //  📍 Smart Fit
+    //  🕐 14:00 • 💰 R$ 80,00
+    //  ⏰ Expira em 2min"
+    const body = `👤 ${studentName}\n📍 ${location}\n🕐 ${timeFormatted} • 💰 ${priceFormatted}\n⏰ Expira em ${expiresText}`;
+    
+    // Alternativa sem quebras de linha (caso sistema não suporte):
+    // const body = `👤 ${studentName} • 📍 ${location} • 🕐 ${timeFormatted} • 💰 ${priceFormatted} • ⏰ Expira em ${expiresText}`;
+
+    // ✅ Log para debug: verificar formato do body
+    this.logger.log(`📱 [NOTIF] Título: "${title}"`);
+    this.logger.log(`📱 [NOTIF] Body formatado: "${body}"`);
 
     try {
       if (!this.app) {
