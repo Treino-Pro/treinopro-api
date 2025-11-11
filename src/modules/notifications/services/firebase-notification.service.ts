@@ -233,7 +233,7 @@ export class FirebaseNotificationService {
     // ✅ Body formatado de forma mais visual e organizada
     // Versão com quebras de linha (suportado em Android/iOS modernos)
     // Formato multi-linha:
-    // "👤 João Silva
+    // "👤 João Silvagita
     //  📍 Smart Fit
     //  🕐 14:00 • 💰 R$ 80,00
     //  ⏰ Expira em 2min"

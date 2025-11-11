@@ -1351,6 +1351,26 @@ export class ProposalsService {
         })
         .where(eq(proposals.id, id));
 
+      // Buscar dados do usuário para incluir na resposta (dentro da transação)
+      const [student] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.id, acceptedProposal.studentId))
+        .limit(1);
+
+      // Retornar resultado da transação
+      return await this.mapToResponseDto(acceptedProposal, student);
+    } catch (error) {
+      console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
+      // Se falhar, reverter status da proposta dentro da transação
+      await tx
+        .update(proposals)
+        .set({
+          status: ProposalStatus.PENDING,
+          updatedAt: new Date(),
+        })
+        .where(eq(proposals.id, id));
+
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar aula';
       throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
     }
