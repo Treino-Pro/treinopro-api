@@ -201,9 +201,11 @@ export class FirebaseNotificationService {
     }
 
     // Sanitizar dados
+    const deepLink = `treinopro://proposal/${proposal.id}`;
     const sanitizedData: Record<string, string> = {
       type: 'new_proposal',
       proposalId: proposal.id,
+      deepLink: deepLink, // ✅ Deep link para abrir modal quando tocar na notificação
       studentName: proposal.studentName,
       location: proposal.location,
       time: proposal.time,

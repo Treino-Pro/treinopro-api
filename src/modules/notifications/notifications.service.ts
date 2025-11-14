@@ -3,7 +3,7 @@ import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { users } from '../../database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 
 export interface NotificationData {
   userId: string;
@@ -336,6 +336,69 @@ export class NotificationsService {
     );
   }
 
+  /**
+   * Enviar notificação de nova proposta para personal trainer
+   * Busca token FCM do banco e envia push notification
+   */
+  async sendProposalNotificationToPersonal(
+    personalId: string,
+    proposalData: {
+      proposalId: string;
+      studentName: string;
+      location: string;
+      time: string;
+      date?: string;
+      modality: string;
+      price: number;
+      expiresIn: number;
+    },
+  ): Promise<void> {
+    try {
+      // Buscar token FCM do banco
+      const tokens = await this.getUserPushTokens(personalId);
+
+      if (tokens.length === 0) {
+        this.logger.warn(
+          `⚠️ Personal ${personalId} não possui token FCM - notificação não enviada`,
+        );
+        return;
+      }
+
+      // Enviar push notification usando PushNotificationService
+      await this.pushService.sendProposalMatchNotification(tokens, {
+        id: proposalData.proposalId,
+        studentName: proposalData.studentName,
+        location: proposalData.location,
+        time: proposalData.time,
+        date: proposalData.date,
+        modality: proposalData.modality,
+        price: proposalData.price,
+        expiresIn: proposalData.expiresIn,
+      });
+
+      // Também criar notificação in-app
+      await this.sendInAppNotification(personalId, 'proposal-match', {
+        proposalId: proposalData.proposalId,
+        studentName: proposalData.studentName,
+        location: proposalData.location,
+        date: proposalData.date,
+        time: proposalData.time,
+        price: proposalData.price,
+        modality: proposalData.modality,
+      });
+
+      this.logger.log(
+        `✅ Notificação de proposta enviada para personal ${personalId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao enviar notificação de proposta para personal ${personalId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   async sendPaymentConfirmationNotification(
     userId: string,
     paymentData: any,
@@ -420,9 +483,71 @@ export class NotificationsService {
   }
 
   private async getUserPushTokens(userId: string): Promise<string[]> {
-    // TODO: Implementar tabela de push tokens
-    // Por enquanto, retornar array vazio para desenvolvimento
-    return [];
+    try {
+      const [user] = await this.db
+        .select({
+          fcmToken: users.fcmToken,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      // Retornar array com token se existir, ou array vazio
+      if (user?.fcmToken) {
+        return [user.fcmToken];
+      }
+
+      this.logger.warn(
+        `⚠️ Usuário ${userId} não possui token FCM no banco de dados`,
+      );
+      return [];
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao buscar token FCM do usuário ${userId}:`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Buscar tokens FCM de múltiplos usuários
+   * Útil para enviar notificações em massa (ex: proposta para vários personais)
+   */
+  async getUsersPushTokens(userIds: string[]): Promise<string[]> {
+    try {
+      if (userIds.length === 0) {
+        return [];
+      }
+
+      const usersWithTokens = await this.db
+        .select({
+          fcmToken: users.fcmToken,
+        })
+        .from(users)
+        .where(
+          and(
+            inArray(users.id, userIds),
+            sql`${users.fcmToken} IS NOT NULL`,
+          ),
+        );
+
+      const tokens = usersWithTokens
+        .map((user) => user.fcmToken)
+        .filter((token): token is string => Boolean(token));
+
+      this.logger.log(
+        `📱 Encontrados ${tokens.length} tokens FCM de ${userIds.length} usuários`,
+      );
+
+      return tokens;
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao buscar tokens FCM de múltiplos usuários:`,
+        error,
+      );
+      return [];
+    }
   }
 
   // ===== MÉTODOS ESPECÍFICOS PARA IN-APP =====
