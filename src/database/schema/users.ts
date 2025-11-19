@@ -77,6 +77,11 @@ export const users = pgTable('users', {
   // Firebase Cloud Messaging
   fcmToken: text('fcm_token'),
 
+  // Campos para localização e raio de atendimento do personal
+  serviceLocationLat: decimal('service_location_lat', { precision: 10, scale: 8 }),
+  serviceLocationLng: decimal('service_location_lng', { precision: 11, scale: 8 }),
+  serviceRadiusKm: decimal('service_radius_km', { precision: 5, scale: 2 }), // até 999.99 km
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

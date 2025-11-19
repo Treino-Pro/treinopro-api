@@ -9,10 +9,12 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger, UseGuards, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { SendMessageDto, WebSocketMessageDto } from './dto/chat.dto';
+import { eq } from 'drizzle-orm';
+import { users } from '../../database/schema/users';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -47,6 +49,7 @@ export class ChatGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly chatService: ChatService,
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
   ) {}
 
   afterInit(server: Server) {
@@ -440,5 +443,48 @@ export class ChatGateway
     }
 
     return personals;
+  }
+
+  /**
+   * Handler para personal_online - atualiza localização e raio no banco
+   */
+  @SubscribeMessage('personal_online')
+  async handlePersonalOnline(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { action: string; radiusKm?: number; center?: { lat: number; lng: number } },
+  ) {
+    try {
+      if (!client.userId || client.userType !== 'personal') {
+        client.emit('error', { message: 'Apenas personals podem usar este evento' });
+        return;
+      }
+
+      if (data.action === 'set_radius' && data.center && data.radiusKm !== undefined) {
+        // Atualizar no banco de dados
+        await this.db
+          .update(users)
+          .set({
+            serviceLocationLat: data.center.lat.toString(),
+            serviceLocationLng: data.center.lng.toString(),
+            serviceRadiusKm: data.radiusKm.toString(),
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, client.userId));
+
+        this.logger.log(
+          `📍 Personal ${client.userId} atualizou localização: lat=${data.center.lat}, lng=${data.center.lng}, raio=${data.radiusKm}km`,
+        );
+
+        client.emit('personal_online_confirmed', {
+          success: true,
+          message: 'Localização e raio atualizados',
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Erro ao processar personal_online: ${error.message}`);
+      client.emit('error', {
+        message: 'Erro ao atualizar localização',
+      });
+    }
   }
 }

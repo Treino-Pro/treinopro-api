@@ -405,10 +405,52 @@ export class ProposalsService {
               continue; // Pular este personal
             }
 
-            // Adicionar para FCM (TODOS que têm token e sem conflito)
+            // Verificar se proposta está dentro do raio de atendimento do personal
+            const proposalCoords = this.extractProposalCoordinates(proposalResponse);
+            if (proposalCoords.lat && proposalCoords.lng) {
+              // Buscar localização do personal do banco
+              const [personalData] = await this.db
+                .select({
+                  serviceLocationLat: users.serviceLocationLat,
+                  serviceLocationLng: users.serviceLocationLng,
+                  serviceRadiusKm: users.serviceRadiusKm,
+                })
+                .from(users)
+                .where(eq(users.id, personalId))
+                .limit(1);
+
+              if (personalData?.serviceLocationLat && personalData?.serviceLocationLng && personalData?.serviceRadiusKm) {
+                const personalLat = parseFloat(personalData.serviceLocationLat);
+                const personalLng = parseFloat(personalData.serviceLocationLng);
+                const radiusKm = parseFloat(personalData.serviceRadiusKm);
+
+                // Calcular distância usando Haversine
+                const distanceKm = this.calculateDistanceKm(
+                  personalLat,
+                  personalLng,
+                  proposalCoords.lat,
+                  proposalCoords.lng,
+                );
+
+                if (distanceKm > radiusKm) {
+                  console.log(
+                    `📍 [PROPOSALS] Personal ${personalId} está fora do raio (${distanceKm.toFixed(2)}km > ${radiusKm}km), NÃO enviando notificação`,
+                  );
+                  continue; // Pular este personal
+                }
+              } else {
+                // Se personal não tem localização definida, não enviar (por segurança)
+                console.log(
+                  `⚠️ [PROPOSALS] Personal ${personalId} não tem localização/raio definido, NÃO enviando notificação`,
+                );
+                continue;
+              }
+            }
+
+            // Adicionar para FCM (dentro do raio e sem conflito)
             nearbyPersonalsForFCM.push(personalId);
             console.log(
-              `✅ [PROPOSALS] Personal ${personalId} SEM conflito, será notificado via FCM`,
+              `✅ [PROPOSALS] Personal ${personalId} DENTRO do raio e sem conflito, será notificado via FCM`,
             );
 
             // Se estiver conectado, também enviar via WebSocket (foreground)
@@ -2897,5 +2939,45 @@ export class ProposalsService {
       );
       return false; // Em caso de erro, não bloquear (fail-safe)
     }
+  }
+
+  /**
+   * Extrai coordenadas da proposta
+   */
+  private extractProposalCoordinates(proposal: any): { lat?: number; lng?: number } {
+    // Tentar extrair de locationLat/locationLng
+    let lat = proposal.locationLat ? parseFloat(proposal.locationLat) : undefined;
+    let lng = proposal.locationLng ? parseFloat(proposal.locationLng) : undefined;
+
+    // Se não encontrou, tentar do objeto location
+    if ((!lat || !lng) && proposal.location) {
+      lat = proposal.location.latitude || proposal.location.lat;
+      lng = proposal.location.longitude || proposal.location.lng;
+    }
+
+    return { lat, lng };
+  }
+
+  /**
+   * Calcula distância em km entre dois pontos usando fórmula de Haversine
+   */
+  private calculateDistanceKm(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
+    const R = 6371; // Raio da Terra em km
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distância em km
   }
 }
