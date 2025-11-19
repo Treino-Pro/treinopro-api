@@ -104,22 +104,17 @@ export class FirebaseNotificationService {
         }
       }
 
-      // ESTRATÉGIA HÍBRIDA: Enviar notification E data
-      // - notification: Sistema Android/iOS exibe automaticamente quando app está FECHADO/hibernando
-      // - data: App usa para criar notificação local quando aberto (com controle total)
-      // Isso garante funcionamento em TODOS os cenários: app aberto, background ou fechado
+      // ✅ ESTRATÉGIA: Enviar APENAS data
+      // - Flutter cria notificação local usando flutter_local_notifications (controle total)
+      // - Funciona em TODOS os cenários: foreground, background e terminated
+      // - Permite customização completa: som, estilo, ações, etc.
       const message: admin.messaging.Message = {
-        // ✅ ADICIONAR notification para funcionar quando app está FECHADO/hibernando
-        // Sistema Android/iOS exibe automaticamente (como Uber, YouTube, 99)
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        // ✅ Manter data para quando app está ABERTO (app cria notificação local)
+        // ❌ REMOVIDO: notification (evita duplicação)
+        // ✅ APENAS data: Flutter cria notificação local
         data: {
           ...sanitizedData,
-          title: notification.title, // Manter para compatibilidade
-          body: notification.body,   // Manter para compatibilidade
+          title: notification.title, // Para Flutter criar notificação local
+          body: notification.body,   // Para Flutter criar notificação local
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -129,28 +124,15 @@ export class FirebaseNotificationService {
           ttl: 120 * 1000, // 120 segundos em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
-          // Configurações específicas do Android
-          notification: {
-            sound: 'default',
-            channelId: 'high_importance_channel', // DEVE corresponder ao canal criado no Flutter
-            priority: 'high' as const,
-          },
+          // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
         apns: {
           payload: {
             aps: {
-              sound: 'alert_proposal.mp3',
-              contentAvailable: true,
-              // Para iOS, garantir que notificação aparece mesmo em hibernação
-              interruptionLevel: 'timeSensitive' as const,
-              badge: 1,
-              // ✅ Categoria para ações de notificação (Aceitar/Ignorar)
-              category: sanitizedData.type === 'new_proposal' ? 'PROPOSTA_ACOES' : undefined,
-              // Alert para iOS (sistema exibe automaticamente)
-              alert: {
-                title: notification.title,
-                body: notification.body,
-              },
+              contentAvailable: true, // Permite que handler de background execute
+              // ❌ REMOVIDO: alert (Flutter cria notificação local)
+              // ❌ REMOVIDO: sound (Flutter configura som)
+              // ❌ REMOVIDO: badge (Flutter gerencia badge)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
@@ -254,15 +236,16 @@ export class FirebaseNotificationService {
         return null;
       }
 
+      // ✅ ESTRATÉGIA: Enviar APENAS data
+      // - Flutter cria notificação local usando flutter_local_notifications
+      // - Evita duplicação e permite customização completa
       const message: admin.messaging.Message = {
-        notification: {
-          title,
-          body,
-        },
+        // ❌ REMOVIDO: notification (evita duplicação)
+        // ✅ APENAS data: Flutter cria notificação local com controle total
         data: {
           ...sanitizedData,
-          title,
-          body,
+          title, // Para Flutter criar notificação local
+          body,  // Para Flutter criar notificação local
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -273,25 +256,13 @@ export class FirebaseNotificationService {
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          notification: {
-            sound: 'default',
-            channelId: 'high_importance_channel',
-            priority: 'high' as const,
-          },
+          // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
         apns: {
           payload: {
             aps: {
-              sound: 'alert_proposal.mp3',
-              contentAvailable: true,
-              interruptionLevel: 'timeSensitive' as const,
-              badge: 1,
-              // ✅ Categoria para ações de notificação iOS
-              category: 'PROPOSTA_ACOES',
-              alert: {
-                title,
-                body,
-              },
+              contentAvailable: true, // Permite que handler de background execute
+              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key)
             threadId: `proposta_${proposal.id}`,
