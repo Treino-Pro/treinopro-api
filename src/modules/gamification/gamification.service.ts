@@ -10,6 +10,7 @@ import { Queue } from 'bull';
 import { randomUUID } from 'crypto';
 import { eq, and, desc, gte, lte, count, sql, or, isNull } from 'drizzle-orm';
 import { ChatGateway } from '../chat/chat.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   userProfiles,
   missions,
@@ -58,6 +59,7 @@ export class GamificationService {
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
     @InjectQueue('gamification-events') private readonly eventsQueue: Queue,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // Deduplicação simples de eventos emitidos neste processo (TTL curto)
@@ -929,6 +931,19 @@ export class GamificationService {
         this.logger.log(
           `🎯 [GAMIFICATION] Evento WebSocket emitido com sucesso`,
         );
+
+        // Criar notificação in-app para missão completada
+        try {
+          await this.notificationsService.sendInAppNotification(userId, 'mission-completed', {
+            missionId: userMission.missions.id,
+            title: userMission.missions.title,
+            xpReward: userMission.missions.xpReward,
+          });
+          this.logger.log(`🔔 [GAMIFICATION] Notificação in-app criada para missão completada`);
+        } catch (error) {
+          this.logger.error(`❌ [GAMIFICATION] Erro ao criar notificação in-app:`, error);
+          // Não bloquear o fluxo se notificação falhar
+        }
 
         // Atribuir próxima missão automaticamente
         this.logger.log(`🎯 [GAMIFICATION] Atribuindo próxima missão...`);

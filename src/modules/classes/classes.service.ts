@@ -19,6 +19,7 @@ import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
 import { RatingsService } from '../ratings/ratings.service';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateClassDto,
   UpdateClassDto,
@@ -45,6 +46,7 @@ export class ClassesService {
     private readonly paymentsService: PaymentsService,
     private readonly ratingsService: RatingsService,
     private readonly firebaseNotificationService: FirebaseNotificationService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createClass(
@@ -481,9 +483,10 @@ export class ClassesService {
             '✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService',
           );
 
-          // Enviar notificação push para personal sobre repasse
+          // Enviar notificação push e in-app para personal sobre repasse
           try {
             const personalAmount = payment.personalAmount || 0;
+            // Enviar push notification
             await this.firebaseNotificationService.sendToUser(userId, {
               title: '💰 Repasse Realizado',
               body: `R$ ${personalAmount.toFixed(2)} foi transferido para sua carteira`,
@@ -493,6 +496,12 @@ export class ClassesService {
                 amount: personalAmount.toString(),
                 description: `Repasse da aula ${classData.date}`,
               },
+            });
+            // Criar notificação in-app
+            await this.notificationsService.sendInAppNotification(userId, 'payment-received', {
+              classId: id,
+              amount: personalAmount.toFixed(2),
+              description: `Repasse da aula ${classData.date}`,
             });
             console.log('✅ [COMPLETE_CLASS] Notificação de repasse enviada');
           } catch (error) {

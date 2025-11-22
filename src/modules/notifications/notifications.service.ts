@@ -302,6 +302,18 @@ export class NotificationsService {
         await this.inAppService.createDisputeUpdateNotification(userId, data);
         break;
 
+      case 'dispute-created':
+        await this.inAppService.createDisputeCreatedNotification(userId, data);
+        break;
+
+      case 'payment-received':
+        await this.inAppService.createPaymentReceivedNotification(userId, data);
+        break;
+
+      case 'mission-completed':
+        await this.inAppService.createMissionCompletedNotification(userId, data);
+        break;
+
       default:
         // Template genérico
         await this.inAppService.createNotification(

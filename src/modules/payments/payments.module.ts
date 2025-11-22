@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsController } from './payments.controller';
 import { PaymentsHealthController } from './payments-health.controller';
 import { WebhooksController } from './webhooks.controller';
@@ -14,7 +15,7 @@ import { ErrorHandlerService } from './error-handler.service';
 import { PaymentSimulationService } from './payment-simulation.service';
 
 @Module({
-  imports: [DatabaseModule, AuthModule],
+  imports: [DatabaseModule, AuthModule, NotificationsModule],
   controllers: [
     PaymentsController,
     WebhooksController,

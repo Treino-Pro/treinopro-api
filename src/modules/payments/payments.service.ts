@@ -22,6 +22,7 @@ import {
   MercadoPagoService,
   CreatePreferenceData,
 } from './mercadopago.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreatePaymentDto,
   CreatePaymentPreferenceDto,
@@ -55,6 +56,7 @@ export class PaymentsService {
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly mercadoPagoService: MercadoPagoService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // Criar preferência de pagamento no Mercado Pago
@@ -462,6 +464,25 @@ export class PaymentsService {
 
     // Atualizar status do pagamento para disputado
     await this.updatePaymentStatus(createDto.paymentId, PaymentStatus.DISPUTED);
+
+    // Criar notificação in-app para o outro usuário (que não criou a disputa)
+    try {
+      const otherUserId = payment.studentId === userId ? payment.personalId : payment.studentId;
+      const classData = await this.db.query.classes.findFirst({
+        where: eq(classes.id, payment.classId),
+      });
+      
+      await this.notificationsService.sendInAppNotification(otherUserId, 'dispute-created', {
+        disputeId: newDispute.id,
+        classId: payment.classId,
+        paymentId: createDto.paymentId,
+        reason: createDto.reason,
+        message: `Uma disputa foi criada sobre sua aula${classData ? ` de ${classData.date}` : ''}`,
+      });
+    } catch (error) {
+      console.error('❌ Erro ao criar notificação in-app de disputa:', error);
+      // Não bloquear a criação da disputa se notificação falhar
+    }
 
     return this.formatDisputeResponse(newDispute);
   }

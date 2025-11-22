@@ -15,12 +15,14 @@ import {
   ChatStatsDto,
 } from './dto/chat.dto';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ChatService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly firebaseNotificationService: FirebaseNotificationService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async sendMessage(
@@ -104,7 +106,7 @@ export class ChatService {
 
     const messageResponse = messageWithUsers[0] as MessageResponseDto;
 
-    // Enviar notificação push para destinatário
+    // Enviar notificação push e in-app para destinatário
     try {
       const senderName = (messageResponse.sender as any)?.name || 'Alguém';
       const messagePreview =
@@ -112,6 +114,7 @@ export class ChatService {
           ? messageText.substring(0, 50) + '...'
           : messageText;
 
+      // Enviar push notification
       await this.firebaseNotificationService.sendToUser(receiverId, {
         title: `💬 ${senderName}`,
         body: messagePreview,
@@ -124,9 +127,17 @@ export class ChatService {
           messagePreview,
         },
       });
+
+      // Criar notificação in-app
+      await this.notificationsService.sendInAppNotification(receiverId, 'new-message', {
+        senderId: userId,
+        senderName: senderName,
+        classId: classId,
+        messagePreview: messagePreview,
+      });
     } catch (error) {
-      console.error('❌ Erro ao enviar notificação push de mensagem:', error);
-      // Não bloquear o envio da mensagem se push falhar
+      console.error('❌ Erro ao enviar notificação de mensagem:', error);
+      // Não bloquear o envio da mensagem se notificação falhar
     }
 
     return messageResponse;

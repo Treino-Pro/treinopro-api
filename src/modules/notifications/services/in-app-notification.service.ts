@@ -321,6 +321,64 @@ export class InAppNotificationService {
     );
   }
 
+  async createDisputeCreatedNotification(
+    userId: string,
+    disputeData: any,
+  ): Promise<InAppNotification> {
+    return this.createNotification(
+      userId,
+      '⚖️ Nova Disputa',
+      disputeData.message || 'Uma disputa foi criada sobre sua aula',
+      'warning',
+      {
+        type: 'dispute_created',
+        disputeId: disputeData.disputeId,
+        classId: disputeData.classId,
+        paymentId: disputeData.paymentId,
+        reason: disputeData.reason,
+        action: 'view_dispute',
+      },
+    );
+  }
+
+  async createPaymentReceivedNotification(
+    userId: string,
+    paymentData: any,
+  ): Promise<InAppNotification> {
+    return this.createNotification(
+      userId,
+      '💰 Repasse Realizado',
+      `R$ ${paymentData.amount} foi transferido para sua carteira`,
+      'success',
+      {
+        type: 'payment_received',
+        classId: paymentData.classId,
+        amount: paymentData.amount,
+        description: paymentData.description,
+        action: 'view_class',
+      },
+    );
+  }
+
+  async createMissionCompletedNotification(
+    userId: string,
+    missionData: any,
+  ): Promise<InAppNotification> {
+    return this.createNotification(
+      userId,
+      '🎯 Missão Concluída!',
+      `Você completou a missão "${missionData.title}" e ganhou ${missionData.xpReward} XP!`,
+      'success',
+      {
+        type: 'mission_completed',
+        missionId: missionData.missionId,
+        title: missionData.title,
+        xpReward: missionData.xpReward,
+        action: 'view_profile',
+      },
+    );
+  }
+
   // ===== NOTIFICAÇÕES ADMINISTRATIVAS =====
 
   async createSystemMaintenanceNotification(
