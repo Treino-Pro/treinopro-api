@@ -104,42 +104,53 @@ export class FirebaseNotificationService {
         }
       }
 
-      // ✅ ESTRATÉGIA: Enviar APENAS data
-      // - Flutter cria notificação local usando flutter_local_notifications (controle total)
+      // ✅ ESTRATÉGIA: Enviar notification + data
+      // - notification: Firebase mostra automaticamente quando app está em background/terminated
+      // - data: Flutter recebe quando app está em foreground e pode criar notificação local
       // - Funciona em TODOS os cenários: foreground, background e terminated
-      // - Permite customização completa: som, estilo, ações, etc.
       const message: admin.messaging.Message = {
-        // ❌ REMOVIDO: notification (evita duplicação)
-        // ✅ APENAS data: Flutter cria notificação local
+        // ✅ notification: Firebase mostra automaticamente em background/terminated
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        // ✅ data: Flutter recebe em foreground e pode processar
         data: {
           ...sanitizedData,
-          title: notification.title, // Para Flutter criar notificação local
-          body: notification.body,   // Para Flutter criar notificação local
+          title: notification.title, // Para Flutter criar notificação local se necessário
+          body: notification.body,   // Para Flutter criar notificação local se necessário
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
-          // ✅ TTL: 120 segundos (2 minutos) - notificações expiram após esse tempo
-          ttl: 120 * 1000, // 120 segundos em milissegundos
+          // ✅ TTL aumentado para 24h para sobreviver a ciclos de Doze/App Standby
+          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
-          // ❌ REMOVIDO: notification (Flutter cria notificação local)
+          notification: {
+            icon: '@mipmap/ic_launcher',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+          },
         },
         apns: {
           payload: {
             aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
+              },
+              sound: 'default',
+              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
-              // ❌ REMOVIDO: alert (Flutter cria notificação local)
-              // ❌ REMOVIDO: sound (Flutter configura som)
-              // ❌ REMOVIDO: badge (Flutter gerencia badge)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
           },
           headers: {
-            // ✅ APNS Expiration: 120 segundos a partir de agora
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
+            // ✅ APNS Expiration alinhado com Android (24h)
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 24 * 60 * 60),
             // ✅ APNS Priority: 10 (alta prioridade)
             'apns-priority': '10',
           },
@@ -251,8 +262,8 @@ export class FirebaseNotificationService {
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
-          // ✅ TTL: 120 segundos (2 minutos)
-          ttl: 120 * 1000,
+          // ✅ TTL alinhado com demais notificações (24h)
+          ttl: 24 * 60 * 60 * 1000,
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
@@ -268,8 +279,8 @@ export class FirebaseNotificationService {
             threadId: `proposta_${proposal.id}`,
           },
           headers: {
-            // ✅ APNS Expiration: 120 segundos
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
+            // ✅ APNS Expiration alinhado (24h)
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 24 * 60 * 60),
             'apns-priority': '10',
           },
         },

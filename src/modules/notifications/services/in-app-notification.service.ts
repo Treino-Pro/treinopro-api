@@ -54,10 +54,16 @@ export class InAppNotificationService {
     userId: string,
     limit: number = 50,
   ): Promise<InAppNotification[]> {
-    return this.notifications
+    const userNotifications = this.notifications
       .filter((n) => n.userId === userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
+    
+    this.logger.log(
+      `📋 [IN_APP] Buscando notificações para usuário ${userId}: ${this.notifications.length} total, ${userNotifications.length} do usuário`,
+    );
+    
+    return userNotifications;
   }
 
   async getUnreadNotifications(userId: string): Promise<InAppNotification[]> {
@@ -67,8 +73,14 @@ export class InAppNotificationService {
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    return this.notifications.filter((n) => n.userId === userId && !n.isRead)
+    const count = this.notifications.filter((n) => n.userId === userId && !n.isRead)
       .length;
+    
+    this.logger.log(
+      `📊 [IN_APP] Contador de não lidas para usuário ${userId}: ${count} (total de notificações: ${this.notifications.length})`,
+    );
+    
+    return count;
   }
 
   async markAsRead(notificationId: string, userId: string): Promise<void> {

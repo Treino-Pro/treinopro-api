@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -15,7 +15,7 @@ import { ErrorHandlerService } from './error-handler.service';
 import { PaymentSimulationService } from './payment-simulation.service';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, NotificationsModule],
+  imports: [DatabaseModule, AuthModule, forwardRef(() => NotificationsModule)],
   controllers: [
     PaymentsController,
     WebhooksController,
