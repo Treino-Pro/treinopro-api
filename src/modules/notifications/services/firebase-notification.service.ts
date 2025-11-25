@@ -123,15 +123,16 @@ export class FirebaseNotificationService {
         },
         token: user.fcmToken,
         android: {
-          priority: 'high' as const,
-          // ✅ TTL: 120 segundos (2 minutos) - notificações expiram após esse tempo
-          ttl: 120 * 1000, // 120 segundos em milissegundos
+          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
+          // ✅ TTL: 24 horas (86400 segundos) - aumentar para garantir entrega mesmo com Doze Mode
+          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
           notification: {
-            icon: '@mipmap/ic_launcher',
+            icon: '@mipmap/launcher_icon',
             sound: 'default',
             channelId: 'high_importance_channel',
+            priority: 'high' as const, // ✅ Garantir prioridade alta também na notificação
           },
         },
         apns: {
@@ -149,8 +150,8 @@ export class FirebaseNotificationService {
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
           },
           headers: {
-            // ✅ APNS Expiration: 120 segundos a partir de agora
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
+            // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
             // ✅ APNS Priority: 10 (alta prioridade)
             'apns-priority': '10',
           },
@@ -247,41 +248,60 @@ export class FirebaseNotificationService {
         return null;
       }
 
-      // ✅ ESTRATÉGIA: Enviar APENAS data
-      // - Flutter cria notificação local usando flutter_local_notifications
-      // - Evita duplicação e permite customização completa
+      // ✅ CORREÇÃO CRÍTICA: Enviar notification + data (não apenas data)
+      // - notification: Google Play Services mostra automaticamente quando app está morto/background
+      // - data: Flutter recebe quando app está em foreground e pode criar notificação local
+      // - Funciona em TODOS os cenários: foreground, background e terminated
+      // - priority: 'high' garante que passe pelo Doze Mode
       const message: admin.messaging.Message = {
-        // ❌ REMOVIDO: notification (evita duplicação)
-        // ✅ APENAS data: Flutter cria notificação local com controle total
+        // ✅ ADICIONAR: notification para garantir que apareça mesmo quando app está morto
+        // Google Play Services (que nunca morre) exibe esta notificação automaticamente
+        notification: {
+          title: title,
+          body: body,
+        },
+        // ✅ data: Flutter recebe em foreground e pode processar
         data: {
           ...sanitizedData,
-          title, // Para Flutter criar notificação local
-          body,  // Para Flutter criar notificação local
+          title, // Para Flutter criar notificação local se necessário
+          body,  // Para Flutter criar notificação local se necessário
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
         android: {
-          priority: 'high' as const,
-          // ✅ TTL: 120 segundos (2 minutos)
-          ttl: 120 * 1000,
+          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
+          // ✅ TTL: 24 horas (86400 segundos) - aumentar para garantir entrega mesmo com Doze Mode
+          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          // ❌ REMOVIDO: notification (Flutter cria notificação local)
+          // ✅ ADICIONAR: notification para Android também
+          notification: {
+            icon: '@mipmap/launcher_icon',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+            priority: 'high' as const,
+          },
         },
         apns: {
           payload: {
             aps: {
+              // ✅ ADICIONAR: alert para iOS mostrar notificação
+              alert: {
+                title: title,
+                body: body,
+              },
+              sound: 'default',
+              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
-              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key)
             threadId: `proposta_${proposal.id}`,
           },
           headers: {
-            // ✅ APNS Expiration: 120 segundos
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
-            'apns-priority': '10',
+            // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
+            'apns-priority': '10', // ✅ Alta prioridade
           },
         },
       };
