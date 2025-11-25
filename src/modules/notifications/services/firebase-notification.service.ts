@@ -124,8 +124,8 @@ export class FirebaseNotificationService {
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
-          // ✅ TTL aumentado para 24h para sobreviver a ciclos de Doze/App Standby
-          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
+          // ✅ TTL: 120 segundos (2 minutos) - notificações expiram após esse tempo
+          ttl: 120 * 1000, // 120 segundos em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
           notification: {
@@ -149,8 +149,8 @@ export class FirebaseNotificationService {
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
           },
           headers: {
-            // ✅ APNS Expiration alinhado com Android (24h)
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 24 * 60 * 60),
+            // ✅ APNS Expiration: 120 segundos a partir de agora
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
             // ✅ APNS Priority: 10 (alta prioridade)
             'apns-priority': '10',
           },
@@ -262,8 +262,8 @@ export class FirebaseNotificationService {
         token: user.fcmToken,
         android: {
           priority: 'high' as const,
-          // ✅ TTL alinhado com demais notificações (24h)
-          ttl: 24 * 60 * 60 * 1000,
+          // ✅ TTL: 120 segundos (2 minutos)
+          ttl: 120 * 1000,
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
@@ -279,8 +279,8 @@ export class FirebaseNotificationService {
             threadId: `proposta_${proposal.id}`,
           },
           headers: {
-            // ✅ APNS Expiration alinhado (24h)
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + 24 * 60 * 60),
+            // ✅ APNS Expiration: 120 segundos
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + 120),
             'apns-priority': '10',
           },
         },
