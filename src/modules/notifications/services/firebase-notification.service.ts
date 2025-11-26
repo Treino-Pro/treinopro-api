@@ -104,47 +104,35 @@ export class FirebaseNotificationService {
         }
       }
 
-      // ✅ ESTRATÉGIA: Enviar notification + data
-      // - notification: Firebase mostra automaticamente quando app está em background/terminated
-      // - data: Flutter recebe quando app está em foreground e pode criar notificação local
-      // - Funciona em TODOS os cenários: foreground, background e terminated
+      // ✅ ESTRATÉGIA: Enviar APENAS data (não notification)
+      // - Flutter SEMPRE cria notificação local usando flutter_local_notifications
+      // - firebaseBackgroundMessageHandler SEMPRE é chamado quando há apenas data
+      // - Flutter tem controle total sobre estilo, som, ações, etc.
+      // - priority: 'high' garante que passe pelo Doze Mode
+      // - TTL: 24 horas garante entrega mesmo com atrasos
       const message: admin.messaging.Message = {
-        // ✅ notification: Firebase mostra automaticamente em background/terminated
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        // ✅ data: Flutter recebe em foreground e pode processar
+        // ✅ APENAS data: Flutter cria notificação local com controle total
+        // Isso garante que firebaseBackgroundMessageHandler sempre seja chamado
         data: {
           ...sanitizedData,
-          title: notification.title, // Para Flutter criar notificação local se necessário
-          body: notification.body,   // Para Flutter criar notificação local se necessário
+          title: notification.title, // Para Flutter criar notificação local
+          body: notification.body,   // Para Flutter criar notificação local
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
         android: {
           priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
-          // ✅ TTL: 24 horas (86400 segundos) - aumentar para garantir entrega mesmo com Doze Mode
+          // ✅ TTL: 24 horas (86400 segundos) - garantir entrega mesmo com Doze Mode
           ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
-          notification: {
-            icon: '@mipmap/launcher_icon',
-            sound: 'default',
-            channelId: 'high_importance_channel',
-            priority: 'high' as const, // ✅ Garantir prioridade alta também na notificação
-          },
+          // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
         apns: {
           payload: {
             aps: {
-              alert: {
-                title: notification.title,
-                body: notification.body,
-              },
-              sound: 'default',
-              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
+              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
@@ -248,52 +236,36 @@ export class FirebaseNotificationService {
         return null;
       }
 
-      // ✅ CORREÇÃO CRÍTICA: Enviar notification + data (não apenas data)
-      // - notification: Google Play Services mostra automaticamente quando app está morto/background
-      // - data: Flutter recebe quando app está em foreground e pode criar notificação local
-      // - Funciona em TODOS os cenários: foreground, background e terminated
+      // ✅ ESTRATÉGIA: Enviar APENAS data (não notification)
+      // - Flutter SEMPRE cria notificação local usando flutter_local_notifications
+      // - firebaseBackgroundMessageHandler SEMPRE é chamado quando há apenas data
+      // - Flutter tem controle total sobre estilo, som, ações, etc.
       // - priority: 'high' garante que passe pelo Doze Mode
+      // - TTL: 24 horas garante entrega mesmo com atrasos
       const message: admin.messaging.Message = {
-        // ✅ ADICIONAR: notification para garantir que apareça mesmo quando app está morto
-        // Google Play Services (que nunca morre) exibe esta notificação automaticamente
-        notification: {
-          title: title,
-          body: body,
-        },
-        // ✅ data: Flutter recebe em foreground e pode processar
+        // ✅ APENAS data: Flutter cria notificação local com controle total
+        // Isso garante que firebaseBackgroundMessageHandler sempre seja chamado
         data: {
           ...sanitizedData,
-          title, // Para Flutter criar notificação local se necessário
-          body,  // Para Flutter criar notificação local se necessário
+          title, // Para Flutter criar notificação local
+          body,  // Para Flutter criar notificação local
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
         android: {
           priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
-          // ✅ TTL: 24 horas (86400 segundos) - aumentar para garantir entrega mesmo com Doze Mode
+          // ✅ TTL: 24 horas (86400 segundos) - garantir entrega mesmo com Doze Mode
           ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          // ✅ ADICIONAR: notification para Android também
-          notification: {
-            icon: '@mipmap/launcher_icon',
-            sound: 'default',
-            channelId: 'high_importance_channel',
-            priority: 'high' as const,
-          },
+          // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
         apns: {
           payload: {
             aps: {
-              // ✅ ADICIONAR: alert para iOS mostrar notificação
-              alert: {
-                title: title,
-                body: body,
-              },
-              sound: 'default',
-              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
+              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key)
             threadId: `proposta_${proposal.id}`,
