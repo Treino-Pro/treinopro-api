@@ -126,6 +126,12 @@ export class FirebaseNotificationService {
           ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
+          // ✅ CRÍTICO: collapseKey para agrupar notificações e evitar perda em Doze Mode
+          collapseKey: sanitizedData.type === 'new_message' 
+            ? `message_${sanitizedData.classId || 'default'}` 
+            : sanitizedData.proposalId 
+              ? `proposal_${sanitizedData.proposalId}` 
+              : 'default',
           // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
         apns: {
