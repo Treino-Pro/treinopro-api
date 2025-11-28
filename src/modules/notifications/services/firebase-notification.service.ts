@@ -208,19 +208,23 @@ export class FirebaseNotificationService {
         }
       }
 
-      // ✅ ESTRATÉGIA: Enviar APENAS data (não notification)
-      // - Flutter SEMPRE cria notificação local usando flutter_local_notifications
-      // - firebaseBackgroundMessageHandler SEMPRE é chamado quando há apenas data
-      // - Flutter tem controle total sobre estilo, som, ações, etc.
+      // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data
+      // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
+      // - data: Permite que Flutter processe e customize quando handler executar
       // - priority: 'high' garante que passe pelo Doze Mode
       // - TTL: 24 horas garante entrega mesmo com atrasos
+      // - Esta abordagem garante entrega imediata E customização quando possível
       const message: admin.messaging.Message = {
-        // ✅ APENAS data: Flutter cria notificação local com controle total
-        // Isso garante que firebaseBackgroundMessageHandler sempre seja chamado
+        // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        // ✅ data: Flutter processa e customiza quando handler executar
         data: {
           ...sanitizedData,
-          title: notification.title, // Para Flutter criar notificação local
-          body: notification.body,   // Para Flutter criar notificação local
+          title: notification.title, // Para Flutter criar notificação local customizada
+          body: notification.body,   // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -236,13 +240,31 @@ export class FirebaseNotificationService {
             : sanitizedData.proposalId
               ? `proposal_${sanitizedData.proposalId}`
               : 'default',
-          // ❌ REMOVIDO: notification (Flutter cria notificação local)
+          // ✅ notification: Garante exibição imediata no Android
+          notification: {
+            title: notification.title,
+            body: notification.body,
+            icon: 'ic_notification',
+            color: '#4CAF50',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+            priority: 'high' as const,
+            visibility: 'public' as const,
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
         },
         apns: {
           payload: {
             aps: {
+              // ✅ alert: iOS mostra notificação imediatamente
+              alert: {
+                title: notification.title,
+                body: notification.body,
+              },
+              sound: 'default',
+              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
-              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
             threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
@@ -348,19 +370,23 @@ export class FirebaseNotificationService {
         return null;
       }
 
-      // ✅ ESTRATÉGIA: Enviar APENAS data (não notification)
-      // - Flutter SEMPRE cria notificação local usando flutter_local_notifications
-      // - firebaseBackgroundMessageHandler SEMPRE é chamado quando há apenas data
-      // - Flutter tem controle total sobre estilo, som, ações, etc.
+      // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data
+      // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
+      // - data: Permite que Flutter processe e customize quando handler executar
       // - priority: 'high' garante que passe pelo Doze Mode
       // - TTL: 24 horas garante entrega mesmo com atrasos
+      // - Esta abordagem garante entrega imediata E customização quando possível
       const message: admin.messaging.Message = {
-        // ✅ APENAS data: Flutter cria notificação local com controle total
-        // Isso garante que firebaseBackgroundMessageHandler sempre seja chamado
+        // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
+        notification: {
+          title: title,
+          body: body,
+        },
+        // ✅ data: Flutter processa e customiza quando handler executar
         data: {
           ...sanitizedData,
-          title, // Para Flutter criar notificação local
-          body,  // Para Flutter criar notificação local
+          title, // Para Flutter criar notificação local customizada
+          body,  // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -371,13 +397,32 @@ export class FirebaseNotificationService {
           // ✅ Collapse Key: agrupa notificações da mesma proposta
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          // ❌ REMOVIDO: notification (Flutter cria notificação local)
+          // ✅ notification: Garante exibição imediata no Android
+          notification: {
+            title: title,
+            body: body,
+            icon: 'ic_notification',
+            color: '#FF6A00', // Laranja do TreinoPro
+            sound: 'default',
+            channelId: 'proposal_channel', // Canal específico para propostas
+            priority: 'high' as const,
+            visibility: 'public' as const,
+            // ✅ Full-screen intent para aparecer mesmo com tela bloqueada
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
         },
         apns: {
           payload: {
             aps: {
+              // ✅ alert: iOS mostra notificação imediatamente
+              alert: {
+                title: title,
+                body: body,
+              },
+              sound: 'default',
+              badge: 1,
               contentAvailable: true, // Permite que handler de background execute
-              // ❌ REMOVIDO: alert, sound, badge (Flutter cria notificação local)
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key)
             threadId: `proposta_${proposal.id}`,
@@ -528,28 +573,57 @@ export class FirebaseNotificationService {
         }
       }
 
+      // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data (igual ao sendToUser)
+      // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
+      // - data: Permite que Flutter processe e customize quando handler executar
       const message: admin.messaging.Message = {
-        data: {
-          ...sanitizedData,
+        // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
+        notification: {
           title: item.notification.title,
           body: item.notification.body,
+        },
+        // ✅ data: Flutter processa e customiza quando handler executar
+        data: {
+          ...sanitizedData,
+          title: item.notification.title, // Para Flutter criar notificação local customizada
+          body: item.notification.body,   // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
         android: {
-          priority: 'high' as const,
-          ttl: 24 * 60 * 60 * 1000,
+          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
+          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
           directBootOk: true,
+          // ✅ notification: Garante exibição imediata no Android
+          notification: {
+            title: item.notification.title,
+            body: item.notification.body,
+            icon: 'ic_notification',
+            color: '#4CAF50',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+            priority: 'high' as const,
+            visibility: 'public' as const,
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          },
         },
         apns: {
           payload: {
             aps: {
-              contentAvailable: true,
+              // ✅ alert: iOS mostra notificação imediatamente
+              alert: {
+                title: item.notification.title,
+                body: item.notification.body,
+              },
+              sound: 'default',
+              badge: 1,
+              contentAvailable: true, // Permite que handler de background execute
             },
           },
           headers: {
             'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
-            'apns-priority': '10',
+            'apns-priority': '10', // ✅ Alta prioridade
           },
         },
       };
