@@ -13,6 +13,7 @@ export * from './gamification';
 export * from './email-verifications';
 export * from './files';
 export * from './nonces';
+export * from './notifications';
 
 // Export all enums
 export * from './users';

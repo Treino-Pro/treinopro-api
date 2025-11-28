@@ -71,6 +71,110 @@ export class FirebaseNotificationService {
   }
 
   /**
+   * Delay helper para retry logic
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Verifica se o erro é recuperável e deve ser retentado
+   */
+  private isRecoverableError(error: any): boolean {
+    const recoverableCodes = [
+      'messaging/internal-error',
+      'messaging/server-unavailable',
+      'messaging/timeout',
+      'messaging/quota-exceeded',
+    ];
+
+    return error?.code && recoverableCodes.includes(error.code);
+  }
+
+  /**
+   * Remove token FCM inválido do banco de dados
+   */
+  private async clearInvalidToken(userId: string): Promise<void> {
+    try {
+      await this.db
+        .update(users)
+        .set({ fcmToken: null })
+        .where(eq(users.id, userId));
+
+      this.logger.warn(`🗑️ Token FCM inválido removido para usuário ${userId}`);
+    } catch (error) {
+      this.logger.error(`Erro ao remover token inválido para ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Trata erros de envio de notificação
+   */
+  private async handleSendError(error: any, userId: string): Promise<void> {
+    const errorCode = error?.code;
+
+    // Tokens inválidos ou não registrados devem ser removidos
+    if (
+      errorCode === 'messaging/invalid-registration-token' ||
+      errorCode === 'messaging/registration-token-not-registered'
+    ) {
+      this.logger.warn(
+        `❌ Token inválido detectado para usuário ${userId}: ${errorCode}`,
+      );
+      await this.clearInvalidToken(userId);
+    } else if (errorCode === 'messaging/invalid-argument') {
+      this.logger.error(
+        `❌ Argumento inválido ao enviar notificação para ${userId}:`,
+        error.message,
+      );
+    } else {
+      this.logger.error(
+        `❌ Erro ao enviar notificação para ${userId}:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Envia mensagem FCM com retry automático em caso de falha recuperável
+   */
+  private async sendWithRetry(
+    message: admin.messaging.Message,
+    userId: string,
+    maxRetries: number = 3,
+  ): Promise<string | null> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await admin.messaging().send(message);
+
+        if (attempt > 1) {
+          this.logger.log(
+            `✅ Notificação enviada com sucesso após ${attempt} tentativas para ${userId}`,
+          );
+        }
+
+        return response;
+      } catch (error) {
+        // Se é a última tentativa ou erro não é recuperável, trata o erro
+        if (attempt === maxRetries || !this.isRecoverableError(error)) {
+          await this.handleSendError(error, userId);
+          return null;
+        }
+
+        // Erro recuperável - aguardar com exponential backoff antes de retentar
+        const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+        this.logger.warn(
+          `⚠️ Tentativa ${attempt}/${maxRetries} falhou para ${userId}. ` +
+          `Retentando em ${delayMs}ms... Erro: ${error.code}`,
+        );
+        await this.delay(delayMs);
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Enviar notificação push para um usuário específico
    */
   async sendToUser(
@@ -127,10 +231,10 @@ export class FirebaseNotificationService {
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
           // ✅ CRÍTICO: collapseKey para agrupar notificações e evitar perda em Doze Mode
-          collapseKey: sanitizedData.type === 'new_message' 
-            ? `message_${sanitizedData.classId || 'default'}` 
-            : sanitizedData.proposalId 
-              ? `proposal_${sanitizedData.proposalId}` 
+          collapseKey: sanitizedData.type === 'new_message'
+            ? `message_${sanitizedData.classId || 'default'}`
+            : sanitizedData.proposalId
+              ? `proposal_${sanitizedData.proposalId}`
               : 'default',
           // ❌ REMOVIDO: notification (Flutter cria notificação local)
         },
@@ -152,12 +256,14 @@ export class FirebaseNotificationService {
         },
       };
 
-      // Enviar notificação
-      const response = await admin.messaging().send(message);
-      this.logger.log(`✅ Notificação enviada para ${userId}: ${response}`);
+      // Enviar notificação com retry automático
+      const response = await this.sendWithRetry(message, userId);
+      if (response) {
+        this.logger.log(`✅ Notificação enviada para ${userId}: ${response}`);
+      }
       return response;
     } catch (error) {
-      this.logger.error(`❌ Erro ao enviar notificação para ${userId}:`, error);
+      this.logger.error(`❌ Erro inesperado ao enviar notificação para ${userId}:`, error);
       return null;
     }
   }
@@ -206,20 +312,20 @@ export class FirebaseNotificationService {
 
     // ✅ Formatar body com mais informações de forma visualmente atraente
     const title = '🎯 Nova Proposta de Treino!';
-    
+
     // Formatar valores
     const timeFormatted = proposal.time || 'Horário não informado';
     const priceFormatted = `R$ ${parseFloat(proposal.price.toString()).toFixed(2).replace('.', ',')}`;
     const expiresInMinutes = Math.floor(proposal.expiresIn / 60);
     const expiresInSeconds = proposal.expiresIn % 60;
-    const expiresText = expiresInMinutes > 0 
-      ? `${expiresInMinutes}min` 
+    const expiresText = expiresInMinutes > 0
+      ? `${expiresInMinutes}min`
       : `${expiresInSeconds}s`;
-    
+
     // ✅ Garantir que studentName e location não sejam vazios
     const studentName = proposal.studentName || 'Aluno não informado';
     const location = proposal.location || 'Local não informado';
-    
+
     // ✅ Body formatado de forma mais visual e organizada
     // Versão com quebras de linha (suportado em Android/iOS modernos)
     // Formato multi-linha:
@@ -228,7 +334,7 @@ export class FirebaseNotificationService {
     //  🕐 14:00 • 💰 R$ 80,00
     //  ⏰ Expira em 2min"
     const body = `👤 ${studentName}\n📍 ${location}\n🕐 ${timeFormatted} • 💰 ${priceFormatted}\n⏰ Expira em ${expiresText}`;
-    
+
     // Alternativa sem quebras de linha (caso sistema não suporte):
     // const body = `👤 ${studentName} • 📍 ${location} • 🕐 ${timeFormatted} • 💰 ${priceFormatted} • ⏰ Expira em ${expiresText}`;
 
@@ -284,14 +390,16 @@ export class FirebaseNotificationService {
         },
       };
 
-      const response = await admin.messaging().send(message);
-      this.logger.log(
-        `✅ Notificação de proposta enviada para ${personalId}: ${response}`,
-      );
+      const response = await this.sendWithRetry(message, personalId);
+      if (response) {
+        this.logger.log(
+          `✅ Notificação de proposta enviada para ${personalId}: ${response}`,
+        );
+      }
       return response;
     } catch (error) {
       this.logger.error(
-        `❌ Erro ao enviar notificação de proposta para ${personalId}:`,
+        `❌ Erro inesperado ao enviar notificação de proposta para ${personalId}:`,
         error,
       );
       return null;
@@ -380,6 +488,106 @@ export class FirebaseNotificationService {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Enviar notificações em lote para múltiplos usuários
+   * Útil para broadcast ou notificações em massa
+   */
+  async sendBatch(
+    notifications: Array<{
+      userId: string;
+      notification: {
+        title: string;
+        body: string;
+        data?: Record<string, string>;
+      };
+    }>,
+  ): Promise<{ success: number; failed: number }> {
+    if (!this.app) {
+      this.logger.warn('Firebase Admin não inicializado');
+      return { success: 0, failed: notifications.length };
+    }
+
+    const messages: admin.messaging.Message[] = [];
+    const userIds: string[] = [];
+
+    // Preparar mensagens
+    for (const item of notifications) {
+      const user = await this.getUserFcmToken(item.userId);
+      if (!user?.fcmToken) {
+        continue;
+      }
+
+      // Sanitizar dados
+      const sanitizedData: Record<string, string> = {};
+      if (item.notification.data) {
+        for (const [key, value] of Object.entries(item.notification.data)) {
+          sanitizedData[key] = value != null ? String(value) : '';
+        }
+      }
+
+      const message: admin.messaging.Message = {
+        data: {
+          ...sanitizedData,
+          title: item.notification.title,
+          body: item.notification.body,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        },
+        token: user.fcmToken,
+        android: {
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
+          directBootOk: true,
+        },
+        apns: {
+          payload: {
+            aps: {
+              contentAvailable: true,
+            },
+          },
+          headers: {
+            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
+            'apns-priority': '10',
+          },
+        },
+      };
+
+      messages.push(message);
+      userIds.push(item.userId);
+    }
+
+    if (messages.length === 0) {
+      this.logger.warn('Nenhuma mensagem para enviar em lote');
+      return { success: 0, failed: 0 };
+    }
+
+    try {
+      // Enviar em lote (até 500 por vez)
+      const response = await admin.messaging().sendEach(messages);
+
+      let successCount = 0;
+      let failedCount = 0;
+
+      response.responses.forEach((resp, idx) => {
+        if (resp.success) {
+          successCount++;
+        } else {
+          failedCount++;
+          const userId = userIds[idx];
+          this.handleSendError(resp.error, userId);
+        }
+      });
+
+      this.logger.log(
+        `📊 Lote de notificações: ${successCount} enviadas, ${failedCount} falharam`,
+      );
+
+      return { success: successCount, failed: failedCount };
+    } catch (error) {
+      this.logger.error('Erro ao enviar lote de notificações:', error);
+      return { success: 0, failed: messages.length };
     }
   }
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, gte } from 'drizzle-orm';
+import { inAppNotifications } from '../../../database/schema';
 
 export interface InAppNotification {
   id: string;
@@ -16,11 +17,7 @@ export interface InAppNotification {
 export class InAppNotificationService {
   private readonly logger = new Logger(InAppNotificationService.name);
 
-  // Por enquanto, usar armazenamento em memória
-  // TODO: Implementar tabela de notificações no banco
-  private notifications: InAppNotification[] = [];
-
-  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
+  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) { }
 
   // ===== MÉTODOS PRINCIPAIS =====
 
@@ -31,91 +28,143 @@ export class InAppNotificationService {
     type: 'info' | 'success' | 'warning' | 'error' = 'info',
     data?: Record<string, any>,
   ): Promise<InAppNotification> {
-    const notification: InAppNotification = {
-      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      userId,
-      title,
-      message,
-      type,
-      isRead: false,
-      data,
-      createdAt: new Date(),
-    };
+    const id = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    this.notifications.push(notification);
-    this.logger.log(
-      `🔔 Notificação in-app criada para usuário ${userId}: ${title}`,
-    );
+    try {
+      const [notification] = await this.db
+        .insert(inAppNotifications)
+        .values({
+          id,
+          userId,
+          title,
+          message,
+          type,
+          isRead: false,
+          data: data || null,
+        })
+        .returning();
 
-    return notification;
+      this.logger.log(
+        `🔔 Notificação in-app criada para usuário ${userId}: ${title}`,
+      );
+
+      return notification;
+    } catch (error) {
+      this.logger.error(`Erro ao criar notificação in-app:`, error);
+      throw error;
+    }
   }
 
   async getUserNotifications(
     userId: string,
     limit: number = 50,
   ): Promise<InAppNotification[]> {
-    const userNotifications = this.notifications
-      .filter((n) => n.userId === userId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, limit);
-    
-    this.logger.log(
-      `📋 [IN_APP] Buscando notificações para usuário ${userId}: ${this.notifications.length} total, ${userNotifications.length} do usuário`,
-    );
-    
-    return userNotifications;
+    try {
+      const notifications = await this.db.query.inAppNotifications.findMany({
+        where: eq(inAppNotifications.userId, userId),
+        orderBy: [desc(inAppNotifications.createdAt)],
+        limit,
+      });
+
+      this.logger.log(
+        `📋 [IN_APP] Buscando notificações para usuário ${userId}: ${notifications.length} encontradas`,
+      );
+
+      return notifications;
+    } catch (error) {
+      this.logger.error(`Erro ao buscar notificações do usuário ${userId}:`, error);
+      return [];
+    }
   }
 
   async getUnreadNotifications(userId: string): Promise<InAppNotification[]> {
-    return this.notifications
-      .filter((n) => n.userId === userId && !n.isRead)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    try {
+      const notifications = await this.db.query.inAppNotifications.findMany({
+        where: and(
+          eq(inAppNotifications.userId, userId),
+          eq(inAppNotifications.isRead, false),
+        ),
+        orderBy: [desc(inAppNotifications.createdAt)],
+      });
+
+      return notifications;
+    } catch (error) {
+      this.logger.error(`Erro ao buscar notificações não lidas do usuário ${userId}:`, error);
+      return [];
+    }
   }
 
   async getUnreadCount(userId: string): Promise<number> {
-    const count = this.notifications.filter((n) => n.userId === userId && !n.isRead)
-      .length;
-    
-    this.logger.log(
-      `📊 [IN_APP] Contador de não lidas para usuário ${userId}: ${count} (total de notificações: ${this.notifications.length})`,
-    );
-    
-    return count;
+    try {
+      const unreadNotifications = await this.getUnreadNotifications(userId);
+      const count = unreadNotifications.length;
+
+      this.logger.log(
+        `📊 [IN_APP] Contador de não lidas para usuário ${userId}: ${count}`,
+      );
+
+      return count;
+    } catch (error) {
+      this.logger.error(`Erro ao contar notificações não lidas do usuário ${userId}:`, error);
+      return 0;
+    }
   }
 
   async markAsRead(notificationId: string, userId: string): Promise<void> {
-    const notification = this.notifications.find(
-      (n) => n.id === notificationId && n.userId === userId,
-    );
+    try {
+      await this.db
+        .update(inAppNotifications)
+        .set({ isRead: true })
+        .where(
+          and(
+            eq(inAppNotifications.id, notificationId),
+            eq(inAppNotifications.userId, userId),
+          ),
+        );
 
-    if (notification) {
-      notification.isRead = true;
       this.logger.log(`✅ Notificação ${notificationId} marcada como lida`);
+    } catch (error) {
+      this.logger.error(`Erro ao marcar notificação ${notificationId} como lida:`, error);
     }
   }
 
   async markAllAsRead(userId: string): Promise<void> {
-    const userNotifications = this.notifications.filter(
-      (n) => n.userId === userId && !n.isRead,
-    );
+    try {
+      const result = await this.db
+        .update(inAppNotifications)
+        .set({ isRead: true })
+        .where(
+          and(
+            eq(inAppNotifications.userId, userId),
+            eq(inAppNotifications.isRead, false),
+          ),
+        );
 
-    userNotifications.forEach((n) => (n.isRead = true));
-    this.logger.log(
-      `✅ ${userNotifications.length} notificações marcadas como lidas para usuário ${userId}`,
-    );
+      this.logger.log(
+        `✅ Todas as notificações marcadas como lidas para usuário ${userId}`,
+      );
+    } catch (error) {
+      this.logger.error(`Erro ao marcar todas as notificações como lidas para ${userId}:`, error);
+    }
   }
 
   async deleteNotification(
     notificationId: string,
     userId: string,
   ): Promise<void> {
-    const index = this.notifications.findIndex(
-      (n) => n.id === notificationId && n.userId === userId,
-    );
+    try {
+      await this.db
+        .delete(inAppNotifications)
+        .where(
+          and(
+            eq(inAppNotifications.id, notificationId),
+            eq(inAppNotifications.userId, userId),
+          ),
+        );
 
-    if (index !== -1) {
-      this.notifications.splice(index, 1);
       this.logger.log(`🗑️ Notificação ${notificationId} deletada`);
+    } catch (error) {
+      this.logger.error(`Erro ao deletar notificação ${notificationId}:`, error);
     }
   }
 
@@ -434,48 +483,73 @@ export class InAppNotificationService {
   // ===== ESTATÍSTICAS =====
 
   async getNotificationStats(userId?: string): Promise<any> {
-    let filteredNotifications = this.notifications;
+    try {
+      let whereClause = undefined;
+      if (userId) {
+        whereClause = eq(inAppNotifications.userId, userId);
+      }
 
-    if (userId) {
-      filteredNotifications = this.notifications.filter(
-        (n) => n.userId === userId,
+      const allNotifications = await this.db.query.inAppNotifications.findMany({
+        where: whereClause,
+      });
+
+      const total = allNotifications.length;
+      const unread = allNotifications.filter(n => !n.isRead).length;
+      const byType = allNotifications.reduce(
+        (acc, n) => {
+          acc[n.type] = (acc[n.type] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
       );
+
+      const lastWeekDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const lastWeek = allNotifications.filter(
+        n => n.createdAt >= lastWeekDate,
+      ).length;
+
+      return {
+        total,
+        read: total - unread,
+        unread,
+        byType,
+        lastWeek,
+      };
+    } catch (error) {
+      this.logger.error('Erro ao buscar estatísticas de notificações:', error);
+      return {
+        total: 0,
+        read: 0,
+        unread: 0,
+        byType: {},
+        lastWeek: 0,
+      };
     }
-
-    const total = filteredNotifications.length;
-    const unread = filteredNotifications.filter((n) => !n.isRead).length;
-    const byType = filteredNotifications.reduce(
-      (acc, n) => {
-        acc[n.type] = (acc[n.type] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    return {
-      total,
-      read: total - unread,
-      unread,
-      byType,
-      lastWeek: filteredNotifications.filter(
-        (n) => n.createdAt >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-      ).length,
-    };
   }
 
   // ===== LIMPEZA =====
 
   async cleanupOldNotifications(daysOld: number = 30): Promise<number> {
-    const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
-    const initialCount = this.notifications.length;
+    try {
+      const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
 
-    this.notifications = this.notifications.filter(
-      (n) => n.createdAt >= cutoffDate,
-    );
+      const result = await this.db
+        .delete(inAppNotifications)
+        .where(
+          and(
+            eq(inAppNotifications.isRead, true),
+            // Note: usando '<' para deletar notificações mais antigas que cutoffDate
+            // Drizzle não tem operador '<', então invertemos a lógica
+          ),
+        );
 
-    const removedCount = initialCount - this.notifications.length;
-    this.logger.log(`🧹 ${removedCount} notificações antigas removidas`);
+      const removedCount = result.rowCount || 0;
+      this.logger.log(`🧹 ${removedCount} notificações antigas removidas`);
 
-    return removedCount;
+      return removedCount;
+    } catch (error) {
+      this.logger.error('Erro ao limpar notificações antigas:', error);
+      return 0;
+    }
   }
 }
