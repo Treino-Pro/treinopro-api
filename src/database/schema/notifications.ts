@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, jsonb, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 /**
@@ -7,7 +7,7 @@ import { users } from './users';
  */
 export const inAppNotifications = pgTable('in_app_notifications', {
     id: text('id').primaryKey(),
-    userId: text('user_id')
+    userId: uuid('user_id')
         .notNull()
         .references(() => users.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),

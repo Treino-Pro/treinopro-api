@@ -6,7 +6,7 @@
 --  Criar tabela de notificações in-app
 CREATE TABLE IF NOT EXISTS in_app_notifications (
   id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('info', 'success', 'warning', 'error')),
