@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   Inject,
 } from '@nestjs/common';
 import { eq, and, or, like, desc, asc, count, sql } from 'drizzle-orm';
@@ -11,6 +12,7 @@ import {
   CreateUserDto,
   UpdateUserDto,
   UpdateProfileDto,
+  UpdateServiceLocationDto,
   UserSearchDto,
   UpdateUserStatusDto,
   UserResponseDto,
@@ -449,6 +451,65 @@ export class UsersService {
       .returning();
 
     console.log('✅ [USERS] Perfil atualizado com sucesso:', userId);
+    return this.mapUserToResponse(updatedUser);
+  }
+
+  /**
+   * Atualizar localização de atendimento do personal trainer
+   */
+  async updateServiceLocation(
+    userId: string,
+    updateServiceLocationDto: UpdateServiceLocationDto,
+  ): Promise<UserResponseDto> {
+    console.log('📍 [USERS] Atualizando localização de atendimento:', userId);
+    console.log('📍 [USERS] Dados recebidos:', updateServiceLocationDto);
+
+    // Verificar se usuário existe e é personal
+    const existingUser = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!existingUser) {
+      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    if (existingUser.userType !== 'personal') {
+      console.log('❌ [USERS] Usuário não é personal trainer:', userId);
+      throw new ForbiddenException(
+        'Apenas personal trainers podem atualizar localização de atendimento',
+      );
+    }
+
+    // Preparar dados para atualização
+    const updateData: any = {
+      updatedAt: new Date(),
+    };
+
+    if (updateServiceLocationDto.serviceLocationLat !== undefined) {
+      updateData.serviceLocationLat = updateServiceLocationDto.serviceLocationLat.toString();
+    }
+    if (updateServiceLocationDto.serviceLocationLng !== undefined) {
+      updateData.serviceLocationLng = updateServiceLocationDto.serviceLocationLng.toString();
+    }
+    if (updateServiceLocationDto.serviceRadiusKm !== undefined) {
+      updateData.serviceRadiusKm = updateServiceLocationDto.serviceRadiusKm.toString();
+    }
+
+    // Atualizar localização
+    const [updatedUser] = await this.db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, userId))
+      .returning();
+
+    console.log('✅ [USERS] Localização de atendimento atualizada:', {
+      userId,
+      lat: updateData.serviceLocationLat,
+      lng: updateData.serviceLocationLng,
+      radius: updateData.serviceRadiusKm,
+    });
+
     return this.mapUserToResponse(updatedUser);
   }
 

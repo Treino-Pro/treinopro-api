@@ -50,6 +50,24 @@ export class CreateProposalDto {
   locationAddress: string;
 
   @ApiProperty({
+    description: 'Latitude do local de treino (opcional, mas recomendado)',
+    example: -23.5505,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  locationLat?: number;
+
+  @ApiProperty({
+    description: 'Longitude do local de treino (opcional, mas recomendado)',
+    example: -46.6333,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  locationLng?: number;
+
+  @ApiProperty({
     description: 'Data do treino',
     example: '2024-01-15T14:00:00.000Z',
   })

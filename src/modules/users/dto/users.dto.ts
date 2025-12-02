@@ -10,6 +10,7 @@ import {
   MinLength,
   MaxLength,
   IsInt,
+  IsNumber,
   Min,
   Max,
 } from 'class-validator';
@@ -301,6 +302,32 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEmail({}, { message: 'Email do responsável deve ter um formato válido' })
   guardianEmail?: string;
+}
+
+export class UpdateServiceLocationDto {
+  @ApiPropertyOptional({
+    example: -23.5505,
+    description: 'Latitude da localização de atendimento do personal',
+  })
+  @IsOptional()
+  @IsNumber()
+  serviceLocationLat?: number;
+
+  @ApiPropertyOptional({
+    example: -46.6333,
+    description: 'Longitude da localização de atendimento do personal',
+  })
+  @IsOptional()
+  @IsNumber()
+  serviceLocationLng?: number;
+
+  @ApiPropertyOptional({
+    example: 5.0,
+    description: 'Raio de atendimento em quilômetros',
+  })
+  @IsOptional()
+  @IsNumber()
+  serviceRadiusKm?: number;
 }
 
 // DTOs para busca e filtros

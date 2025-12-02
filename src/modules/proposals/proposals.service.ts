@@ -246,11 +246,27 @@ export class ProposalsService {
         `📍 [PROPOSALS] Proposta sem locationId, tentando criar/atualizar local com coordenadas...`,
       );
       
+      // ✅ Usar coordenadas do DTO se disponíveis, senão fazer geocoding
+      const locationLat = createProposalDto.locationLat;
+      const locationLng = createProposalDto.locationLng;
+      
+      if (locationLat && locationLng) {
+        console.log(
+          `✅ [PROPOSALS] Coordenadas recebidas do app: lat=${locationLat}, lng=${locationLng}`,
+        );
+      } else {
+        console.log(
+          `⚠️ [PROPOSALS] Coordenadas não fornecidas pelo app, será feito geocoding do endereço`,
+        );
+      }
+      
       try {
         const locationsService = this.moduleRef.get(LocationsService, { strict: false });
         finalLocationId = await locationsService.createOrUpdateLocation(
           createProposalDto.locationName,
           createProposalDto.locationAddress,
+          locationLat, // ✅ Passar coordenadas se disponíveis
+          locationLng,
         );
 
         if (finalLocationId) {
