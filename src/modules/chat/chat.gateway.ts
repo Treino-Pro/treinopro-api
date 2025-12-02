@@ -113,8 +113,29 @@ export class ChatGateway
     }
   }
 
-  handleDisconnect(client: AuthenticatedSocket) {
+  async handleDisconnect(client: AuthenticatedSocket) {
     if (client.userId) {
+      // ✅ Se for personal, marcar como offline no banco quando desconectar
+      if (client.userType === 'personal') {
+        try {
+          await this.db
+            .update(users)
+            .set({
+              isPersonalOnline: false,
+              updatedAt: new Date(),
+            })
+            .where(eq(users.id, client.userId));
+          
+          this.logger.log(
+            `📴 Personal ${client.userId} desconectou - marcado como OFFLINE no banco`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Erro ao marcar personal como offline: ${error.message}`,
+          );
+        }
+      }
+
       this.connectedUsers.delete(client.userId);
 
       // Notificar que o usuário está offline
@@ -460,19 +481,20 @@ export class ChatGateway
       }
 
       if (data.action === 'set_radius' && data.center && data.radiusKm !== undefined) {
-        // Atualizar no banco de dados
+        // Atualizar no banco de dados (localização, raio e status online)
         await this.db
           .update(users)
           .set({
             serviceLocationLat: data.center.lat.toString(),
             serviceLocationLng: data.center.lng.toString(),
             serviceRadiusKm: data.radiusKm.toString(),
+            isPersonalOnline: true, // ✅ Marcar personal como online
             updatedAt: new Date(),
           })
           .where(eq(users.id, client.userId));
 
         this.logger.log(
-          `📍 Personal ${client.userId} atualizou localização: lat=${data.center.lat}, lng=${data.center.lng}, raio=${data.radiusKm}km`,
+          `📍 Personal ${client.userId} atualizou localização: lat=${data.center.lat}, lng=${data.center.lng}, raio=${data.radiusKm}km e está ONLINE`,
         );
 
         client.emit('personal_online_confirmed', {
@@ -484,6 +506,44 @@ export class ChatGateway
       this.logger.error(`Erro ao processar personal_online: ${error.message}`);
       client.emit('error', {
         message: 'Erro ao atualizar localização',
+      });
+    }
+  }
+
+  /**
+   * Handler para personal_offline - marca personal como offline no banco
+   */
+  @SubscribeMessage('personal_offline')
+  async handlePersonalOffline(
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    try {
+      if (!client.userId || client.userType !== 'personal') {
+        client.emit('error', { message: 'Apenas personals podem usar este evento' });
+        return;
+      }
+
+      // Atualizar status online para false no banco de dados
+      await this.db
+        .update(users)
+        .set({
+          isPersonalOnline: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, client.userId));
+
+      this.logger.log(
+        `📴 Personal ${client.userId} foi marcado como OFFLINE`,
+      );
+
+      client.emit('personal_offline_confirmed', {
+        success: true,
+        message: 'Status offline atualizado',
+      });
+    } catch (error) {
+      this.logger.error(`Erro ao processar personal_offline: ${error.message}`);
+      client.emit('error', {
+        message: 'Erro ao atualizar status offline',
       });
     }
   }

@@ -415,8 +415,9 @@ export class ProposalsService {
           `📢 [PROPOSALS] ${connectedPersonals.length} personals conectados via WebSocket`,
         );
 
-        // 2. CRÍTICO: Buscar TODOS os personals ativos que têm fcmToken do BANCO DE DADOS
+        // 2. CRÍTICO: Buscar TODOS os personals ativos, online e que têm fcmToken do BANCO DE DADOS
         // Isso permite que FCM funcione mesmo quando app está em background (WebSocket desconectado)
+        // ✅ FILTRO: Apenas personals que estão ONLINE receberão FCM
         const allPersonalsWithFcm = await this.db
           .select({
             id: users.id,
@@ -429,6 +430,7 @@ export class ProposalsService {
             and(
               eq(users.userType, 'personal'),
               eq(users.status, 'active'),
+              eq(users.isPersonalOnline, true), // ✅ Apenas personals online
               sql`${users.fcmToken} IS NOT NULL`,
             ),
           );
