@@ -115,37 +115,22 @@ export class ChatGateway
 
   async handleDisconnect(client: AuthenticatedSocket) {
     if (client.userId) {
-      // ✅ Se for personal, marcar como offline no banco quando desconectar
-      if (client.userType === 'personal') {
-        try {
-          await this.db
-            .update(users)
-            .set({
-              isPersonalOnline: false,
-              updatedAt: new Date(),
-            })
-            .where(eq(users.id, client.userId));
-          
-          this.logger.log(
-            `📴 Personal ${client.userId} desconectou - marcado como OFFLINE no banco`,
-          );
-        } catch (error) {
-          this.logger.error(
-            `Erro ao marcar personal como offline: ${error.message}`,
-          );
-        }
-      }
-
+      // ✅ CORREÇÃO: NÃO marcar como offline automaticamente quando WebSocket desconecta
+      // O status offline só deve ser definido quando o usuário explicitamente usa o toggle
+      // Quando o app vai para background/terminated, o WebSocket desconecta, mas o estado
+      // do toggle deve persistir. Quando o app volta ao foreground e reconecta, o frontend
+      // reenvia o status correto baseado no estado persistido localmente.
+      
       this.connectedUsers.delete(client.userId);
 
-      // Notificar que o usuário está offline
+      // Notificar que o usuário desconectou (mas não necessariamente está offline)
       this.server.emit('user_offline', {
         userId: client.userId,
         userType: client.userType,
         timestamp: new Date(),
       });
 
-      this.logger.log(`User ${client.userId} disconnected`);
+      this.logger.log(`User ${client.userId} disconnected (WebSocket desconectado, mas status online/offline mantido)`);
     }
   }
 
