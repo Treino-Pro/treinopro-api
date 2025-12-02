@@ -458,7 +458,7 @@ export class ProposalsService {
                 `⚠️ [PROPOSALS] Proposta ${proposalResponse.id} não tem coordenadas (locationLat/locationLng), NÃO enviando notificação FCM para personal ${personalId}`,
               );
               console.log(
-                `📍 [PROPOSALS] locationId: ${proposalResponse.locationId || 'null'}, locationName: ${proposalResponse.locationName || 'null'}`,
+                `📍 [PROPOSALS] locationName: ${proposalResponse.locationName || 'null'}, locationAddress: ${proposalResponse.locationAddress || 'null'}`,
               );
               continue; // Pular este personal
             }
