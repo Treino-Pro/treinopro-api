@@ -6,6 +6,8 @@ import {
   LocationDto,
   UserFavoriteLocationDto,
 } from './dto/locations.dto';
+import { locations } from '../../database/schema/locations';
+import { eq } from 'drizzle-orm';
 
 @Injectable()
 export class LocationsService {
@@ -503,6 +505,116 @@ export class LocationsService {
     } catch (error) {
       this.logger.error('Erro ao buscar favoritos:', error);
       return [];
+    }
+  }
+
+  /**
+   * Buscar coordenadas de um endereço usando Google Geocoding API
+   */
+  async geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+    if (!this.googlePlacesApiKey) {
+      this.logger.warn('Google Places API key não configurada para geocoding');
+      return null;
+    }
+
+    try {
+      // Usar Google Geocoding API
+      const geocodingUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.googlePlacesApiKey}&region=br&language=pt-BR`;
+
+      const response = await fetch(geocodingUrl);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.status === 'OK' && data.results && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        return {
+          lat: location.lat,
+          lng: location.lng,
+        };
+      }
+
+      this.logger.warn(`Geocoding falhou para endereço: ${address}. Status: ${data.status}`);
+      return null;
+    } catch (error) {
+      this.logger.error(`Erro ao fazer geocoding do endereço ${address}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Criar ou atualizar local na tabela locations
+   */
+  async createOrUpdateLocation(
+    locationName: string,
+    locationAddress: string,
+    lat?: number,
+    lng?: number,
+  ): Promise<string | null> {
+    try {
+      // Se não tem coordenadas, tentar geocoding
+      if (!lat || !lng) {
+        const coords = await this.geocodeAddress(locationAddress);
+        if (coords) {
+          lat = coords.lat;
+          lng = coords.lng;
+        } else {
+          this.logger.warn(
+            `Não foi possível obter coordenadas para: ${locationAddress}`,
+          );
+          return null;
+        }
+      }
+
+      // Verificar se local já existe (por endereço)
+      const existingLocations = await this.db
+        .select()
+        .from(locations)
+        .where(eq(locations.address, locationAddress))
+        .limit(1);
+
+      const existingLocation = existingLocations[0];
+
+      if (existingLocation) {
+        // Atualizar coordenadas se necessário
+        const existingLat = parseFloat(String(existingLocation.lat));
+        const existingLng = parseFloat(String(existingLocation.lng));
+        
+        if (existingLat !== lat || existingLng !== lng) {
+          await this.db
+            .update(locations)
+            .set({
+              lat: lat.toString(),
+              lng: lng.toString(),
+              name: locationName,
+              updatedAt: new Date(),
+            })
+            .where(eq(locations.id, existingLocation.id));
+        }
+        this.logger.log(`Local atualizado: ${existingLocation.id} - ${locationName}`);
+        return existingLocation.id;
+      }
+
+      // Criar novo local
+      const [newLocation] = await this.db
+        .insert(locations)
+        .values({
+          name: locationName,
+          address: locationAddress,
+          lat: lat.toString(),
+          lng: lng.toString(),
+          type: 'other',
+        })
+        .returning();
+
+      this.logger.log(`Local criado: ${newLocation.id} - ${locationName}`);
+      return newLocation.id;
+    } catch (error) {
+      this.logger.error('Erro ao criar/atualizar local:', error);
+      return null;
     }
   }
 }

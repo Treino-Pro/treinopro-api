@@ -10,6 +10,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ChatModule } from '../chat/chat.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { LocationsModule } from '../locations/locations.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     JobsModule,
     ChatModule,
     NotificationsModule,
+    LocationsModule,
   ],
   controllers: [ProposalsController],
   providers: [

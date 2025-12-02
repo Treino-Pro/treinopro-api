@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import {
   proposals,
   users,
@@ -45,6 +46,7 @@ import { ProposalsGateway } from './proposals.gateway';
 import { NonceService } from '../notifications/services/nonce.service';
 import { ConflictException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { LocationsService } from '../locations/locations.service';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
 @Injectable()
@@ -57,6 +59,7 @@ export class ProposalsService {
     private readonly chatGateway: ChatGateway,
     private readonly proposalsGateway: ProposalsGateway,
     private readonly nonceService: NonceService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async createProposal(
@@ -234,12 +237,53 @@ export class ProposalsService {
       );
     }
 
+    // ===== GARANTIR QUE LOCAL TEM COORDENADAS =====
+    let finalLocationId = createProposalDto.locationId;
+
+    // Se não tem locationId, tentar criar/atualizar local com coordenadas
+    if (!finalLocationId && createProposalDto.locationName && createProposalDto.locationAddress) {
+      console.log(
+        `📍 [PROPOSALS] Proposta sem locationId, tentando criar/atualizar local com coordenadas...`,
+      );
+      
+      try {
+        const locationsService = this.moduleRef.get(LocationsService, { strict: false });
+        finalLocationId = await locationsService.createOrUpdateLocation(
+          createProposalDto.locationName,
+          createProposalDto.locationAddress,
+        );
+
+        if (finalLocationId) {
+          console.log(
+            `✅ [PROPOSALS] Local criado/atualizado com coordenadas: ${finalLocationId}`,
+          );
+        } else {
+          console.log(
+            `⚠️ [PROPOSALS] Não foi possível obter coordenadas para o local. A proposta será criada sem locationId, mas FCM será bloqueado.`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `❌ [PROPOSALS] Erro ao criar/atualizar local:`,
+          error,
+        );
+        // Continuar mesmo se falhar - FCM será bloqueado depois
+      }
+    }
+
+    // Atualizar locationId se foi criado/atualizado
+    if (finalLocationId && finalLocationId !== createProposalDto.locationId) {
+      console.log(
+        `🔄 [PROPOSALS] Atualizando locationId da proposta: ${createProposalDto.locationId || 'null'} -> ${finalLocationId}`,
+      );
+    }
+
     // ===== CRIAR PROPOSTA PRIMEIRO =====
     const [proposal] = await this.db
       .insert(proposals)
       .values({
         studentId,
-        locationId: createProposalDto.locationId,
+        locationId: finalLocationId,
         locationName: createProposalDto.locationName,
         locationAddress: createProposalDto.locationAddress,
         trainingDate: trainingDate,
@@ -407,44 +451,58 @@ export class ProposalsService {
 
             // Verificar se proposta está dentro do raio de atendimento do personal
             const proposalCoords = this.extractProposalCoordinates(proposalResponse);
-            if (proposalCoords.lat && proposalCoords.lng) {
-              // Buscar localização do personal do banco
-              const [personalData] = await this.db
-                .select({
-                  serviceLocationLat: users.serviceLocationLat,
-                  serviceLocationLng: users.serviceLocationLng,
-                  serviceRadiusKm: users.serviceRadiusKm,
-                })
-                .from(users)
-                .where(eq(users.id, personalId))
-                .limit(1);
 
-              if (personalData?.serviceLocationLat && personalData?.serviceLocationLng && personalData?.serviceRadiusKm) {
-                const personalLat = parseFloat(personalData.serviceLocationLat);
-                const personalLng = parseFloat(personalData.serviceLocationLng);
-                const radiusKm = parseFloat(personalData.serviceRadiusKm);
+            // ✅ CRÍTICO: Se proposta não tem coordenadas, NÃO enviar FCM
+            if (!proposalCoords.lat || !proposalCoords.lng) {
+              console.log(
+                `⚠️ [PROPOSALS] Proposta ${proposalResponse.id} não tem coordenadas (locationLat/locationLng), NÃO enviando notificação FCM para personal ${personalId}`,
+              );
+              console.log(
+                `📍 [PROPOSALS] locationId: ${proposalResponse.locationId || 'null'}, locationName: ${proposalResponse.locationName || 'null'}`,
+              );
+              continue; // Pular este personal
+            }
 
-                // Calcular distância usando Haversine
-                const distanceKm = this.calculateDistanceKm(
-                  personalLat,
-                  personalLng,
-                  proposalCoords.lat,
-                  proposalCoords.lng,
-                );
+            // Buscar localização do personal do banco
+            const [personalData] = await this.db
+              .select({
+                serviceLocationLat: users.serviceLocationLat,
+                serviceLocationLng: users.serviceLocationLng,
+                serviceRadiusKm: users.serviceRadiusKm,
+              })
+              .from(users)
+              .where(eq(users.id, personalId))
+              .limit(1);
 
-                if (distanceKm > radiusKm) {
-                  console.log(
-                    `📍 [PROPOSALS] Personal ${personalId} está fora do raio (${distanceKm.toFixed(2)}km > ${radiusKm}km), NÃO enviando notificação`,
-                  );
-                  continue; // Pular este personal
-                }
-              } else {
-                // Se personal não tem localização definida, não enviar (por segurança)
+            if (personalData?.serviceLocationLat && personalData?.serviceLocationLng && personalData?.serviceRadiusKm) {
+              const personalLat = parseFloat(personalData.serviceLocationLat);
+              const personalLng = parseFloat(personalData.serviceLocationLng);
+              const radiusKm = parseFloat(personalData.serviceRadiusKm);
+
+              // Calcular distância usando Haversine
+              const distanceKm = this.calculateDistanceKm(
+                personalLat,
+                personalLng,
+                proposalCoords.lat!,
+                proposalCoords.lng!,
+              );
+
+              if (distanceKm > radiusKm) {
                 console.log(
-                  `⚠️ [PROPOSALS] Personal ${personalId} não tem localização/raio definido, NÃO enviando notificação`,
+                  `📍 [PROPOSALS] Personal ${personalId} está fora do raio (${distanceKm.toFixed(2)}km > ${radiusKm}km), NÃO enviando notificação`,
                 );
-                continue;
+                continue; // Pular este personal
               }
+
+              console.log(
+                `✅ [PROPOSALS] Personal ${personalId} está dentro do raio (${distanceKm.toFixed(2)}km <= ${radiusKm}km)`,
+              );
+            } else {
+              // Se personal não tem localização definida, não enviar (por segurança)
+              console.log(
+                `⚠️ [PROPOSALS] Personal ${personalId} não tem localização/raio definido, NÃO enviando notificação`,
+              );
+              continue;
             }
 
             // Adicionar para FCM (dentro do raio e sem conflito)
