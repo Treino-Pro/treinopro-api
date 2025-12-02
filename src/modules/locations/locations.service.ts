@@ -509,7 +509,8 @@ export class LocationsService {
   }
 
   /**
-   * Buscar coordenadas de um endereço usando Google Geocoding API
+   * Buscar coordenadas de um endereço usando Google Places API (Text Search)
+   * Usa a mesma API que já está habilitada para busca de lugares
    */
   async geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
     if (!this.googlePlacesApiKey) {
@@ -518,10 +519,26 @@ export class LocationsService {
     }
 
     try {
-      // Usar Google Geocoding API
-      const geocodingUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.googlePlacesApiKey}&region=br&language=pt-BR`;
+      // Usar Google Places API (Text Search) - mesma API já habilitada
+      const requestBody = {
+        textQuery: address,
+        languageCode: 'pt-BR',
+        regionCode: 'BR',
+        maxResultCount: 1,
+      };
 
-      const response = await fetch(geocodingUrl);
+      const response = await fetch(
+        `${this.googlePlacesBaseUrl}/places:searchText`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': this.googlePlacesApiKey,
+            'X-Goog-FieldMask': 'places.location',
+          },
+          body: JSON.stringify(requestBody),
+        },
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -529,15 +546,17 @@ export class LocationsService {
 
       const data = await response.json();
 
-      if (data.status === 'OK' && data.results && data.results.length > 0) {
-        const location = data.results[0].geometry.location;
-        return {
-          lat: location.lat,
-          lng: location.lng,
-        };
+      if (data.places && data.places.length > 0) {
+        const place = data.places[0];
+        if (place.location) {
+          return {
+            lat: place.location.latitude,
+            lng: place.location.longitude,
+          };
+        }
       }
 
-      this.logger.warn(`Geocoding falhou para endereço: ${address}. Status: ${data.status}`);
+      this.logger.warn(`Geocoding falhou para endereço: ${address}. Nenhum resultado encontrado.`);
       return null;
     } catch (error) {
       this.logger.error(`Erro ao fazer geocoding do endereço ${address}:`, error);
