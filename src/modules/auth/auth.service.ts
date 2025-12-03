@@ -10,6 +10,7 @@ import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
+import { files } from '../../database/schema/files';
 import {
   RegisterDto,
   LoginDto,
@@ -315,21 +316,31 @@ export class AuthService {
       // ✅ CORREÇÃO: Buscar usuário com timeout para evitar travamento
       const startTime = Date.now();
       
+      // ✅ CORREÇÃO: Buscar usuário SEM JOIN primeiro (mais rápido)
+      // Se precisar da imagem, buscar depois
       const queryPromise = this.db.query.users.findFirst({
         where: eq(users.email, email),
-        with: {
-          profileImage: true,
-        },
+        // ✅ TEMPORÁRIO: Remover JOIN com profileImage para melhorar performance
+        // TODO: Buscar profileImage separadamente se necessário
+        // with: {
+        //   profileImage: true,
+        // },
       });
 
+      // ✅ Aumentar timeout para 30 segundos
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Query timeout após 20 segundos')), 20000)
+        setTimeout(() => reject(new Error('Query timeout após 30 segundos')), 30000)
       );
 
       const user = await Promise.race([queryPromise, timeoutPromise]) as any;
 
       const queryTime = Date.now() - startTime;
       console.log(`🔐 [AUTH][Service] Query do banco concluída em ${queryTime}ms. Usuário encontrado:`, user ? 'SIM' : 'NÃO');
+      
+      // ✅ Se query demorou muito, logar warning
+      if (queryTime > 5000) {
+        console.warn(`⚠️ [AUTH][Service] Query demorou ${queryTime}ms - possível problema de performance no banco`);
+      }
 
       if (!user) {
         console.log('❌ [AUTH][Service] Usuário não encontrado');
@@ -364,6 +375,20 @@ export class AuthService {
       console.log('✅ [AUTH][Service] Tokens gerados com sucesso');
       console.log('✅ [AUTH][Service] Login concluído para:', email);
 
+      // ✅ Buscar profileImage separadamente se necessário (após query principal)
+      let profileImageUrl: string | undefined;
+      if (user.profileImageId) {
+        try {
+          const profileImage = await this.db.query.files.findFirst({
+            where: eq(files.id, user.profileImageId),
+          });
+          profileImageUrl = profileImage?.url;
+        } catch (e) {
+          console.warn('⚠️ [AUTH][Service] Erro ao buscar profileImage:', e);
+          // Não falhar login se não conseguir buscar imagem
+        }
+      }
+
       return {
         user: {
           id: user.id,
@@ -372,12 +397,20 @@ export class AuthService {
           lastName: user.lastName,
           userType: user.userType,
           isVerified: user.isVerified,
-          profileImageUrl: user.profileImage?.url,
+          profileImageUrl: profileImageUrl,
         },
         ...tokens,
       };
     } catch (error) {
       console.error('❌ [AUTH][Service] Erro no login:', error);
+      
+      // ✅ CORREÇÃO: Tratar timeout especificamente
+      if (error instanceof Error && error.message.includes('timeout')) {
+        throw new BadRequestException(
+          'Servidor demorou muito para processar. Tente novamente em alguns instantes.',
+        );
+      }
+      
       throw error;
     }
   }
