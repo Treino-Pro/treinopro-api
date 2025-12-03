@@ -30,7 +30,8 @@ if (useMockDatabase) {
     client = postgres(connectionString, {
       max: 1,
       idle_timeout: 20,
-      connect_timeout: 10,
+      connect_timeout: 30, // ✅ Aumentado de 10 para 30 segundos
+      command_timeout: 30, // ✅ Adicionado timeout para comandos SQL
       onnotice: () => {}, // Silenciar notices
       timezone: 'America/Sao_Paulo', // Forçar timezone
       onconnect: async (connection: any) => {
@@ -49,7 +50,8 @@ if (useMockDatabase) {
       client = postgres('postgresql://localhost:5432/treinopro', {
         max: 1,
         idle_timeout: 20,
-        connect_timeout: 10,
+        connect_timeout: 30, // ✅ Aumentado de 10 para 30 segundos
+        command_timeout: 30, // ✅ Adicionado timeout para comandos SQL
         onnotice: () => {},
         timezone: 'America/Sao_Paulo', // Forçar timezone
         onconnect: async (connection) => {

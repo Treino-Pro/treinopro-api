@@ -308,49 +308,78 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Buscar usuário com imagem de perfil
-    const user = await this.db.query.users.findFirst({
-      where: eq(users.email, email),
-      with: {
-        profileImage: true,
-      },
-    });
+    console.log('🔐 [AUTH][Service] Iniciando login para:', email);
+    console.log('🔐 [AUTH][Service] Buscando usuário no banco...');
 
-    if (!user) {
-      throw new UnauthorizedException('Credenciais inválidas');
+    try {
+      // ✅ CORREÇÃO: Buscar usuário com timeout para evitar travamento
+      const startTime = Date.now();
+      
+      const queryPromise = this.db.query.users.findFirst({
+        where: eq(users.email, email),
+        with: {
+          profileImage: true,
+        },
+      });
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Query timeout após 20 segundos')), 20000)
+      );
+
+      const user = await Promise.race([queryPromise, timeoutPromise]) as any;
+
+      const queryTime = Date.now() - startTime;
+      console.log(`🔐 [AUTH][Service] Query do banco concluída em ${queryTime}ms. Usuário encontrado:`, user ? 'SIM' : 'NÃO');
+
+      if (!user) {
+        console.log('❌ [AUTH][Service] Usuário não encontrado');
+        throw new UnauthorizedException('Credenciais inválidas');
+      }
+
+      console.log('🔐 [AUTH][Service] Verificando senha...');
+      // Verificar senha
+      const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+
+      console.log('🔐 [AUTH][Service] Senha válida:', isPasswordValid);
+
+      if (!isPasswordValid) {
+        console.log('❌ [AUTH][Service] Senha inválida');
+        throw new UnauthorizedException('Credenciais inválidas');
+      }
+
+      // Nota: Verificação de email é apenas no cadastro, não no login
+
+      console.log('🔐 [AUTH][Service] Gerando tokens...');
+      // Gerar tokens
+      const tokens = await this.generateTokens(
+        user.id,
+        user.email,
+        user.userType,
+        user.firstName,
+        user.lastName,
+        user.document,
+        user.cref,
+      );
+
+      console.log('✅ [AUTH][Service] Tokens gerados com sucesso');
+      console.log('✅ [AUTH][Service] Login concluído para:', email);
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          userType: user.userType,
+          isVerified: user.isVerified,
+          profileImageUrl: user.profileImage?.url,
+        },
+        ...tokens,
+      };
+    } catch (error) {
+      console.error('❌ [AUTH][Service] Erro no login:', error);
+      throw error;
     }
-
-    // Verificar senha
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Credenciais inválidas');
-    }
-
-    // Nota: Verificação de email é apenas no cadastro, não no login
-
-    // Gerar tokens
-    const tokens = await this.generateTokens(
-      user.id,
-      user.email,
-      user.userType,
-      user.firstName,
-      user.lastName,
-      user.document,
-      user.cref,
-    );
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        userType: user.userType,
-        isVerified: user.isVerified,
-        profileImageUrl: user.profileImage?.url,
-      },
-      ...tokens,
-    };
   }
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
