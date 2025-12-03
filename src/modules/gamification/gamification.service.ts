@@ -184,6 +184,22 @@ export class GamificationService {
       `🔍 [GAMIFICATION_SERVICE] getUserProfile chamado com userId: ${userId}`,
     );
 
+    // ✅ CORREÇÃO: Validar que usuário existe antes de buscar/criar perfil
+    const [userExists] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!userExists) {
+      this.logger.error(
+        `❌ [GAMIFICATION_SERVICE] Tentativa de buscar perfil para usuário inexistente: ${userId}`,
+      );
+      throw new Error(
+        `Usuário não encontrado: ${userId}. Não é possível buscar perfil de gamificação.`,
+      );
+    }
+
     const [profile] = await this.db
       .select()
       .from(userProfiles)
@@ -268,6 +284,22 @@ export class GamificationService {
   private async createInitialProfile(
     userId: string,
   ): Promise<UserProfileResponseDto> {
+    // ✅ CORREÇÃO: Validar que usuário existe antes de criar perfil
+    const [user] = await this.db
+      .select({ userType: users.userType, id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) {
+      this.logger.error(
+        `❌ [GAMIFICATION_SERVICE] Tentativa de criar perfil para usuário inexistente: ${userId}`,
+      );
+      throw new Error(
+        `Usuário não encontrado: ${userId}. Não é possível criar perfil de gamificação.`,
+      );
+    }
+
     const [newProfile] = await this.db
       .insert(userProfiles)
       .values({
@@ -284,15 +316,8 @@ export class GamificationService {
     // Criar missão inicial sem pré-requisitos para novos usuários
     await this.createInitialMissionForUser(userId);
 
-    // Determinar tipo de usuário para cálculo de thresholds
-    const [user] = await this.db
-      .select({ userType: users.userType })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
     const userType: 'student' | 'personal' =
-      user?.userType === 'personal' ? 'personal' : 'student';
+      user.userType === 'personal' ? 'personal' : 'student';
 
     return {
       ...newProfile,

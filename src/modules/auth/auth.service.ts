@@ -93,6 +93,16 @@ export class AuthService {
 
       console.log('✅ [AUTH] Email disponível, prosseguindo com validações...');
 
+      // ✅ CORREÇÃO: Invalidar cache do email antes de criar novo usuário
+      // Isso previne problemas se usuário deletou conta e está recriando com mesmo email
+      try {
+        await this.invalidateUserCache(undefined, email);
+        console.log('✅ [AUTH] Cache invalidado para email antes de criar novo usuário');
+      } catch (error) {
+        console.warn('⚠️ [AUTH] Erro ao invalidar cache:', error);
+        // Continuar mesmo se invalidação de cache falhar
+      }
+
       // Validar CREF para Personal Trainers
       if (userType === 'personal' && !cref) {
         console.log('❌ [AUTH] CREF obrigatório para Personal Trainers');
@@ -324,7 +334,20 @@ export class AuthService {
       const cachedUser = await this.cacheManager.get<any>(cacheKey);
       if (cachedUser) {
         console.log('✅ [AUTH][Service] Usuário encontrado no cache');
-        return cachedUser;
+        // ✅ CORREÇÃO: Validar que usuário ainda existe no banco antes de retornar do cache
+        // Isso previne problemas se usuário foi deletado após ser cacheado
+        const userStillExists = await this.db.query.users.findFirst({
+          where: eq(users.id, cachedUser.id),
+          columns: { id: true },
+        });
+        
+        if (!userStillExists) {
+          console.warn('⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache');
+          await this.invalidateUserCache(cachedUser.id, email);
+          // Continuar para buscar do banco (retornará null)
+        } else {
+          return cachedUser;
+        }
       }
     } catch (error) {
       console.warn('⚠️ [AUTH][Service] Erro ao buscar do cache:', error);

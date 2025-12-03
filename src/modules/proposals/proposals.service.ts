@@ -792,6 +792,40 @@ export class ProposalsService {
           '📡 [PROPOSALS SERVICE] Evento de recontratação emitido para personal:',
           createRecontractDto.personalId,
         );
+
+        // ✅ NOVO: Enviar FCM para o personal específico da recontratação
+        // Verificar se o personal está online antes de enviar FCM
+        const [personalForFCM] = await this.db
+          .select()
+          .from(users)
+          .where(
+            and(
+              eq(users.id, createRecontractDto.personalId),
+              eq(users.isPersonalOnline, true), // ✅ Apenas se estiver online
+            ),
+          )
+          .limit(1);
+
+        if (personalForFCM) {
+          console.log(
+            `🔥 [PROPOSALS SERVICE] Personal está online - enviando FCM para recontratação: ${createRecontractDto.personalId}`,
+          );
+          await this.proposalsGateway.sendProposalCreated({
+            proposal: proposalResponse,
+            student: {
+              id: user?.id,
+              name: `${user?.firstName} ${user?.lastName}`,
+              firstName: user?.firstName,
+              lastName: user?.lastName,
+              profileImageUrl: user?.profileImageUrl,
+            },
+            nearbyPersonals: [createRecontractDto.personalId], // Apenas o personal específico
+          });
+        } else {
+          console.log(
+            `⚠️ [PROPOSALS SERVICE] Personal não está online - FCM não enviado para recontratação: ${createRecontractDto.personalId}`,
+          );
+        }
       } catch (error) {
         console.error(
           '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',

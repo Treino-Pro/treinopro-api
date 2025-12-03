@@ -6,6 +6,8 @@ import {
   ForbiddenException,
   Inject,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { eq, and, or, like, desc, asc, count, sql } from 'drizzle-orm';
 import { users, files } from '../../database/schema';
 import {
@@ -24,7 +26,13 @@ import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject('DATABASE_CONNECTION') private db: any) {}
+  private readonly USER_CACHE_PREFIX = 'user:';
+  private readonly USER_EMAIL_CACHE_PREFIX = 'user:email:';
+
+  constructor(
+    @Inject('DATABASE_CONNECTION') private db: any,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {}
 
   // ===== CRUD BÁSICO =====
 
@@ -350,7 +358,22 @@ export class UsersService {
       );
     }
 
-    // 3. Deletar usuário permanentemente
+    // 3. ✅ CORREÇÃO: Invalidar cache ANTES de deletar usuário
+    // Isso previne problemas se usuário criar nova conta com mesmo email
+    try {
+      await this.cacheManager.del(`${this.USER_CACHE_PREFIX}${userId}`);
+      if (existingUser.email) {
+        await this.cacheManager.del(
+          `${this.USER_EMAIL_CACHE_PREFIX}${existingUser.email.toLowerCase()}`,
+        );
+      }
+      console.log('✅ [USERS] Cache invalidado para usuário deletado');
+    } catch (error) {
+      console.warn('⚠️ [USERS] Erro ao invalidar cache:', error);
+      // Continuar mesmo se invalidação de cache falhar
+    }
+
+    // 4. Deletar usuário permanentemente
     // O histórico de aulas, propostas, avaliações, etc. será mantido
     // pois as foreign keys permitem NULL ou não têm CASCADE DELETE
     await this.db.delete(users).where(eq(users.id, userId));
