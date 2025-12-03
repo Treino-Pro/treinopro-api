@@ -26,12 +26,18 @@ if (useMockDatabase) {
   const postgres = require('postgres');
 
   // Create connection with better error handling
+  // ✅ OTIMIZAÇÃO: Connection pool aumentado para suportar alta concorrência
+  // Para 500k usuários simultâneos, precisamos de um pool maior
+  // Fórmula recomendada: (cores * 2) + effective_spindle_count
+  // Para produção com alta carga: 20-100 conexões
+  const maxConnections = parseInt(process.env.DATABASE_MAX_CONNECTIONS || '50', 10);
+  
   try {
     client = postgres(connectionString, {
-      max: 1,
+      max: maxConnections, // ✅ Aumentado de 1 para suportar alta concorrência
       idle_timeout: 20,
-      connect_timeout: 30, // ✅ Aumentado de 10 para 30 segundos
-      command_timeout: 30, // ✅ Adicionado timeout para comandos SQL
+      connect_timeout: 10, // ✅ Reduzido para 10s (timeout menor = falha rápida)
+      command_timeout: 5, // ✅ Reduzido para 5s (queries devem ser rápidas)
       onnotice: () => {}, // Silenciar notices
       timezone: 'America/Sao_Paulo', // Forçar timezone
       onconnect: async (connection: any) => {
@@ -47,11 +53,12 @@ if (useMockDatabase) {
 
     // Fallback para conexão local sem autenticação
     try {
+      const maxConnections = parseInt(process.env.DATABASE_MAX_CONNECTIONS || '50', 10);
       client = postgres('postgresql://localhost:5432/treinopro', {
-        max: 1,
+        max: maxConnections, // ✅ Aumentado de 1 para suportar alta concorrência
         idle_timeout: 20,
-        connect_timeout: 30, // ✅ Aumentado de 10 para 30 segundos
-        command_timeout: 30, // ✅ Adicionado timeout para comandos SQL
+        connect_timeout: 10, // ✅ Reduzido para 10s
+        command_timeout: 5, // ✅ Reduzido para 5s
         onnotice: () => {},
         timezone: 'America/Sao_Paulo', // Forçar timezone
         onconnect: async (connection) => {

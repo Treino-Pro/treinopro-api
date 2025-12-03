@@ -8,6 +8,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { eq } from 'drizzle-orm';
 import { users } from '../../database/schema';
 import { files } from '../../database/schema/files';
@@ -26,10 +28,15 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AuthService {
+  private readonly USER_CACHE_TTL = 300; // 5 minutos em segundos
+  private readonly USER_CACHE_PREFIX = 'user:';
+  private readonly USER_EMAIL_CACHE_PREFIX = 'user:email:';
+
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
     @Inject('DATABASE_CONNECTION') private db: any,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private crefService: CrefService,
     private emailVerificationService: EmailVerificationService,
     private gamificationService: GamificationService,
@@ -306,41 +313,92 @@ export class AuthService {
     }
   }
 
+  /**
+   * Busca usuário do cache ou do banco de dados
+   */
+  private async getUserByEmail(email: string): Promise<any> {
+    const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`;
+    
+    // Tentar buscar do cache primeiro
+    try {
+      const cachedUser = await this.cacheManager.get<any>(cacheKey);
+      if (cachedUser) {
+        console.log('✅ [AUTH][Service] Usuário encontrado no cache');
+        return cachedUser;
+      }
+    } catch (error) {
+      console.warn('⚠️ [AUTH][Service] Erro ao buscar do cache:', error);
+      // Continuar para buscar do banco
+    }
+
+    // Buscar do banco de dados
+    // ✅ OTIMIZAÇÃO: Buscar apenas campos necessários para login
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.email, email),
+      columns: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        userType: true,
+        firstName: true,
+        lastName: true,
+        document: true,
+        cref: true,
+        isVerified: true,
+        profileImageId: true,
+      },
+    });
+
+    // Salvar no cache se encontrado
+    if (user) {
+      try {
+        await this.cacheManager.set(cacheKey, user, this.USER_CACHE_TTL);
+        // Também cachear por ID
+        await this.cacheManager.set(
+          `${this.USER_CACHE_PREFIX}${user.id}`,
+          user,
+          this.USER_CACHE_TTL,
+        );
+      } catch (error) {
+        console.warn('⚠️ [AUTH][Service] Erro ao salvar no cache:', error);
+        // Não falhar se cache falhar
+      }
+    }
+
+    return user;
+  }
+
+  /**
+   * Invalida cache de um usuário (por ID ou email)
+   */
+  private async invalidateUserCache(userId?: string, email?: string): Promise<void> {
+    try {
+      if (userId) {
+        await this.cacheManager.del(`${this.USER_CACHE_PREFIX}${userId}`);
+      }
+      if (email) {
+        await this.cacheManager.del(`${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`);
+      }
+      console.log('✅ [AUTH][Service] Cache invalidado para usuário');
+    } catch (error) {
+      console.warn('⚠️ [AUTH][Service] Erro ao invalidar cache:', error);
+      // Não falhar se invalidação de cache falhar
+    }
+  }
+
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
     console.log('🔐 [AUTH][Service] Iniciando login para:', email);
-    console.log('🔐 [AUTH][Service] Buscando usuário no banco...');
 
     try {
-      // ✅ CORREÇÃO: Buscar usuário com timeout para evitar travamento
       const startTime = Date.now();
       
-      // ✅ CORREÇÃO: Buscar usuário SEM JOIN primeiro (mais rápido)
-      // Se precisar da imagem, buscar depois
-      const queryPromise = this.db.query.users.findFirst({
-        where: eq(users.email, email),
-        // ✅ TEMPORÁRIO: Remover JOIN com profileImage para melhorar performance
-        // TODO: Buscar profileImage separadamente se necessário
-        // with: {
-        //   profileImage: true,
-        // },
-      });
-
-      // ✅ Aumentar timeout para 30 segundos
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Query timeout após 30 segundos')), 30000)
-      );
-
-      const user = await Promise.race([queryPromise, timeoutPromise]) as any;
+      // ✅ OTIMIZAÇÃO: Buscar usuário com cache
+      const user = await this.getUserByEmail(email);
 
       const queryTime = Date.now() - startTime;
-      console.log(`🔐 [AUTH][Service] Query do banco concluída em ${queryTime}ms. Usuário encontrado:`, user ? 'SIM' : 'NÃO');
-      
-      // ✅ Se query demorou muito, logar warning
-      if (queryTime > 5000) {
-        console.warn(`⚠️ [AUTH][Service] Query demorou ${queryTime}ms - possível problema de performance no banco`);
-      }
+      console.log(`🔐 [AUTH][Service] Usuário buscado em ${queryTime}ms`);
 
       if (!user) {
         console.log('❌ [AUTH][Service] Usuário não encontrado');
@@ -351,14 +409,10 @@ export class AuthService {
       // Verificar senha
       const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
-      console.log('🔐 [AUTH][Service] Senha válida:', isPasswordValid);
-
       if (!isPasswordValid) {
         console.log('❌ [AUTH][Service] Senha inválida');
         throw new UnauthorizedException('Credenciais inválidas');
       }
-
-      // Nota: Verificação de email é apenas no cadastro, não no login
 
       console.log('🔐 [AUTH][Service] Gerando tokens...');
       // Gerar tokens
@@ -373,7 +427,6 @@ export class AuthService {
       );
 
       console.log('✅ [AUTH][Service] Tokens gerados com sucesso');
-      console.log('✅ [AUTH][Service] Login concluído para:', email);
 
       // ✅ Buscar profileImage separadamente se necessário (após query principal)
       let profileImageUrl: string | undefined;
@@ -381,6 +434,7 @@ export class AuthService {
         try {
           const profileImage = await this.db.query.files.findFirst({
             where: eq(files.id, user.profileImageId),
+            columns: { url: true },
           });
           profileImageUrl = profileImage?.url;
         } catch (e) {
@@ -404,14 +458,13 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AUTH][Service] Erro no login:', error);
       
-      // ✅ CORREÇÃO: Tratar timeout especificamente
-      if (error instanceof Error && error.message.includes('timeout')) {
-        throw new BadRequestException(
-          'Servidor demorou muito para processar. Tente novamente em alguns instantes.',
-        );
+      if (error instanceof UnauthorizedException) {
+        throw error;
       }
       
-      throw error;
+      throw new BadRequestException(
+        'Erro ao processar login. Tente novamente em alguns instantes.',
+      );
     }
   }
 
@@ -518,6 +571,9 @@ export class AuthService {
         .set({ passwordHash: hashedPassword, updatedAt: new Date() })
         .where(eq(users.email, email));
 
+      // ✅ OTIMIZAÇÃO: Invalidar cache após reset de senha
+      await this.invalidateUserCache(user.id, email);
+
       console.log(`✅ [AUTH] Senha atualizada com sucesso para ${email}`);
 
       return { message: 'Senha alterada com sucesso' };
@@ -557,45 +613,89 @@ export class AuthService {
       .set({ passwordHash: newPasswordHash, updatedAt: new Date() })
       .where(eq(users.id, userId));
 
+    // ✅ OTIMIZAÇÃO: Invalidar cache após mudança de senha
+    await this.invalidateUserCache(userId, user.email);
+
     return { message: 'Senha alterada com sucesso' };
   }
 
   async refreshToken(refreshToken: string) {
     try {
+      // ✅ OTIMIZAÇÃO: Verificar token primeiro (mais rápido que query no banco)
       const payload = this.jwtService.verify(refreshToken, {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
       });
 
-      const user = await this.db.query.users.findFirst({
-        where: eq(users.id, payload.sub),
-      });
+      // ✅ OTIMIZAÇÃO: Tentar buscar do cache primeiro
+      const cacheKey = `${this.USER_CACHE_PREFIX}${payload.sub}`;
+      let user: any;
+
+      try {
+        user = await this.cacheManager.get<any>(cacheKey);
+        if (!user) {
+          // Se não estiver no cache, buscar do banco
+          user = await this.db.query.users.findFirst({
+            where: eq(users.id, payload.sub),
+            columns: {
+              id: true,
+              email: true,
+              userType: true,
+              firstName: true,
+              lastName: true,
+              document: true,
+              cref: true,
+              isVerified: true,
+            },
+          });
+
+          // Salvar no cache se encontrado
+          if (user) {
+            await this.cacheManager.set(cacheKey, user, this.USER_CACHE_TTL);
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ [AUTH][Service] Erro ao buscar usuário (cache/banco):', error);
+        // Se cache/banco falhar, usar dados do token (já validado)
+        user = {
+          id: payload.sub,
+          email: payload.email,
+          userType: payload.userType,
+          firstName: payload.firstName || '',
+          lastName: payload.lastName || '',
+          document: payload.document || '',
+          cref: payload.cref || '',
+          isVerified: true, // Assumir verificado se token é válido
+        };
+      }
 
       if (!user) {
         throw new UnauthorizedException('Usuário não encontrado');
       }
 
+      // Gerar novos tokens
       const tokens = await this.generateTokens(
         user.id,
-        user.email,
-        user.userType,
-        user.firstName,
-        user.lastName,
-        user.document,
-        user.cref,
+        user.email || payload.email,
+        user.userType || payload.userType,
+        user.firstName || payload.firstName,
+        user.lastName || payload.lastName,
+        user.document || payload.document,
+        user.cref || payload.cref,
       );
 
       return {
         user: {
           id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          userType: user.userType,
-          isVerified: user.isVerified,
+          email: user.email || payload.email,
+          firstName: user.firstName || payload.firstName || '',
+          lastName: user.lastName || payload.lastName || '',
+          userType: user.userType || payload.userType,
+          isVerified: user.isVerified !== undefined ? user.isVerified : true,
         },
         ...tokens,
       };
     } catch (error) {
+      console.error('❌ [AUTH][Service] Erro ao renovar token:', error);
       throw new UnauthorizedException('Token de refresh inválido');
     }
   }
