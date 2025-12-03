@@ -26,6 +26,6 @@ import { CrefCacheService } from '../modules/cref/cref-cache.service';
     }),
   ],
   providers: [CrefCacheService],
-  exports: [CrefCacheService],
+  exports: [CacheModule, CrefCacheService], // ✅ Exportar CacheModule para disponibilizar CACHE_MANAGER
 })
 export class SharedCacheModule {}
