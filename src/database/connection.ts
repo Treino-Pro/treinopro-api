@@ -54,7 +54,7 @@ if (useMockDatabase) {
     // Fallback para conexão local sem autenticação
     try {
       const maxConnections = parseInt(process.env.DATABASE_MAX_CONNECTIONS || '50', 10);
-      client = postgres('postgresql://localhost:5432/treinopro', {
+      client = postgres('postgresql://localhost:5433/treinopro', {
         max: maxConnections, // ✅ Aumentado de 1 para suportar alta concorrência
         idle_timeout: 20,
         connect_timeout: 10, // ✅ Reduzido para 10s

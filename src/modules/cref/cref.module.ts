@@ -6,6 +6,7 @@ import { CrefService } from './cref.service';
 import { CrefController } from './cref.controller';
 import { CrefQueueService } from './cref-queue.service';
 import { CrefProcessor } from './cref.processor';
+import { CrefCacheService } from './cref-cache.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { CrefProcessor } from './cref.processor';
       name: 'cref-validation',
     }),
   ],
-  providers: [CrefService, CrefQueueService, CrefProcessor],
+  providers: [CrefService, CrefQueueService, CrefProcessor, CrefCacheService],
   controllers: [CrefController],
   exports: [CrefService, CrefQueueService], // Exportar para usar em outros módulos
 })

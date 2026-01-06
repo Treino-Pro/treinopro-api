@@ -51,6 +51,50 @@ export class CrefController {
     return this.crefService.parseCrefNumber(cref);
   }
 
+  @Get('token')
+  @Public()
+  @ApiOperation({
+    summary: 'Obter Token do CONFEF',
+    description:
+      'Obtém o token JWT do CONFEF para autenticação nas requisições. Útil para testes e debug.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Token obtido com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        token: {
+          type: 'string',
+          example:
+            'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+        },
+        expiresAt: {
+          type: 'string',
+          format: 'date-time',
+          example: '2024-01-03T23:45:00.000Z',
+        },
+        isCached: {
+          type: 'boolean',
+          example: true,
+          description: 'Indica se o token veio do cache',
+        },
+        ttl: {
+          type: 'number',
+          example: 600000,
+          description: 'TTL do token em milissegundos (10 minutos)',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Erro ao obter token',
+  })
+  async getToken() {
+    return this.crefService.getTokenInfo();
+  }
+
   @Get('cache/health')
   @ApiOperation({
     summary: 'Health Check do Cache',

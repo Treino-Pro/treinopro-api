@@ -26,7 +26,7 @@ async function bootstrap() {
 
       // Permitir origins configurados (web)
       const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
-        'http://localhost:3000',
+        'http://localhost:3001',
       ];
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -71,7 +71,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const configService = app.get(ConfigService);
-  const port = configService.get('PORT') || 3000;
+  const port = configService.get('PORT') || 3001;
 
   await app.listen(port);
   console.log(`🚀 TreinoPRO API rodando na porta ${port}`);

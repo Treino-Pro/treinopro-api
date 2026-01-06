@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios, { AxiosError } from 'axios';
+import * as FormDataLib from 'form-data';
 import {
   CrefValidationResult,
   ConfefData,
@@ -18,6 +20,8 @@ export class CrefService {
   private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 minutos - aumentar cache
   private readonly REQUEST_TIMEOUT = 15000; // 15 segundos
   private readonly MAX_RETRIES = 3; // Número máximo de tentativas
+  private readonly MAX_REDIRECTS = 10; // Máximo de redirects
+  private readonly MAX_REDIRECTS_SESSION = 5; // Máximo de redirects para estabelecer sessão
 
   constructor(
     private configService: ConfigService,
@@ -118,6 +122,25 @@ export class CrefService {
     return naturezaUpper.includes('BACHAREL');
   }
 
+  async getTokenInfo(): Promise<{
+    token: string;
+    expiresAt: Date;
+    isCached: boolean;
+    ttl: number;
+  }> {
+    const cached = this.tokenCache && Date.now() < this.tokenCache.expires;
+    const token = await this.getToken();
+
+    return {
+      token,
+      expiresAt: this.tokenCache
+        ? new Date(this.tokenCache.expires)
+        : new Date(),
+      isCached: cached,
+      ttl: this.TOKEN_TTL,
+    };
+  }
+
   private async fetchFromConfef(
     crefNumber: string,
   ): Promise<ConfefData | null> {
@@ -144,6 +167,17 @@ export class CrefService {
         return this.processConfefResponse(retryResponse.data, crefNumber);
       }
 
+      // Validar se a resposta é JSON válido antes de processar
+      if (
+        typeof response.data === 'string' &&
+        response.data.includes('<html>')
+      ) {
+        this.logger.error(
+          `💥 [CREF] Resposta é HTML em vez de JSON. Pode ser um redirect não seguido.`,
+        );
+        throw new Error('Resposta do CONFEF é HTML em vez de JSON');
+      }
+
       return this.processConfefResponse(response.data, crefNumber);
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na consulta CONFEF: ${error.message}`);
@@ -151,92 +185,524 @@ export class CrefService {
     }
   }
 
+  private createFormData(crefNumber: string): FormDataLib {
+    const formData = new FormDataLib();
+    formData.append('q', crefNumber);
+    return formData;
+  }
+
+  private getBrowserHeaders(cookies?: string[]): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      Origin: 'https://www.confef.org.br',
+      Referer: `${this.CONFEF_BASE}/registrados/`,
+      Connection: 'keep-alive',
+    };
+
+    if (cookies && cookies.length > 0) {
+      headers['Cookie'] = cookies.join('; ');
+    }
+
+    return headers;
+  }
+
+  private getApiHeaders(
+    formData: FormDataLib,
+    token: string,
+    cookies?: string[],
+  ): Record<string, string> {
+    return {
+      ...formData.getHeaders(),
+      ...this.getBrowserHeaders(cookies),
+      Authorization: `Bearer ${token}`,
+      Accept: '*/*',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    };
+  }
+
+  private getPageHeaders(cookies?: string[]): Record<string, string> {
+    return {
+      ...this.getBrowserHeaders(cookies),
+      Accept:
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+    };
+  }
+
+  private extractCookies(
+    response: any,
+    existingCookies: string[] = [],
+  ): string[] {
+    const setCookieHeaders = response.headers['set-cookie'] || [];
+    const newCookies = Array.isArray(setCookieHeaders)
+      ? setCookieHeaders
+      : [setCookieHeaders].filter(Boolean);
+    return [...existingCookies, ...newCookies];
+  }
+
+  private normalizeUrl(url: string): string {
+    return url.startsWith('http') ? url : `https://www.confef.org.br${url}`;
+  }
+
+  private isChallengeUrl(url: string): boolean {
+    return url === '/challenge' || url.includes('/challenge');
+  }
+
+  private isRedirectStatus(status: number): boolean {
+    return status === 302 || status === 301;
+  }
+
+  private extractTokenFromResponse(data: any): string {
+    if (typeof data === 'string') {
+      return data.trim();
+    }
+    if (data && typeof data === 'object') {
+      return data.token || data.jwt || '';
+    }
+    return '';
+  }
+
+  private extractErrorInfo(error: unknown): { message: string; code: string } {
+    if (error instanceof AxiosError) {
+      return {
+        message: error.message || error.response?.statusText || 'Erro desconhecido',
+        code: error.code || 'UNKNOWN',
+      };
+    }
+    const err = error as Error;
+    return {
+      message: err.message || String(error),
+      code: err.name || 'UNKNOWN',
+    };
+  }
+
+  private isRetryableError(errorMessage: string, errorCode: string): boolean {
+    const retryableCodes = [
+      'ECONNABORTED',
+      'ETIMEDOUT',
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'ERR_FR_TOO_MANY_REDIRECTS',
+    ];
+    const retryableMessages = [
+      'timeout',
+      'fetch',
+      'redirect',
+      'Máximo de redirects',
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'ETIMEDOUT',
+    ];
+
+    return (
+      retryableCodes.includes(errorCode) ||
+      retryableMessages.some((msg) => errorMessage.includes(msg))
+    );
+  }
+
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    retryCount: number,
+    operationName: string,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      const { message, code } = this.extractErrorInfo(error);
+
+      if (
+        this.isRetryableError(message, code) &&
+        retryCount < this.MAX_RETRIES
+      ) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        this.logger.warn(
+          `⚠️ [CREF] ${operationName} - Tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.retryWithBackoff(fn, retryCount + 1, operationName);
+      }
+
+      if (code === 'ECONNABORTED' || message.includes('timeout')) {
+        this.logger.error(
+          `💥 [CREF] ${operationName} - Timeout após múltiplas tentativas`,
+        );
+        throw new Error(`Timeout ao ${operationName}`);
+      }
+
+      throw error;
+    }
+  }
+
+  private async followRedirectGet(
+    url: string,
+    redirectCount = 0,
+    maxRedirects = this.MAX_REDIRECTS,
+    visitedUrls: Map<string, number> = new Map(),
+    cookies: string[] = [],
+    headersOverride?: Record<string, string>,
+  ): Promise<{ data: any; status: number; cookies: string[] }> {
+    if (redirectCount >= maxRedirects) {
+      throw new Error('Máximo de redirects excedido');
+    }
+
+    const targetUrl = this.normalizeUrl(url);
+
+    // Contar visitas e detectar loops
+    const visitCount = visitedUrls.get(targetUrl) || 0;
+    visitedUrls.set(targetUrl, visitCount + 1);
+
+    if (visitCount >= 2) {
+      this.logger.error(
+        `💥 [CREF] Loop detectado! URL visitada mais de 2 vezes: ${targetUrl}`,
+      );
+      throw new Error(
+        `Loop de redirects detectado. URL visitada múltiplas vezes: ${targetUrl}`,
+      );
+    }
+
+    this.logger.log(
+      `🔄 [CREF] GET ${redirectCount + 1} para: ${targetUrl}`,
+    );
+
+    const headers = headersOverride || this.getPageHeaders(cookies);
+    const response = await axios.get(targetUrl, {
+      headers,
+      timeout: this.REQUEST_TIMEOUT,
+      maxRedirects: 0,
+      validateStatus: (status) => status < 600,
+    });
+
+    const allCookies = this.extractCookies(response, cookies);
+
+    this.logger.log(
+      `📡 [CREF] GET resposta: ${response.status}, Content-Type: ${response.headers['content-type']}`,
+    );
+
+    // Se retornou redirect, seguir
+    if (this.isRedirectStatus(response.status)) {
+      const redirectUrl = response.headers.location;
+      if (!redirectUrl) {
+        throw new Error('Redirect sem URL de destino');
+      }
+
+      // Se o redirect for para /challenge, resolver antes de continuar
+      if (this.isChallengeUrl(redirectUrl)) {
+        this.logger.log(`🛡️ [CREF] Challenge detectado, resolvendo...`);
+        return this.followRedirectGet(
+          redirectUrl,
+          redirectCount + 1,
+          maxRedirects,
+          visitedUrls,
+          allCookies,
+          {
+            ...this.getPageHeaders(allCookies),
+            'Sec-Fetch-Site': 'same-origin',
+          },
+        );
+      }
+
+      // Seguir redirect
+      const nextUrl = this.normalizeUrl(redirectUrl);
+      this.logger.log(`🔄 [CREF] Seguindo redirect GET para: ${nextUrl}`);
+
+      return this.followRedirectGet(
+        nextUrl,
+        redirectCount + 1,
+        maxRedirects,
+        visitedUrls,
+        allCookies,
+        headersOverride,
+      );
+    }
+
+    return { data: response.data, status: response.status, cookies: allCookies };
+  }
+
+  private async establishSession(): Promise<string[]> {
+    this.logger.log(`🍪 [CREF] Estabelecendo sessão inicial...`);
+    let cookies: string[] = [];
+
+    try {
+      // 1. GET na página de registrados para obter cookies iniciais
+      const pageResult = await this.followRedirectGet(
+        this.CONFEF_BASE + '/registrados/',
+        0,
+        this.MAX_REDIRECTS,
+        new Map(),
+        [],
+        this.getPageHeaders(),
+      );
+
+      cookies = pageResult.cookies;
+      this.logger.log(`🍪 [CREF] Cookies obtidos: ${cookies.length} cookies`);
+
+      // 2. GET na API para estabelecer sessão completa
+      try {
+        await this.followRedirectGet(
+          this.API_URL,
+          0,
+          this.MAX_REDIRECTS_SESSION,
+          new Map(),
+          cookies,
+          {
+            ...this.getBrowserHeaders(cookies),
+            Accept: '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        );
+        this.logger.log(`✅ [CREF] Sessão estabelecida com sucesso`);
+      } catch (error) {
+        this.logger.debug(
+          `🔍 [CREF] Requisição de estabelecimento: ${error.message}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `⚠️ [CREF] Erro ao estabelecer sessão (continuando): ${error.message}`,
+      );
+    }
+
+    return cookies;
+  }
+
+  private async resolveChallenge(
+    challengeUrl: string,
+    cookies: string[],
+  ): Promise<string[]> {
+    this.logger.log(`🛡️ [CREF] Resolvendo challenge...`);
+
+    try {
+      const result = await this.followRedirectGet(
+        challengeUrl,
+        0,
+        this.MAX_REDIRECTS_SESSION,
+        new Map(),
+        cookies,
+        {
+          ...this.getPageHeaders(cookies),
+          'Sec-Fetch-Site': 'same-origin',
+        },
+      );
+
+      this.logger.log(`✅ [CREF] Challenge resolvido`);
+      return result.cookies;
+    } catch (error) {
+      this.logger.warn(
+        `⚠️ [CREF] Erro ao resolver challenge: ${error.message}`,
+      );
+      return cookies;
+    }
+  }
+
+  private async followRedirect(
+    url: string,
+    token: string,
+    crefNumber: string,
+    redirectCount = 0,
+    maxRedirects = this.MAX_REDIRECTS,
+    visitedUrls: Map<string, number> = new Map(),
+    cookies: string[] = [],
+  ): Promise<{ data: any; status: number }> {
+    if (redirectCount >= maxRedirects) {
+      throw new Error('Máximo de redirects excedido');
+    }
+
+    const formData = this.createFormData(crefNumber);
+    const targetUrl = this.normalizeUrl(url);
+
+    // Contar visitas e detectar loops
+    const visitCount = visitedUrls.get(targetUrl) || 0;
+    visitedUrls.set(targetUrl, visitCount + 1);
+
+    // Permitir visitar a API duas vezes (inicial e após challenge)
+    if (visitCount >= 2 && targetUrl === this.API_URL) {
+      this.logger.error(
+        `💥 [CREF] Loop detectado! API visitada mais de 2 vezes: ${targetUrl}`,
+      );
+      throw new Error(
+        `Loop de redirects detectado. API visitada múltiplas vezes: ${targetUrl}`,
+      );
+    }
+
+    // Para outras URLs, não permitir visitar mais de uma vez
+    if (visitCount >= 1 && targetUrl !== this.API_URL) {
+      this.logger.error(
+        `💥 [CREF] Loop detectado! URL já visitada: ${targetUrl}`,
+      );
+      throw new Error(
+        `Loop de redirects detectado. URL repetida: ${targetUrl}`,
+      );
+    }
+
+    this.logger.log(
+      `🔄 [CREF] Requisição ${redirectCount + 1} para: ${targetUrl}`,
+    );
+
+    const headers = this.getApiHeaders(formData, token, cookies);
+    const response = await axios.post(targetUrl, formData, {
+      headers,
+      timeout: this.REQUEST_TIMEOUT,
+      maxRedirects: 0,
+      validateStatus: (status) => status < 600,
+    });
+
+    const allCookies = this.extractCookies(response, cookies);
+
+    this.logger.log(
+      `📡 [CREF] Resposta: ${response.status}, Content-Type: ${response.headers['content-type']}`,
+    );
+
+    // Se retornou redirect, seguir
+    if (this.isRedirectStatus(response.status)) {
+      const redirectUrl = response.headers.location;
+      if (!redirectUrl) {
+        throw new Error('Redirect sem URL de destino');
+      }
+
+      // Se o redirect for para /challenge, resolver antes de continuar
+      if (this.isChallengeUrl(redirectUrl)) {
+        try {
+          const updatedCookies = await this.resolveChallenge(
+            redirectUrl,
+            allCookies,
+          );
+          // Continuar para a API com cookies atualizados
+          return this.followRedirect(
+            this.API_URL,
+            token,
+            crefNumber,
+            redirectCount + 1,
+            maxRedirects,
+            visitedUrls,
+            updatedCookies,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ [CREF] Erro ao resolver challenge (continuando): ${error.message}`,
+          );
+        }
+      }
+
+      // Se o redirect for "/", voltar para a URL original da API
+      const nextUrl =
+        redirectUrl === '/' ||
+        redirectUrl === '/confefv2/includes/api/registrados_pf/get_registrados.php'
+          ? this.API_URL
+          : this.normalizeUrl(redirectUrl);
+
+      this.logger.log(`🔄 [CREF] Seguindo redirect para: ${nextUrl}`);
+
+      return this.followRedirect(
+        nextUrl,
+        token,
+        crefNumber,
+        redirectCount + 1,
+        maxRedirects,
+        visitedUrls,
+        allCookies,
+      );
+    }
+
+    // Se a resposta é HTML em vez de JSON, pode ser um redirect não detectado
+    if (
+      typeof response.data === 'string' &&
+      response.data.includes('<html>')
+    ) {
+      this.logger.warn(
+        `⚠️ [CREF] Resposta é HTML. Tentando extrair redirect do HTML...`,
+      );
+      const locationMatch = response.data.match(/location\s*=\s*['"]([^'"]+)['"]/i);
+      if (locationMatch && locationMatch[1]) {
+        return this.followRedirect(
+          locationMatch[1],
+          token,
+          crefNumber,
+          redirectCount + 1,
+          maxRedirects,
+        );
+      }
+    }
+
+    return { data: response.data, status: response.status };
+  }
+
   private async makeConfefRequest(
     token: string,
     crefNumber: string,
     retryCount = 0,
   ) {
-    const url = new URL(this.API_URL);
-    url.searchParams.set('draw', '1');
-    url.searchParams.set('start', '0');
-    url.searchParams.set('length', '50');
-    url.searchParams.set('search[value]', crefNumber);
-    url.searchParams.set('search[regex]', 'false');
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      this.REQUEST_TIMEOUT,
-    );
-
-    try {
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
-          Accept: 'application/json, text/javascript, */*; q=0.01',
-          Origin: 'https://www.confef.org.br',
-          Referer: `${this.CONFEF_BASE}/registrados/`,
-          'X-Requested-With': 'XMLHttpRequest',
-          Connection: 'keep-alive',
-          'Cache-Control': 'no-cache',
-        },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok && response.status >= 500) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return { data, status: response.status };
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      // Retry com backoff exponencial em caso de timeout ou erro de rede
-      if (
-        (error.name === 'AbortError' || error.message.includes('fetch')) &&
-        retryCount < this.MAX_RETRIES
-      ) {
-        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
-        this.logger.warn(
-          `⚠️ [CREF] Timeout/erro na tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`,
+    return this.retryWithBackoff(
+      async () => {
+        this.logger.log(
+          `📤 [CREF] Enviando POST para CONFEF com CREF: ${crefNumber}`,
         );
 
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.makeConfefRequest(token, crefNumber, retryCount + 1);
-      }
+        // Estabelecer sessão inicial para evitar challenge
+        const initialCookies = await this.establishSession();
 
-      if (error.name === 'AbortError') {
-        throw new Error('Request timeout após múltiplas tentativas');
-      }
-      throw error;
-    }
+        // Usar função recursiva para seguir todos os redirects com cookies
+        const response = await this.followRedirect(
+          this.API_URL,
+          token,
+          crefNumber,
+          0,
+          this.MAX_REDIRECTS,
+          new Map(),
+          initialCookies,
+        );
+
+        this.logger.log(`📡 [CREF] Resposta final: ${response.status}`);
+
+        return { data: response.data, status: response.status };
+      },
+      retryCount,
+      'requisição CONFEF',
+    );
   }
 
   private processConfefResponse(
     responseData: any,
     crefNumber: string,
   ): ConfefData | null {
+    // Log da estrutura completa para debug
+    this.logger.debug(
+      `🔍 [CREF] Estrutura da resposta: ${JSON.stringify(responseData).substring(0, 500)}`,
+    );
+
     const data = responseData?.data || [];
 
     this.logger.log(
       `🔍 [CREF] Número de registros encontrados: ${data.length}`,
     );
 
+    if (data.length === 0) {
+      this.logger.warn(
+        `⚠️ [CREF] Resposta vazia. Estrutura completa: ${JSON.stringify(responseData)}`,
+      );
+    }
+
     // Buscar correspondência - otimizado para performance
     for (const row of data) {
-      // Mapear campos corretos da resposta da API
-      const nome = row.Nome || row.nome || row['2'];
-      const situacao = row.Categoria || row.categoria || row['4'];
-      const uf = row.UF || row.uf || row['0'];
-      const naturezaTitulo =
-        row.NaturezaTitulo || row.naturezaTitulo || row['5'];
-      const crefCompleto = row.NUM_REGISTRO || row.numeroRegistro || row['7'];
+      // Mapear campos corretos da resposta da API (baseado na estrutura fornecida)
+      const nome = row.Nome || row.nome;
+      const situacao = row.Categoria || row.categoria;
+      const uf = row.UF || row.uf;
+      const naturezaTitulo = row.NaturezaTitulo || row.naturezaTitulo;
+      const crefCompleto = row.NUM_REGISTRO || row.numeroRegistro;
+
+      this.logger.debug(
+        `🔍 [CREF] Verificando registro: ${crefCompleto} vs ${crefNumber}`,
+      );
 
       // Verificar se o CREF completo corresponde - parar no primeiro match
       if (crefCompleto === crefNumber) {
@@ -264,92 +730,54 @@ export class CrefService {
       return this.tokenCache.token;
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      this.REQUEST_TIMEOUT,
+    return this.retryWithBackoff(
+      async () => {
+        this.logger.log(`🔑 [CREF] Obtendo novo token do CONFEF`);
+
+        // Estabelecer sessão antes de buscar o token
+        let cookies: string[] = [];
+        try {
+          cookies = await this.establishSession();
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ [CREF] Erro ao estabelecer sessão (continuando): ${error.message}`,
+          );
+        }
+
+        // Usar a mesma função recursiva para gerenciar redirects
+        const result = await this.followRedirectGet(
+          this.TOKEN_URL,
+          0,
+          this.MAX_REDIRECTS,
+          new Map(),
+          cookies,
+          {
+            ...this.getBrowserHeaders(cookies),
+            Accept: 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cache-Control': 'no-cache',
+          },
+        );
+
+        // Extrair token da resposta
+        const token = this.extractTokenFromResponse(result.data);
+
+        if (!token) {
+          throw new Error('Token não encontrado na resposta');
+        }
+
+        // Cache do token
+        this.tokenCache = {
+          token,
+          expires: Date.now() + this.TOKEN_TTL,
+        };
+
+        this.logger.log(`✅ [CREF] Token obtido com sucesso`);
+        return token;
+      },
+      retryCount,
+      'obter token',
     );
-
-    try {
-      this.logger.log(`🔑 [CREF] Obtendo novo token do CONFEF`);
-
-      const response = await fetch(this.TOKEN_URL, {
-        method: 'GET',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36',
-          Accept: 'application/json, text/javascript, */*; q=0.01',
-          Origin: 'https://www.confef.org.br',
-          Referer: `${this.CONFEF_BASE}/registrados/`,
-          'X-Requested-With': 'XMLHttpRequest',
-          Connection: 'keep-alive',
-          'Cache-Control': 'no-cache',
-        },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok && response.status >= 500) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      let token = '';
-      try {
-        const json = await response.json();
-        token = json.token || json.jwt || '';
-      } catch {
-        const text = await response.text();
-        token = text?.trim() || '';
-      }
-
-      if (!token) {
-        throw new Error('Token não encontrado na resposta');
-      }
-
-      // Cache do token
-      this.tokenCache = {
-        token,
-        expires: Date.now() + this.TOKEN_TTL,
-      };
-
-      this.logger.log(`✅ [CREF] Token obtido com sucesso`);
-      return token;
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      // Retry com backoff exponencial
-      if (
-        (error.name === 'AbortError' || error.message.includes('fetch')) &&
-        retryCount < this.MAX_RETRIES
-      ) {
-        const delay = Math.pow(2, retryCount) * 1000;
-        this.logger.warn(
-          `⚠️ [CREF] Timeout/erro ao obter token. Tentativa ${retryCount + 1}/${this.MAX_RETRIES}. Aguardando ${delay}ms...`,
-        );
-
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.getToken(retryCount + 1);
-      }
-
-      if (error.name === 'AbortError') {
-        this.logger.error(
-          `💥 [CREF] Timeout ao obter token após múltiplas tentativas`,
-        );
-        throw new Error('Timeout ao obter token de acesso');
-      }
-      this.logger.error(`💥 [CREF] Erro ao obter token: ${error.message}`);
-      throw new Error('Falha ao obter token de acesso');
-    }
   }
 
-  private normalizeCref(cref: string): string {
-    return (cref || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  }
-
-  private matchesCref(registro: string, crefNumber: string): boolean {
-    const registroDigits = registro.replace(/\D/g, '');
-    const crefDigits = crefNumber.replace(/\D/g, '');
-    return registroDigits.endsWith(crefDigits);
-  }
 }
