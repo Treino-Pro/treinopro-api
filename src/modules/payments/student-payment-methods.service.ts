@@ -394,6 +394,17 @@ export class StudentPaymentMethodsService {
       );
 
       console.log('USUARIO', user);
+      
+      // Usar CPF do usuário se disponível, senão usar CPF de teste
+      const userCpf = user.documentNumber || '19119119100';
+      const identificationType = user.documentType === 'CPF' ? 'CPF' : 'CPF';
+      
+      console.log('🔍 [SAVE_CARD] Usando identificação:', {
+        type: identificationType,
+        number: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
+        source: user.documentNumber ? 'usuário' : 'teste',
+      });
+
       // 1. Criar ou buscar customer no Mercado Pago
       const customer = await this.mercadoPagoService.createOrGetCustomer(
         userId,
@@ -403,8 +414,8 @@ export class StudentPaymentMethodsService {
           lastName:
             saveCardDto.cardHolderName?.split(' ').slice(1).join(' ') || 'User',
           identification: {
-            type: 'CPF',
-            number: '19119119100', // CPF de teste
+            type: identificationType,
+            number: userCpf,
           },
         },
       );
@@ -420,8 +431,8 @@ export class StudentPaymentMethodsService {
         {
           token: cardToken,
           cardholderName: saveCardDto.cardHolderName,
-          identificationType: 'CPF',
-          identificationNumber: '19119119100',
+          identificationType: identificationType,
+          identificationNumber: userCpf,
         },
       );
 

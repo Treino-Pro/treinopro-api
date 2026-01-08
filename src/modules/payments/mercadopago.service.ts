@@ -994,12 +994,38 @@ export class MercadoPagoService {
         throw new BadRequestException('Customer ID é obrigatório');
       }
 
-      // ✅ PAYLOAD SIMPLIFICADO (Mercado Pago detecta automaticamente)
-      const cardPayload = {
+      // ✅ CORREÇÃO: Incluir cardholder no payload (obrigatório segundo documentação MP)
+      // O Mercado Pago requer cardholder com name e identification para salvar cartões
+      const cardPayload: any = {
         token: cardData.token,
-        // Opcional: Se souber a bandeira, pode passar payment_method_id
-        // Mas deixar o MP detectar automaticamente é mais seguro
       };
+
+      // Adicionar cardholder se os dados estiverem disponíveis
+      if (
+        cardData.cardholderName &&
+        cardData.identificationType &&
+        cardData.identificationNumber
+      ) {
+        cardPayload.cardholder = {
+          name: cardData.cardholderName,
+          identification: {
+            type: cardData.identificationType,
+            number: cardData.identificationNumber,
+          },
+        };
+        console.log('👤 [MP CARD] Cardholder incluído no payload:', {
+          name: cardData.cardholderName,
+          identificationType: cardData.identificationType,
+          identificationNumber: cardData.identificationNumber.replace(
+            /\d(?=\d{4})/g,
+            '*',
+          ), // Mascarar para log
+        });
+      } else {
+        console.warn(
+          '⚠️ [MP CARD] Cardholder não incluído - dados incompletos',
+        );
+      }
 
       console.log(
         '📤 [MP CARD] Enviando payload:',
