@@ -385,56 +385,141 @@ export class StudentPaymentMethodsService {
         );
       }
 
-      // 1. Criar token do cartão IMEDIATAMENTE (minimizar chance de expiração)
-      console.log('🔐 [SAVE_CARD] Criando token do cartão...');
-      const cardToken = await this.tokenizeCard(saveCardDto);
-      console.log(
-        '🔑 [SAVE_CARD] Token criado:',
-        cardToken.substring(0, 20) + '...',
-      );
-
-      console.log('USUARIO', user);
-      
       // Usar CPF do usuário se disponível, senão usar CPF de teste
       const userCpf = user.documentNumber || '19119119100';
       const identificationType = user.documentType === 'CPF' ? 'CPF' : 'CPF';
+      
+      // Usar nome completo do usuário para cardholder, não apenas o nome do cartão
+      const cardholderFirstName = user.firstName || saveCardDto.cardHolderName?.split(' ')[0] || 'Test';
+      const cardholderLastName = user.lastName || saveCardDto.cardHolderName?.split(' ').slice(1).join(' ') || 'User';
+      const cardholderFullName = `${cardholderFirstName} ${cardholderLastName}`.trim();
       
       console.log('🔍 [SAVE_CARD] Usando identificação:', {
         type: identificationType,
         number: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
         source: user.documentNumber ? 'usuário' : 'teste',
+        cardholderName: cardholderFullName,
       });
 
-      // 1. Criar ou buscar customer no Mercado Pago
+      // 1. Criar token do cartão
+      console.log('🔐 [SAVE_CARD] Criando token do cartão...');
+      const cardToken = await this.tokenizeCard(saveCardDto);
+      console.log('🔑 [SAVE_CARD] Token criado:', cardToken.substring(0, 20) + '...');
+
+      // 2. Criar ou buscar customer no Mercado Pago
       const customer = await this.mercadoPagoService.createOrGetCustomer(
         userId,
         {
           email: user.email || 'test_user_123456@testuser.com',
-          firstName: saveCardDto.cardHolderName?.split(' ')[0] || 'Test',
-          lastName:
-            saveCardDto.cardHolderName?.split(' ').slice(1).join(' ') || 'User',
+          firstName: cardholderFirstName,
+          lastName: cardholderLastName,
           identification: {
             type: identificationType,
             number: userCpf,
           },
         },
       );
-
       console.log('👤 [SAVE_CARD] Customer criado/encontrado:', customer.id);
 
-      // 3. Salvar cartão no customer IMEDIATAMENTE após criar token
-      console.log('💳 [SAVE_CARD] Salvando cartão no customer...');
-      console.log('🔍 [SAVE_CARD] Customer ID:', customer.id);
-      console.log('🔍 [SAVE_CARD] Token length:', cardToken?.length);
-      const savedCard = await this.mercadoPagoService.saveCardToCustomer(
-        customer.id,
-        {
+      // 3. ESTRATÉGIA: Pré-autorização de R$ 1,00 para validar cartão
+      console.log('💳 [SAVE_CARD] Fazendo pré-autorização de R$ 1,00 para validar cartão...');
+      
+      let validationPayment;
+      try {
+        validationPayment = await this.mercadoPagoService.createPayment({
           token: cardToken,
-          cardholderName: saveCardDto.cardHolderName,
-          identificationType: identificationType,
-          identificationNumber: userCpf,
-        },
-      );
+          amount: 1.00, // Valor simbólico
+          description: 'Validação do cartão (estorno automático)',
+          externalReference: `card_validation_${userId}_${Date.now()}`,
+          capture: false, // Apenas autorização, sem captura
+          payerEmail: user.email,
+          payerIdentification: {
+            type: identificationType,
+            number: userCpf,
+          },
+          payerId: customer.id, // Usar customer ID
+        });
+
+        console.log('✅ [SAVE_CARD] Pré-autorização aprovada:', validationPayment.id);
+        console.log('💳 [SAVE_CARD] Card ID retornado:', validationPayment.card?.id);
+        console.log('💳 [SAVE_CARD] Status do pagamento:', validationPayment.status);
+
+        // 4. Estornar imediatamente
+        console.log('🔄 [SAVE_CARD] Estornando pré-autorização...');
+        try {
+          await this.mercadoPagoService.refundPayment(validationPayment.id, 1.00);
+          console.log('✅ [SAVE_CARD] Estorno realizado com sucesso');
+        } catch (refundError) {
+          console.error('⚠️ [SAVE_CARD] Erro ao estornar (não crítico):', refundError);
+          // Não bloquear o fluxo se o estorno falhar
+        }
+      } catch (paymentError) {
+        console.error('❌ [SAVE_CARD] Erro na pré-autorização:', paymentError);
+        throw new BadRequestException(
+          `Cartão inválido ou recusado: ${paymentError.message || 'Não foi possível validar o cartão'}`,
+        );
+      }
+
+      // 5. Salvar cartão no customer usando o card_id do payment ou token
+      let savedCard;
+      
+      if (validationPayment.card?.id) {
+        // Tentar salvar usando o card_id retornado pelo payment
+        console.log('💾 [SAVE_CARD] Verificando se cartão já está salvo no customer...');
+        
+        try {
+          // Verificar se o cartão já está no customer
+          const customerCards = await this.mercadoPagoService.getCustomerCards(customer.id);
+          const existingCard = customerCards.find(
+            (card: any) => card.id === validationPayment.card.id,
+          );
+          
+          if (existingCard) {
+            console.log('✅ [SAVE_CARD] Cartão já salvo no customer via payment');
+            savedCard = {
+              id: existingCard.id,
+              lastFourDigits: existingCard.last_four_digits,
+              paymentMethodId: existingCard.payment_method?.id,
+              expirationMonth: existingCard.expiration_month,
+              expirationYear: existingCard.expiration_year,
+            };
+          } else {
+            // Se não estiver salvo, tentar salvar manualmente com token
+            console.log('💾 [SAVE_CARD] Cartão não encontrado no customer, salvando manualmente...');
+            savedCard = await this.mercadoPagoService.saveCardToCustomer(
+              customer.id,
+              {
+                token: cardToken,
+                cardholderName: cardholderFullName,
+                identificationType: identificationType,
+                identificationNumber: userCpf,
+              },
+            );
+          }
+        } catch (saveError) {
+          console.error('⚠️ [SAVE_CARD] Erro ao verificar/salvar cartão no customer:', saveError);
+          // Se falhar, usar dados do payment
+          savedCard = {
+            id: validationPayment.card.id,
+            lastFourDigits: validationPayment.card.last_four_digits,
+            paymentMethodId: validationPayment.payment_method_id,
+            expirationMonth: validationPayment.card.expiration_month,
+            expirationYear: validationPayment.card.expiration_year,
+          };
+        }
+      } else {
+        // Fallback: tentar salvar usando token (método antigo)
+        console.log('💾 [SAVE_CARD] Card ID não retornado, usando método de token...');
+        savedCard = await this.mercadoPagoService.saveCardToCustomer(
+          customer.id,
+          {
+            token: cardToken,
+            cardholderName: cardholderFullName,
+            identificationType: identificationType,
+            identificationNumber: userCpf,
+          },
+        );
+      }
 
       console.log('💳 [SAVE_CARD] Cartão salvo no customer:', savedCard.id);
 
@@ -454,6 +539,9 @@ export class StudentPaymentMethodsService {
       }
 
       // 7. Salvar no banco de dados
+      // Usar lastFourDigits do savedCard se disponível, senão usar do cardNumber
+      const lastFourDigits = savedCard.lastFourDigits || saveCardDto.cardNumber.slice(-4);
+      
       const [savedPaymentMethod] = await db
         .insert(savedCards)
         .values({
@@ -463,10 +551,10 @@ export class StudentPaymentMethodsService {
           mpCardId: savedCard.id,
           cardBrand,
           cardType: saveCardDto.cardType,
-          lastFourDigits: saveCardDto.cardNumber.slice(-4),
-          expirationMonth: month,
-          expirationYear: year,
-          cardHolderName: saveCardDto.cardHolderName,
+          lastFourDigits: lastFourDigits,
+          expirationMonth: savedCard.expirationMonth?.toString() || month,
+          expirationYear: savedCard.expirationYear?.toString() || year,
+          cardHolderName: cardholderFullName, // Usar nome completo
           nickname: saveCardDto.nickname,
           isDefault: saveCardDto.setAsDefault || false,
           expiresAt,
