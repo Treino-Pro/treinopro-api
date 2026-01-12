@@ -51,6 +51,22 @@ export class MercadoPagoService {
     const accessToken = process.env.MP_ACCESS_TOKEN || '';
     const isTestMode = accessToken.startsWith('TEST-');
 
+    // ✅ VALIDAÇÃO: Verificar se Access Token está configurado
+    if (!accessToken) {
+      this.logger.error('❌ MP_ACCESS_TOKEN não configurado');
+    } else {
+      this.logger.log(
+        `✅ MercadoPago Service - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`,
+      );
+      
+      // ✅ AVISO: Se estiver em produção, alertar sobre cartões de teste
+      if (!isTestMode) {
+        this.logger.warn(
+          '⚠️ Modo PRODUÇÃO: Certifique-se de usar cartões reais, não cartões de teste',
+        );
+      }
+    }
+
     this.client = new MercadoPagoConfig({
       accessToken,
       options: {
@@ -63,10 +79,6 @@ export class MercadoPagoService {
     this.paymentRefund = new PaymentRefund(this.client);
     this.cardToken = new CardToken(this.client);
     this.customer = new Customer(this.client);
-
-    this.logger.log(
-      `MercadoPago Service inicializado - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`,
-    );
   }
 
   // Criar preferência de pagamento com split
@@ -647,13 +659,15 @@ export class MercadoPagoService {
     expirationYear: string;
     securityCode: string;
     cardholderName: string;
+    identificationType?: string;
+    identificationNumber?: string;
   }): Promise<string> {
     try {
       this.logger.log(
         `Criando token de cartão para: ${cardData.cardholderName}`,
       );
 
-      const cardTokenRequest = {
+      const cardTokenRequest: any = {
         card_number: cardData.cardNumber.replace(/\s/g, ''), // Remove espaços
         expiration_month: cardData.expirationMonth,
         expiration_year: cardData.expirationYear,
@@ -662,6 +676,21 @@ export class MercadoPagoService {
           name: cardData.cardholderName,
         },
       };
+
+      // ✅ ADICIONAR: identification é obrigatório segundo MP
+      if (cardData.identificationType && cardData.identificationNumber) {
+        cardTokenRequest.cardholder.identification = {
+          type: cardData.identificationType,
+          number: cardData.identificationNumber.replace(/\D/g, ''), // Remove formatação (pontos, traços)
+        };
+        
+        this.logger.log(`🔍 [MP CARD TOKEN] Identification incluído:`, {
+          type: cardData.identificationType,
+          number_masked: cardData.identificationNumber.replace(/\d(?=\d{4})/g, '*'),
+        });
+      } else {
+        this.logger.warn('⚠️ [MP CARD TOKEN] Identification não fornecido - pode causar erro 400');
+      }
 
       this.logger.log(`🔍 [MP CARD TOKEN] Payload:`, {
         card_number_masked: cardData.cardNumber.replace(/\d(?=\d{4})/g, '*'), // Mascarar número para log
@@ -672,6 +701,7 @@ export class MercadoPagoService {
         expiration_year: cardTokenRequest.expiration_year,
         security_code: '***',
         cardholder_name: cardData.cardholderName,
+        has_identification: !!cardTokenRequest.cardholder.identification,
       });
 
       const response = await this.cardToken.create({

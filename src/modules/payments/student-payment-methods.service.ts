@@ -401,12 +401,7 @@ export class StudentPaymentMethodsService {
         cardholderName: cardholderFullName,
       });
 
-      // 1. Criar token do cartão
-      console.log('🔐 [SAVE_CARD] Criando token do cartão...');
-      const cardToken = await this.tokenizeCard(saveCardDto);
-      console.log('🔑 [SAVE_CARD] Token criado:', cardToken.substring(0, 20) + '...');
-
-      // 2. Criar ou buscar customer no Mercado Pago
+      // 1. Criar ou buscar customer no Mercado Pago
       const customer = await this.mercadoPagoService.createOrGetCustomer(
         userId,
         {
@@ -421,13 +416,22 @@ export class StudentPaymentMethodsService {
       );
       console.log('👤 [SAVE_CARD] Customer criado/encontrado:', customer.id);
 
-      // 3. ESTRATÉGIA: Pré-autorização de R$ 1,00 para validar cartão
+      // 2. ESTRATÉGIA: Pré-autorização de R$ 1,00 para validar cartão
       console.log('💳 [SAVE_CARD] Fazendo pré-autorização de R$ 1,00 para validar cartão...');
+      
+      // ✅ Gerar token fresco para validação
+      console.log('🔐 [SAVE_CARD] Gerando token para validação...');
+      const validationToken = await this.tokenizeCard(
+        saveCardDto,
+        identificationType,
+        userCpf,
+      );
+      console.log('🔑 [SAVE_CARD] Token de validação criado:', validationToken.substring(0, 20) + '...');
       
       let validationPayment;
       try {
         validationPayment = await this.mercadoPagoService.createPayment({
-          token: cardToken,
+          token: validationToken,
           amount: 1.00, // Valor simbólico
           description: 'Validação do cartão (estorno automático)',
           externalReference: `card_validation_${userId}_${Date.now()}`,
@@ -444,7 +448,7 @@ export class StudentPaymentMethodsService {
         console.log('💳 [SAVE_CARD] Card ID retornado:', validationPayment.card?.id);
         console.log('💳 [SAVE_CARD] Status do pagamento:', validationPayment.status);
 
-        // 4. Estornar imediatamente
+        // 3. Estornar imediatamente
         console.log('🔄 [SAVE_CARD] Estornando pré-autorização...');
         try {
           await this.mercadoPagoService.refundPayment(validationPayment.id, 1.00);
@@ -460,7 +464,17 @@ export class StudentPaymentMethodsService {
         );
       }
 
-      // 5. Salvar cartão no customer usando o card_id do payment ou token
+      // 4. ✅ IMPORTANTE: Gerar token FRESCO imediatamente antes de salvar
+      // Não reutilizar o token da pré-autorização (pode ter expirado)
+      console.log('🔐 [SAVE_CARD] Gerando token fresco para salvar cartão...');
+      const freshCardToken = await this.tokenizeCard(
+        saveCardDto,
+        identificationType,
+        userCpf,
+      );
+      console.log('🔑 [SAVE_CARD] Token fresco criado:', freshCardToken.substring(0, 20) + '...');
+
+      // 5. Salvar cartão no customer usando o card_id do payment ou token fresco
       let savedCard;
       
       if (validationPayment.card?.id) {
@@ -484,12 +498,12 @@ export class StudentPaymentMethodsService {
               expirationYear: existingCard.expiration_year,
             };
           } else {
-            // Se não estiver salvo, tentar salvar manualmente com token
-            console.log('💾 [SAVE_CARD] Cartão não encontrado no customer, salvando manualmente...');
+            // Se não estiver salvo, tentar salvar manualmente com token fresco
+            console.log('💾 [SAVE_CARD] Cartão não encontrado no customer, salvando manualmente com token fresco...');
             savedCard = await this.mercadoPagoService.saveCardToCustomer(
               customer.id,
               {
-                token: cardToken,
+                token: freshCardToken, // ✅ Token fresco gerado AGORA
                 cardholderName: cardholderFullName,
                 identificationType: identificationType,
                 identificationNumber: userCpf,
@@ -508,12 +522,12 @@ export class StudentPaymentMethodsService {
           };
         }
       } else {
-        // Fallback: tentar salvar usando token (método antigo)
-        console.log('💾 [SAVE_CARD] Card ID não retornado, usando método de token...');
+        // Fallback: tentar salvar usando token fresco
+        console.log('💾 [SAVE_CARD] Card ID não retornado, usando método de token fresco...');
         savedCard = await this.mercadoPagoService.saveCardToCustomer(
           customer.id,
           {
-            token: cardToken,
+            token: freshCardToken, // ✅ Token fresco gerado AGORA
             cardholderName: cardholderFullName,
             identificationType: identificationType,
             identificationNumber: userCpf,
@@ -546,7 +560,7 @@ export class StudentPaymentMethodsService {
         .insert(savedCards)
         .values({
           userId,
-          mpCardToken: cardToken,
+          mpCardToken: freshCardToken, // ✅ Usar token fresco
           mpCustomerId: customer.id,
           mpCardId: savedCard.id,
           cardBrand,
@@ -588,7 +602,11 @@ export class StudentPaymentMethodsService {
   }
 
   // Tokenizar cartão no Mercado Pago
-  private async tokenizeCard(cardDto: SaveCardDto): Promise<string> {
+  private async tokenizeCard(
+    cardDto: SaveCardDto,
+    identificationType?: string,
+    identificationNumber?: string,
+  ): Promise<string> {
     try {
       console.log('🔐 [TOKENIZE CARD] Tokenizando cartão no Mercado Pago...');
 
@@ -601,6 +619,7 @@ export class StudentPaymentMethodsService {
         month: month,
         year: fullYear,
         cardNumberMasked: cardDto.cardNumber.replace(/\d(?=\d{4})/g, '*'),
+        hasIdentification: !!(identificationType && identificationNumber),
       });
 
       // Usar cartão de teste oficial do MP se for o cartão Mastercard problemático
@@ -617,6 +636,8 @@ export class StudentPaymentMethodsService {
           expirationYear: fullYear,
           securityCode: '123', // CVV padrão do MP
           cardholderName: 'APRO', // Nome padrão para aprovação
+          identificationType: identificationType, // ✅ Passar identification
+          identificationNumber: identificationNumber, // ✅ Passar identification
         });
 
         console.log(
@@ -637,11 +658,14 @@ export class StudentPaymentMethodsService {
         expirationYear: fullYear,
         securityCode: cardDto.cvv,
         cardholderName: cardDto.cardHolderName,
+        identificationType: identificationType, // ✅ Passar identification
+        identificationNumber: identificationNumber, // ✅ Passar identification
       });
 
       console.log('✅ [TOKENIZE CARD] Token criado com sucesso:', {
         tokenLength: token?.length || 0,
         tokenPreview: token?.substring(0, 20) + '...',
+        hasIdentification: !!(identificationType && identificationNumber),
       });
 
       return token;
@@ -918,23 +942,39 @@ export class StudentPaymentMethodsService {
         timesUsed: savedCard.timesUsed,
       });
 
+      // ✅ SEMPRE gerar token fresco - tokens expiram em poucos minutos
       const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
       if (isTestEnv) {
-        // Re-tokenizar usando cartão oficial de teste (sandbox) para evitar token expirado
+        // ✅ Em teste: Re-tokenizar usando cartão oficial de teste (sandbox)
         const fullYear =
           savedCard.expirationYear.length === 2
             ? `20${savedCard.expirationYear}`
             : savedCard.expirationYear;
+        
+        // Buscar dados do usuário para identification
+        const user = await db.query.users.findFirst({
+          where: eq(users.id, userId),
+        });
+        
+        const userCpf = user?.documentNumber || '19119119100';
+        const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
+        
         cardToken = await this.mercadoPagoService.createCardToken({
           cardNumber: '4235 6477 2802 5682', // Visa oficial de teste MP
           expirationMonth: savedCard.expirationMonth,
           expirationYear: fullYear,
           securityCode: '123',
-          cardholderName: 'APRO',
+          cardholderName: savedCard.cardHolderName || 'APRO',
+          identificationType: identificationType, // ✅ Adicionar identification
+          identificationNumber: userCpf, // ✅ Adicionar identification
         });
+        console.log('✅ [CARD PAYMENT] Token fresco gerado para ambiente de teste');
       } else {
-        // Em produção, ainda usamos o token salvo (ideal: migrar para customer/card_id)
-        cardToken = savedCard.mpCardToken;
+        // ❌ Em produção: Não podemos gerar token sem CVV
+        // Tokens expiram rapidamente, não podemos reutilizar
+        throw new BadRequestException(
+          'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+        );
       }
       cardInfo = {
         lastFourDigits: savedCard.lastFourDigits,
@@ -956,8 +996,20 @@ export class StudentPaymentMethodsService {
       console.log('✅ [CARD PAYMENT] Cartão atualizado com novo uso');
     } else if (processDto.cardData) {
       console.log('🆕 [CARD PAYMENT] Processando cartão novo...');
+      // Buscar dados do usuário para identification
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+      
+      const userCpf = user?.documentNumber || '19119119100';
+      const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
+      
       // Usar cartão novo
-      cardToken = await this.tokenizeCard(processDto.cardData);
+      cardToken = await this.tokenizeCard(
+        processDto.cardData,
+        identificationType,
+        userCpf,
+      );
       cardInfo = {
         lastFourDigits: processDto.cardData.cardNumber.slice(-4),
         cardBrand: this.detectCardBrand(processDto.cardData.cardNumber),
@@ -1129,8 +1181,51 @@ export class StudentPaymentMethodsService {
         cardBrand,
       );
 
-      cardToken = savedCard.mpCardToken;
-      console.log('🔍 [PROPOSAL CARD PAYMENT] Token obtido:', {
+      // ✅ SEMPRE gerar token fresco - tokens expiram em poucos minutos
+      // Não reutilizar token salvo
+      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+      if (isTestEnv) {
+        // ✅ Em teste: Gerar token fresco usando cartão oficial de teste
+        const fullYear =
+          savedCard.expirationYear.length === 2
+            ? `20${savedCard.expirationYear}`
+            : savedCard.expirationYear;
+        
+        // Buscar dados do usuário para identification
+        const user = await db.query.users.findFirst({
+          where: eq(users.id, userId),
+        });
+        
+        const userCpf = user?.documentNumber || '19119119100';
+        const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
+        
+        // Mapear bandeira do cartão salvo para cartão de teste MP correspondente
+        let testCardNumber: string;
+        if (cardBrand === 'MASTERCARD' || cardBrand === 'master') {
+          testCardNumber = '4009172292806176'; // Mastercard oficial de teste MP
+        } else {
+          testCardNumber = '4235 6477 2802 5682'; // Visa oficial de teste MP
+        }
+        
+        cardToken = await this.mercadoPagoService.createCardToken({
+          cardNumber: testCardNumber,
+          expirationMonth: savedCard.expirationMonth,
+          expirationYear: fullYear,
+          securityCode: '123',
+          cardholderName: savedCard.cardHolderName || 'APRO',
+          identificationType: identificationType, // ✅ Adicionar identification
+          identificationNumber: userCpf, // ✅ Adicionar identification
+        });
+        console.log('✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para ambiente de teste');
+      } else {
+        // ❌ Em produção: Não podemos gerar token sem CVV
+        // Tokens expiram rapidamente, não podemos reutilizar
+        throw new BadRequestException(
+          'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+        );
+      }
+      
+      console.log('🔍 [PROPOSAL CARD PAYMENT] Token fresco gerado:', {
         tokenLength: cardToken?.length || 0,
         tokenPreview: cardToken?.substring(0, 20) + '...',
         hasToken: !!cardToken,
@@ -1279,6 +1374,14 @@ export class StudentPaymentMethodsService {
             testCardholderName,
           });
 
+          // Buscar dados do usuário para identification
+          const user = await db.query.users.findFirst({
+            where: eq(users.id, userId),
+          });
+          
+          const userCpf = user?.documentNumber || '19119119100';
+          const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
+          
           // Gerar token usando cartão de teste MP correspondente à bandeira do cartão salvo
           cardToken = await this.mercadoPagoService.createCardToken({
             cardNumber: testCardNumber,
@@ -1286,6 +1389,8 @@ export class StudentPaymentMethodsService {
             expirationYear: '20' + (savedCard.expirationYear || '25'), // ✅ '20' + dígitos do cartão
             securityCode: '123',
             cardholderName: testCardholderName,
+            identificationType: identificationType, // ✅ Adicionar identification
+            identificationNumber: userCpf, // ✅ Adicionar identification
           });
 
           console.log(
@@ -1298,23 +1403,14 @@ export class StudentPaymentMethodsService {
             },
           );
         } else {
-          // Produção: verificar se token salvo ainda é válido
-          const tokenAge = Date.now() - new Date(savedCard.createdAt).getTime();
-          const tokenAgeHours = tokenAge / (1000 * 60 * 60);
-
-          if (tokenAgeHours < 24 && savedCard.mpCardToken) {
-            console.log(
-              '🏭 [PROPOSAL CARD PAYMENT] Produção - usando token salvo válido',
-            );
-            cardToken = savedCard.mpCardToken;
-          } else {
-            console.log(
-              '⚠️ [PROPOSAL CARD PAYMENT] Token expirado - pedir para adicionar cartão novamente',
-            );
-            throw new BadRequestException(
-              'Token do cartão expirado. Por favor, adicione o cartão novamente.',
-            );
-          }
+          // ❌ Produção: Não podemos gerar token sem CVV
+          // Tokens expiram rapidamente (poucos minutos), não podemos reutilizar
+          console.log(
+            '⚠️ [PROPOSAL CARD PAYMENT] Produção - token expirado, não é possível gerar novo sem CVV',
+          );
+          throw new BadRequestException(
+            'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+          );
         }
 
         cardInfo = {
