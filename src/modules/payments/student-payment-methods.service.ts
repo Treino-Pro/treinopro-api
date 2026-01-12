@@ -389,16 +389,19 @@ export class StudentPaymentMethodsService {
       const userCpf = user.documentNumber || '19119119100';
       const identificationType = user.documentType === 'CPF' ? 'CPF' : 'CPF';
       
-      // Usar nome completo do usuário para cardholder, não apenas o nome do cartão
-      const cardholderFirstName = user.firstName || saveCardDto.cardHolderName?.split(' ')[0] || 'Test';
-      const cardholderLastName = user.lastName || saveCardDto.cardHolderName?.split(' ').slice(1).join(' ') || 'User';
-      const cardholderFullName = `${cardholderFirstName} ${cardholderLastName}`.trim();
+      // ✅ CORREÇÃO: Usar o nome do cartão (do frontend) em ambos os lugares
+      // O cartão pode ser de outra pessoa, então devemos usar o nome informado no cartão
+      const cardholderName = saveCardDto.cardHolderName || `${user.firstName} ${user.lastName}`.trim();
+      
+      // Para o customer, usar nome do usuário (customer é do usuário, não do cartão)
+      const cardholderFirstName = user.firstName || cardholderName?.split(' ')[0] || 'Test';
+      const cardholderLastName = user.lastName || cardholderName?.split(' ').slice(1).join(' ') || 'User';
       
       console.log('🔍 [SAVE_CARD] Usando identificação:', {
         type: identificationType,
         number: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
         source: user.documentNumber ? 'usuário' : 'teste',
-        cardholderName: cardholderFullName,
+        cardholderName: cardholderName, // ✅ Nome do cartão (pode ser de outra pessoa)
       });
 
       // 1. Criar ou buscar customer no Mercado Pago
@@ -504,7 +507,7 @@ export class StudentPaymentMethodsService {
               customer.id,
               {
                 token: freshCardToken, // ✅ Token fresco gerado AGORA
-                cardholderName: cardholderFullName,
+                cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
                 identificationType: identificationType,
                 identificationNumber: userCpf,
               },
@@ -528,7 +531,7 @@ export class StudentPaymentMethodsService {
           customer.id,
           {
             token: freshCardToken, // ✅ Token fresco gerado AGORA
-            cardholderName: cardholderFullName,
+            cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
             identificationType: identificationType,
             identificationNumber: userCpf,
           },
@@ -568,7 +571,7 @@ export class StudentPaymentMethodsService {
           lastFourDigits: lastFourDigits,
           expirationMonth: savedCard.expirationMonth?.toString() || month,
           expirationYear: savedCard.expirationYear?.toString() || year,
-          cardHolderName: cardholderFullName, // Usar nome completo
+          cardHolderName: cardholderName, // ✅ Usar nome do cartão (pode ser de outra pessoa)
           nickname: saveCardDto.nickname,
           isDefault: saveCardDto.setAsDefault || false,
           expiresAt,
