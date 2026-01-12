@@ -704,15 +704,59 @@ export class MercadoPagoService {
         has_identification: !!cardTokenRequest.cardholder.identification,
       });
 
-      const response = await this.cardToken.create({
-        body: cardTokenRequest,
+      // ✅ CORREÇÃO: Criar token via API REST diretamente
+      // Isso garante que usamos o mesmo Access Token usado para salvar
+      // O SDK pode usar credenciais diferentes internamente
+      const accessToken = process.env.MP_ACCESS_TOKEN;
+      if (!accessToken) {
+        throw new BadRequestException('Token de acesso do Mercado Pago não configurado');
+      }
+
+      this.logger.log(`🌐 [MP CARD TOKEN] Criando token via API REST diretamente`);
+      this.logger.log(`🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`);
+
+      const response = await fetch('https://api.mercadopago.com/v1/card_tokens', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(cardTokenRequest),
       });
 
-      this.logger.log(`Token de cartão criado com sucesso: ${response.id}`);
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = { message: responseText, raw: true };
+        }
+        
+        this.logger.error(`❌ [MP CARD TOKEN] Erro ao criar token:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+        });
+        
+        throw new BadRequestException(
+          `Erro ao processar cartão: ${errorData.message || 'Erro desconhecido'}`,
+        );
+      }
 
-      return response.id;
+      const tokenData = JSON.parse(responseText);
+      this.logger.log(`✅ [MP CARD TOKEN] Token de cartão criado com sucesso: ${tokenData.id}`);
+      
+      return tokenData.id;
     } catch (error) {
       this.logger.error(`Erro ao criar token de cartão:`, error);
+      
+      // Se já for BadRequestException, propagar
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
       throw new BadRequestException(
         `Erro ao processar cartão: ${error.message}`,
       );
