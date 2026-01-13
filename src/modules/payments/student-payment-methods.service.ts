@@ -468,6 +468,13 @@ export class StudentPaymentMethodsService {
         
         // Salvar no banco de dados
         const cardBrand = this.detectCardBrand(cardNumberClean);
+        
+        // Converter expirationDate (MM/YY) para expirationMonth e expirationYear
+        const [month, year] = saveCardDto.expirationDate.split('/');
+        const fullYear = year.length === 2 ? `20${year}` : year;
+        const expirationMonth = month.padStart(2, '0');
+        const expirationYear = fullYear.slice(-2); // Últimos 2 dígitos do ano
+        
         const [newCard] = await db
           .insert(savedCards)
           .values({
@@ -475,7 +482,9 @@ export class StudentPaymentMethodsService {
             cardHolderName: cardholderName,
             lastFourDigits: saveCardDto.cardNumber.replace(/\D/g, '').slice(-4),
             cardBrand: cardBrand,
-            expirationDate: saveCardDto.expirationDate,
+            cardType: saveCardDto.cardType || CardType.CREDIT, // ✅ Campo obrigatório
+            expirationMonth: expirationMonth,
+            expirationYear: expirationYear,
             isDefault: false,
             mpCustomerId: customer.id,
             mpCardId: savedCard.id,
