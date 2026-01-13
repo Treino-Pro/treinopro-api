@@ -386,7 +386,9 @@ export class StudentPaymentMethodsService {
       }
 
       // Usar CPF do usuário se disponível, senão usar CPF de teste
-      const userCpf = user.documentNumber || '19119119100';
+      const userCpfRaw = user.documentNumber || '19119119100';
+      // ✅ IMPORTANTE: Limpar formatação do CPF desde o início
+      const userCpf = userCpfRaw.replace(/\D/g, '');
       const identificationType = user.documentType === 'CPF' ? 'CPF' : 'CPF';
       
       // ✅ CORREÇÃO: Usar o nome do cartão (do frontend) em ambos os lugares
@@ -400,6 +402,7 @@ export class StudentPaymentMethodsService {
       console.log('🔍 [SAVE_CARD] Usando identificação:', {
         type: identificationType,
         number: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
+        numberLength: userCpf.length,
         source: user.documentNumber ? 'usuário' : 'teste',
         cardholderName: cardholderName, // ✅ Nome do cartão (pode ser de outra pessoa)
       });
@@ -470,10 +473,18 @@ export class StudentPaymentMethodsService {
       // 4. ✅ IMPORTANTE: Gerar token FRESCO imediatamente antes de salvar
       // Não reutilizar o token da pré-autorização (pode ter expirado)
       console.log('🔐 [SAVE_CARD] Gerando token fresco para salvar cartão...');
+      
+      console.log('🔍 [SAVE_CARD] Dados para token:', {
+        cardholderName: cardholderName,
+        identificationType: identificationType,
+        identificationNumber: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
+        identificationNumberLength: userCpf.length,
+      });
+      
       const freshCardToken = await this.tokenizeCard(
         saveCardDto,
         identificationType,
-        userCpf,
+        userCpf, // ✅ CPF já está limpo desde o início
       );
       console.log('🔑 [SAVE_CARD] Token fresco criado:', freshCardToken.substring(0, 20) + '...');
 
@@ -503,13 +514,20 @@ export class StudentPaymentMethodsService {
           } else {
             // Se não estiver salvo, tentar salvar manualmente com token fresco
             console.log('💾 [SAVE_CARD] Cartão não encontrado no customer, salvando manualmente com token fresco...');
+            console.log('🔍 [SAVE_CARD] Dados para salvar:', {
+              cardholderName: cardholderName,
+              identificationType: identificationType,
+              identificationNumber: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
+              identificationNumberLength: userCpf.length,
+            });
+            
             savedCard = await this.mercadoPagoService.saveCardToCustomer(
               customer.id,
               {
                 token: freshCardToken, // ✅ Token fresco gerado AGORA
                 cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
                 identificationType: identificationType,
-                identificationNumber: userCpf,
+                identificationNumber: userCpf, // ✅ CPF já está limpo desde o início
               },
             );
           }
@@ -527,13 +545,20 @@ export class StudentPaymentMethodsService {
       } else {
         // Fallback: tentar salvar usando token fresco
         console.log('💾 [SAVE_CARD] Card ID não retornado, usando método de token fresco...');
+        console.log('🔍 [SAVE_CARD] Dados para salvar (fallback):', {
+          cardholderName: cardholderName,
+          identificationType: identificationType,
+          identificationNumber: userCpf.replace(/\d(?=\d{4})/g, '*'), // Mascarar para log
+          identificationNumberLength: userCpf.length,
+        });
+        
         savedCard = await this.mercadoPagoService.saveCardToCustomer(
           customer.id,
           {
             token: freshCardToken, // ✅ Token fresco gerado AGORA
             cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
             identificationType: identificationType,
-            identificationNumber: userCpf,
+            identificationNumber: userCpf, // ✅ CPF já está limpo desde o início
           },
         );
       }

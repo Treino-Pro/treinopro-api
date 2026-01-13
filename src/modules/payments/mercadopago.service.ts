@@ -715,6 +715,9 @@ export class MercadoPagoService {
       this.logger.log(`🌐 [MP CARD TOKEN] Criando token via API REST diretamente`);
       this.logger.log(`🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`);
 
+      // ✅ ADICIONAR: Log do payload completo sendo enviado
+      this.logger.log(`📤 [MP CARD TOKEN] Payload completo enviado:`, JSON.stringify(cardTokenRequest, null, 2));
+
       const response = await fetch('https://api.mercadopago.com/v1/card_tokens', {
         method: 'POST',
         headers: {
@@ -725,6 +728,10 @@ export class MercadoPagoService {
       });
 
       const responseText = await response.text();
+      
+      // ✅ ADICIONAR: Log detalhado da resposta
+      this.logger.log(`📥 [MP CARD TOKEN] Response status: ${response.status} ${response.statusText}`);
+      this.logger.log(`📥 [MP CARD TOKEN] Response body (primeiros 500 chars): ${responseText.substring(0, 500)}`);
       
       if (!response.ok) {
         let errorData;
@@ -738,6 +745,7 @@ export class MercadoPagoService {
           status: response.status,
           statusText: response.statusText,
           error: errorData,
+          cause: errorData.cause || [],
         });
         
         throw new BadRequestException(
@@ -746,7 +754,23 @@ export class MercadoPagoService {
       }
 
       const tokenData = JSON.parse(responseText);
-      this.logger.log(`✅ [MP CARD TOKEN] Token de cartão criado com sucesso: ${tokenData.id}`);
+      
+      // ✅ ADICIONAR: Log completo dos dados retornados
+      this.logger.log(`✅ [MP CARD TOKEN] Token criado com sucesso:`, {
+        id: tokenData.id,
+        status: tokenData.status,
+        card_id: tokenData.card_id,
+        first_six_digits: tokenData.first_six_digits,
+        last_four_digits: tokenData.last_four_digits,
+        expiration_month: tokenData.expiration_month,
+        expiration_year: tokenData.expiration_year,
+        cardholder: tokenData.cardholder,
+        date_created: tokenData.date_created,
+        date_last_updated: tokenData.date_last_updated,
+        date_due: tokenData.date_due,
+        luhn_validation: tokenData.luhn_validation,
+        live_mode: tokenData.live_mode,
+      });
       
       return tokenData.id;
     } catch (error) {
@@ -1080,20 +1104,24 @@ export class MercadoPagoService {
         cardData.identificationType &&
         cardData.identificationNumber
       ) {
+        // ✅ IMPORTANTE: Garantir que o número de identification está sem formatação
+        const cleanIdentificationNumber = cardData.identificationNumber.replace(/\D/g, '');
+        
         cardPayload.cardholder = {
           name: cardData.cardholderName,
           identification: {
             type: cardData.identificationType,
-            number: cardData.identificationNumber,
+            number: cleanIdentificationNumber, // ✅ Sem formatação (pontos, traços)
           },
         };
         console.log('👤 [MP CARD] Cardholder incluído no payload:', {
           name: cardData.cardholderName,
           identificationType: cardData.identificationType,
-          identificationNumber: cardData.identificationNumber.replace(
+          identificationNumber: cleanIdentificationNumber.replace(
             /\d(?=\d{4})/g,
             '*',
           ), // Mascarar para log
+          identificationNumberLength: cleanIdentificationNumber.length,
         });
       } else {
         console.warn(
@@ -1101,10 +1129,19 @@ export class MercadoPagoService {
         );
       }
 
+      // ✅ ADICIONAR: Log detalhado do payload antes de enviar
       console.log(
-        '📤 [MP CARD] Enviando payload:',
+        '📤 [MP CARD] Enviando payload completo:',
         JSON.stringify(cardPayload, null, 2),
       );
+      console.log('🔍 [MP CARD] Detalhes do payload:', {
+        hasToken: !!cardPayload.token,
+        tokenLength: cardPayload.token?.length || 0,
+        hasCardholder: !!cardPayload.cardholder,
+        cardholderName: cardPayload.cardholder?.name,
+        identificationType: cardPayload.cardholder?.identification?.type,
+        identificationNumberLength: cardPayload.cardholder?.identification?.number?.length || 0,
+      });
 
       const url = `https://api.mercadopago.com/v1/customers/${customerId}/cards`;
       const accessToken = process.env.MP_ACCESS_TOKEN;
