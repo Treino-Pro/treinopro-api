@@ -468,7 +468,7 @@ export class StudentPaymentMethodsService {
         
         // Salvar no banco de dados
         const cardBrand = this.detectCardBrand(cardNumberClean);
-        const [newCard] = await this.db
+        const [newCard] = await db
           .insert(savedCards)
           .values({
             userId: userId,
