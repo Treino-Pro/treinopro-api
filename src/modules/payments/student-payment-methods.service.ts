@@ -452,47 +452,83 @@ export class StudentPaymentMethodsService {
         );
         console.log('🔑 [SAVE_CARD] Token criado:', freshCardToken.substring(0, 20) + '...');
         
-        // Salvar diretamente no customer
-        console.log('💾 [SAVE_CARD] Salvando cartão no customer...');
-        const savedCard = await this.mercadoPagoService.saveCardToCustomer(
-          customer.id,
-          {
-            token: freshCardToken,
-            cardholderName: cardholderName,
-            identificationType: identificationType,
-            identificationNumber: userCpf,
-          },
+        // ✅ VERIFICAR: Se o cartão já existe no customer antes de tentar salvar
+        const lastFourDigits = saveCardDto.cardNumber.replace(/\D/g, '').slice(-4);
+        console.log('🔍 [SAVE_CARD] Verificando se cartão já existe no customer...');
+        const existingCards = await this.mercadoPagoService.getCustomerCards(customer.id);
+        const existingCard = existingCards.find(
+          (card: any) => card.last_four_digits === lastFourDigits,
         );
         
-        console.log('✅ [SAVE_CARD] Cartão salvo com sucesso:', savedCard.id);
+        let savedCard;
+        if (existingCard) {
+          console.log('✅ [SAVE_CARD] Cartão já existe no customer:', existingCard.id);
+          savedCard = {
+            id: existingCard.id,
+            lastFourDigits: existingCard.last_four_digits,
+            paymentMethodId: existingCard.payment_method?.id || existingCard.payment_method_id,
+            expirationMonth: existingCard.expiration_month,
+            expirationYear: existingCard.expiration_year,
+          };
+        } else {
+          // Salvar apenas se não existir
+          console.log('💾 [SAVE_CARD] Cartão não encontrado, salvando no customer...');
+          savedCard = await this.mercadoPagoService.saveCardToCustomer(
+            customer.id,
+            {
+              token: freshCardToken,
+              cardholderName: cardholderName,
+              identificationType: identificationType,
+              identificationNumber: userCpf,
+            },
+          );
+          console.log('✅ [SAVE_CARD] Cartão salvo com sucesso:', savedCard.id);
+        }
         
         // Salvar no banco de dados
         const cardBrand = this.detectCardBrand(cardNumberClean);
         
-        // Converter expirationDate (MM/YY) para expirationMonth e expirationYear
-        const [month, year] = saveCardDto.expirationDate.split('/');
-        const fullYear = year.length === 2 ? `20${year}` : year;
-        const expirationMonth = month.padStart(2, '0');
-        const expirationYear = fullYear.slice(-2); // Últimos 2 dígitos do ano
+        // ✅ VERIFICAR: Se o cartão já existe no banco antes de inserir
+        // Reutilizar lastFourDigits já declarado acima
+        const existingDbCard = await db.query.savedCards.findFirst({
+          where: and(
+            eq(savedCards.userId, userId),
+            eq(savedCards.lastFourDigits, lastFourDigits),
+            eq(savedCards.mpCardId, savedCard.id),
+            eq(savedCards.isActive, true),
+          ),
+        });
         
-        const [newCard] = await db
-          .insert(savedCards)
-          .values({
-            userId: userId,
-            cardHolderName: cardholderName,
-            lastFourDigits: saveCardDto.cardNumber.replace(/\D/g, '').slice(-4),
-            cardBrand: cardBrand,
-            cardType: saveCardDto.cardType || CardType.CREDIT, // ✅ Campo obrigatório
-            expirationMonth: expirationMonth,
-            expirationYear: expirationYear,
-            isDefault: false,
-            mpCustomerId: customer.id,
-            mpCardId: savedCard.id,
-            mpCardToken: null, // Não armazenar token
-          })
-          .returning();
-        
-        console.log('✅ [SAVE_CARD] Cartão salvo no banco:', newCard.id);
+        let newCard;
+        if (existingDbCard) {
+          console.log('✅ [SAVE_CARD] Cartão já existe no banco:', existingDbCard.id);
+          newCard = existingDbCard;
+        } else {
+          // Converter expirationDate (MM/YY) para expirationMonth e expirationYear
+          const [month, year] = saveCardDto.expirationDate.split('/');
+          const fullYear = year.length === 2 ? `20${year}` : year;
+          const expirationMonth = month.padStart(2, '0');
+          const expirationYear = fullYear.slice(-2); // Últimos 2 dígitos do ano
+          
+          [newCard] = await db
+            .insert(savedCards)
+            .values({
+              userId: userId,
+              cardHolderName: cardholderName,
+              lastFourDigits: lastFourDigits,
+              cardBrand: cardBrand,
+              cardType: saveCardDto.cardType || CardType.CREDIT, // ✅ Campo obrigatório
+              expirationMonth: expirationMonth,
+              expirationYear: expirationYear,
+              isDefault: false,
+              mpCustomerId: customer.id,
+              mpCardId: savedCard.id,
+              mpCardToken: null, // Não armazenar token
+            })
+            .returning();
+          
+          console.log('✅ [SAVE_CARD] Cartão salvo no banco:', newCard.id);
+        }
         
         return {
           cardId: newCard.id,
@@ -574,18 +610,28 @@ export class StudentPaymentMethodsService {
         console.log('💾 [SAVE_CARD] Verificando se cartão já está salvo no customer...');
         
         try {
-          // Verificar se o cartão já está no customer
+          // Verificar se o cartão já está no customer (por ID ou últimos 4 dígitos)
           const customerCards = await this.mercadoPagoService.getCustomerCards(customer.id);
-          const existingCard = customerCards.find(
+          const lastFourDigits = saveCardDto.cardNumber.replace(/\D/g, '').slice(-4);
+          
+          // Primeiro tentar por ID do payment
+          let existingCard = customerCards.find(
             (card: any) => card.id === validationPayment.card.id,
           );
+          
+          // Se não encontrar por ID, tentar por últimos 4 dígitos
+          if (!existingCard) {
+            existingCard = customerCards.find(
+              (card: any) => card.last_four_digits === lastFourDigits,
+            );
+          }
           
           if (existingCard) {
             console.log('✅ [SAVE_CARD] Cartão já salvo no customer via payment');
             savedCard = {
               id: existingCard.id,
               lastFourDigits: existingCard.last_four_digits,
-              paymentMethodId: existingCard.payment_method?.id,
+              paymentMethodId: existingCard.payment_method?.id || existingCard.payment_method_id,
               expirationMonth: existingCard.expiration_month,
               expirationYear: existingCard.expiration_year,
             };
@@ -630,15 +676,35 @@ export class StudentPaymentMethodsService {
           identificationNumberLength: userCpf.length,
         });
         
-        savedCard = await this.mercadoPagoService.saveCardToCustomer(
-          customer.id,
-          {
-            token: freshCardToken, // ✅ Token fresco gerado AGORA
-            cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
-            identificationType: identificationType,
-            identificationNumber: userCpf, // ✅ CPF já está limpo desde o início
-          },
+        // ✅ VERIFICAR: Se o cartão já existe no customer antes de tentar salvar
+        const lastFourDigits = saveCardDto.cardNumber.replace(/\D/g, '').slice(-4);
+        console.log('🔍 [SAVE_CARD] Verificando se cartão já existe no customer (fallback)...');
+        const customerCards = await this.mercadoPagoService.getCustomerCards(customer.id);
+        const existingCard = customerCards.find(
+          (card: any) => card.last_four_digits === lastFourDigits,
         );
+        
+        if (existingCard) {
+          console.log('✅ [SAVE_CARD] Cartão já existe no customer (fallback):', existingCard.id);
+          savedCard = {
+            id: existingCard.id,
+            lastFourDigits: existingCard.last_four_digits,
+            paymentMethodId: existingCard.payment_method?.id || existingCard.payment_method_id,
+            expirationMonth: existingCard.expiration_month,
+            expirationYear: existingCard.expiration_year,
+          };
+        } else {
+          // Salvar apenas se não existir
+          savedCard = await this.mercadoPagoService.saveCardToCustomer(
+            customer.id,
+            {
+              token: freshCardToken, // ✅ Token fresco gerado AGORA
+              cardholderName: cardholderName, // ✅ Usar nome do cartão (mesmo usado no token)
+              identificationType: identificationType,
+              identificationNumber: userCpf, // ✅ CPF já está limpo desde o início
+            },
+          );
+        }
       }
 
       console.log('💳 [SAVE_CARD] Cartão salvo no customer:', savedCard.id);
@@ -660,26 +726,44 @@ export class StudentPaymentMethodsService {
 
       // 7. Salvar no banco de dados
       // Usar lastFourDigits do savedCard se disponível, senão usar do cardNumber
-      const lastFourDigits = savedCard.lastFourDigits || saveCardDto.cardNumber.slice(-4);
+      const lastFourDigits = savedCard.lastFourDigits || saveCardDto.cardNumber.replace(/\D/g, '').slice(-4);
       
-      const [savedPaymentMethod] = await db
-        .insert(savedCards)
-        .values({
-          userId,
-          mpCardToken: freshCardToken, // ✅ Usar token fresco
-          mpCustomerId: customer.id,
-          mpCardId: savedCard.id,
-          cardBrand,
-          cardType: saveCardDto.cardType,
-          lastFourDigits: lastFourDigits,
-          expirationMonth: savedCard.expirationMonth?.toString() || month,
-          expirationYear: savedCard.expirationYear?.toString() || year,
-          cardHolderName: cardholderName, // ✅ Usar nome do cartão (pode ser de outra pessoa)
-          nickname: saveCardDto.nickname,
-          isDefault: saveCardDto.setAsDefault || false,
-          expiresAt,
-        })
-        .returning();
+      // ✅ VERIFICAR: Se o cartão já existe no banco antes de inserir
+      const existingDbCard = await db.query.savedCards.findFirst({
+        where: and(
+          eq(savedCards.userId, userId),
+          eq(savedCards.lastFourDigits, lastFourDigits),
+          eq(savedCards.mpCardId, savedCard.id),
+          eq(savedCards.isActive, true),
+        ),
+      });
+      
+      let savedPaymentMethod;
+      if (existingDbCard) {
+        console.log('✅ [SAVE_CARD] Cartão já existe no banco (produção):', existingDbCard.id);
+        savedPaymentMethod = existingDbCard;
+      } else {
+        savedPaymentMethod = (
+          await db
+            .insert(savedCards)
+            .values({
+              userId,
+              mpCardToken: freshCardToken, // ✅ Usar token fresco
+              mpCustomerId: customer.id,
+              mpCardId: savedCard.id,
+              cardBrand,
+              cardType: saveCardDto.cardType,
+              lastFourDigits: lastFourDigits,
+              expirationMonth: savedCard.expirationMonth?.toString() || month,
+              expirationYear: savedCard.expirationYear?.toString() || year,
+              cardHolderName: cardholderName, // ✅ Usar nome do cartão (pode ser de outra pessoa)
+              nickname: saveCardDto.nickname,
+              isDefault: saveCardDto.setAsDefault || false,
+              expiresAt,
+            })
+            .returning()
+        )[0];
+      }
 
       console.log('✅ [SAVE_CARD] Cartão salvo com sucesso no banco');
       console.log('✅ [SAVE_CARD] Payment Method ID:', savedPaymentMethod.id);
