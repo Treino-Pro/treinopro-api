@@ -1011,27 +1011,14 @@ export class MercadoPagoService {
         lastName: customerData.lastName,
       });
 
-      // Primeiro, tentar buscar customer existente pelo email
-      const searchUrl = `https://api.mercadopago.com/v1/customers/search?email=${encodeURIComponent(customerData.email)}`;
-
-      const searchResponse = await fetch(searchUrl, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
+      // ✅ SDK: buscar customer existente pelo email
+      const searchData = await this.customer.search({
+        options: { email: customerData.email },
       });
-
-      if (searchResponse.ok) {
-        const searchData = await searchResponse.json();
-        if (searchData.results && searchData.results.length > 0) {
-          const existingCustomer = searchData.results[0];
-          console.log(
-            '✅ [MP CUSTOMER] Customer encontrado:',
-            existingCustomer.id,
-          );
-          return { id: existingCustomer.id };
-        }
+      if (searchData?.results && searchData.results.length > 0) {
+        const existingCustomer = searchData.results[0];
+        console.log('✅ [MP CUSTOMER] Customer encontrado:', existingCustomer.id);
+        return { id: existingCustomer.id };
       }
 
       // Se não encontrou, criar novo customer
@@ -1143,7 +1130,6 @@ export class MercadoPagoService {
         identificationNumberLength: cardPayload.cardholder?.identification?.number?.length || 0,
       });
 
-      const url = `https://api.mercadopago.com/v1/customers/${customerId}/cards`;
       const accessToken = process.env.MP_ACCESS_TOKEN;
 
       if (!accessToken) {
@@ -1152,79 +1138,66 @@ export class MercadoPagoService {
         );
       }
 
-      console.log('🌐 [MP CARD] URL:', url);
       console.log(
         '🔑 [MP CARD] Token válido:',
         accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***',
       );
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': `card_${customerId}_${Date.now()}`, // Evitar duplicação
-        },
-        body: JSON.stringify(cardPayload),
-      });
+      // ✅ SDK: salvar cartão no customer
+      let savedCard: any;
+      try {
+        savedCard = await this.customer.createCard({
+          customerId,
+          body: cardPayload,
+          requestOptions: {
+            idempotencyKey: `card_${customerId}_${Date.now()}`,
+          },
+        });
+      } catch (error) {
+        const status =
+          error?.status ||
+          error?.response?.status ||
+          error?.cause?.status ||
+          error?.response?.data?.status;
+        const errorData =
+          error?.response?.data || error?.cause || error || {};
 
-      const responseText = await response.text();
-
-      console.log('📥 [MP CARD] Response:', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        bodyPreview: responseText.substring(0, 200),
-      });
-
-      // ===== TRATAMENTO DE ERROS DETALHADO =====
-      if (!response.ok) {
-        let errorData;
-        try {
-          errorData = JSON.parse(responseText);
-        } catch {
-          errorData = { message: responseText, raw: true };
-        }
-
-        console.error('❌ [MP CARD] Erro ao salvar cartão:', {
-          status: response.status,
-          statusText: response.statusText,
+        console.error('❌ [MP CARD] Erro ao salvar cartão (SDK):', {
+          status,
           error: errorData,
           cause: errorData.cause || [],
         });
 
         // Mapear erros comuns do Mercado Pago
         let errorMessage = 'Erro ao salvar cartão no Mercado Pago';
+        const message = errorData.message || error?.message || '';
 
-        if (response.status === 400) {
-          if (errorData.message?.includes('token')) {
+        if (status === 400) {
+          if (message.includes('token')) {
             errorMessage =
               'Token do cartão expirado. Por favor, tente novamente.';
-          } else if (errorData.message?.includes('customer')) {
+          } else if (message.includes('customer')) {
             errorMessage = 'Customer inválido. Por favor, recadastre.';
           } else {
-            errorMessage = `Dados inválidos: ${errorData.message || 'Verifique os dados do cartão'}`;
+            errorMessage = `Dados inválidos: ${message || 'Verifique os dados do cartão'}`;
           }
-        } else if (response.status === 401) {
+        } else if (status === 401) {
           errorMessage =
             'Credenciais do Mercado Pago inválidas. Contate o suporte.';
-        } else if (response.status === 404) {
+        } else if (status === 404) {
           errorMessage =
             'Customer não encontrado no Mercado Pago. Por favor, recadastre.';
-        } else if (response.status === 500) {
+        } else if (status === 500) {
           // Erro 500 é comum quando o token expira
           errorMessage =
             'Token do cartão expirou. Por favor, insira os dados do cartão novamente.';
-        } else if (response.status === 429) {
+        } else if (status === 429) {
           errorMessage =
             'Muitas tentativas. Aguarde alguns instantes e tente novamente.';
         }
 
         throw new BadRequestException(errorMessage);
       }
-
-      // ===== SUCESSO =====
-      const savedCard = JSON.parse(responseText);
 
       console.log('✅ [MP CARD] Cartão salvo com sucesso:', {
         id: savedCard.id,
@@ -1269,31 +1242,12 @@ export class MercadoPagoService {
   async getCustomerCards(customerId: string): Promise<any[]> {
     try {
       console.log('📋 [MP CARD] Listando cartões do customer:', customerId);
-
-      const response = await fetch(
-        `https://api.mercadopago.com/v1/customers/${customerId}/cards`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ [MP CARD] Erro ao listar cartões:', errorData);
-        throw new BadRequestException('Erro ao listar cartões do customer');
-      }
-
-      const cards = await response.json();
+      const cards = await this.customer.listCards({ customerId });
       console.log('✅ [MP CARD] Cartões encontrados:', cards.length);
-
       return cards;
     } catch (error) {
-      console.error('❌ [MP CARD] Erro:', error);
-      throw new BadRequestException('Erro ao listar cartões');
+      console.error('❌ [MP CARD] Erro ao listar cartões (SDK):', error);
+      throw new BadRequestException('Erro ao listar cartões do customer');
     }
   }
 
