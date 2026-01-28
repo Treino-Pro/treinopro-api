@@ -27,6 +27,7 @@ async function bootstrap() {
       // Permitir origins configurados (web)
       const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
         'http://localhost:3001',
+        'http://localhost:5173'
       ];
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
