@@ -65,6 +65,9 @@ export class DashboardSummaryResponseDto {
         totalAmount: { type: 'number' },
         status: { type: 'string' },
         createdAt: { type: 'string' },
+        studentName: { type: 'string' },
+        personalName: { type: 'string' },
+        mpPaymentId: { type: 'string' },
       },
     },
   })
@@ -73,6 +76,9 @@ export class DashboardSummaryResponseDto {
     totalAmount: number;
     status: string;
     createdAt: string;
+    studentName?: string | null;
+    personalName?: string | null;
+    mpPaymentId?: string | null;
   }>;
 }
 

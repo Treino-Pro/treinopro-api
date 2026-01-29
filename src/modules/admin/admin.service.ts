@@ -31,17 +31,49 @@ export class AdminService {
           .from(classes),
         this.db.query.payments?.findMany
           ? this.db.query.payments.findMany({
+              with: {
+                student: {
+                  columns: { id: true, firstName: true, lastName: true, email: true },
+                },
+                personal: {
+                  columns: { id: true, firstName: true, lastName: true, email: true },
+                },
+              },
               orderBy: [desc(payments.createdAt)],
               limit: 5,
             })
           : Promise.resolve([]),
       ]);
 
+    // Formatar pagamentos com nomes dos usuários
+    const formattedPayments = Array.isArray(paymentStats)
+      ? paymentStats.map((payment: any) => {
+          const studentName =
+            payment.student?.firstName && payment.student?.lastName
+              ? `${payment.student.firstName} ${payment.student.lastName}`
+              : payment.student?.firstName || payment.student?.email || null;
+          const personalName =
+            payment.personal?.firstName && payment.personal?.lastName
+              ? `${payment.personal.firstName} ${payment.personal.lastName}`
+              : payment.personal?.firstName || payment.personal?.email || null;
+
+          return {
+            id: payment.id,
+            totalAmount: payment.totalAmount ? Number(payment.totalAmount) : 0,
+            status: payment.status || 'pending',
+            createdAt: payment.createdAt ? new Date(payment.createdAt).toISOString() : new Date().toISOString(),
+            studentName: studentName || null,
+            personalName: personalName || null,
+            mpPaymentId: payment.mpPaymentId || null,
+          };
+        })
+      : [];
+
     return {
       users: userCount[0]?.total ?? 0,
       proposals: proposalStats[0] ?? {},
       classes: classStats[0] ?? {},
-      latestPayments: paymentStats ?? [],
+      latestPayments: formattedPayments,
     };
   }
 
