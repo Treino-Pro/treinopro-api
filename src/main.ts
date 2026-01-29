@@ -4,7 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -52,9 +52,10 @@ async function bootstrap() {
     ],
   });
 
-  // Configuração de arquivos estáticos
-  const storagePath = process.env.STORAGE_PATH || './storage';
-  app.useStaticAssets(join(process.cwd(), storagePath), {
+  // Configuração de arquivos estáticos (use STORAGE_PATH absoluto em produção)
+  const storagePath = process.env.STORAGE_PATH || join(process.cwd(), 'storage');
+  const staticDir = isAbsolute(storagePath) ? storagePath : join(process.cwd(), storagePath);
+  app.useStaticAssets(staticDir, {
     prefix: '/static/',
   });
 

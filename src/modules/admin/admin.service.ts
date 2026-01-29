@@ -309,9 +309,14 @@ export class AdminService {
     }
 
     const storedPath = fileRecord.path as string;
+    const storageBase =
+      process.env.STORAGE_PATH && path.isAbsolute(process.env.STORAGE_PATH)
+        ? process.env.STORAGE_PATH
+        : path.join(process.cwd(), process.env.STORAGE_PATH || 'storage');
+    const relativePath = storedPath.replace(/^(\.\/)?storage\/?/, '');
     const absolutePath = path.isAbsolute(storedPath)
       ? storedPath
-      : path.join(process.cwd(), storedPath);
+      : path.join(storageBase, relativePath);
 
     try {
       await fs.access(absolutePath);
