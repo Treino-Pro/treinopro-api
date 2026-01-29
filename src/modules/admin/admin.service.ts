@@ -192,7 +192,7 @@ export class AdminService {
     // Processar URLs das imagens
     const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
     
-    const normalizeUrl = (url: string | null | undefined): string | null => {
+    const normalizeUrl = (url: string | null | undefined, category?: string): string | null => {
       if (!url) return null;
       
       // Se a URL já é completa e válida
@@ -201,51 +201,59 @@ export class AdminService {
           const urlObj = new URL(url);
           const normalizedBase = new URL(baseUrl);
           
-          // Se o hostname é diferente, normalizar mantendo o pathname
-          if (urlObj.hostname !== normalizedBase.hostname) {
+          // Se o hostname é diferente, normalizar mantendo o pathname completo
+          if (urlObj.hostname !== normalizedBase.hostname || urlObj.port !== normalizedBase.port) {
             const normalized = `${normalizedBase.origin}${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
             console.log(`🔄 [ADMIN] URL normalizada: ${url} -> ${normalized}`);
             return normalized;
           }
           
           // Se já está correto, retornar como está
+          console.log(`✅ [ADMIN] URL já está correta: ${url}`);
           return url;
         } catch (e) {
           console.warn(`⚠️ [ADMIN] Erro ao fazer parse da URL: ${url}`, e);
-          // Tentar substituir o hostname
-          return url.replace(/https?:\/\/[^/]+/, baseUrl);
+          // Tentar substituir o hostname e porta
+          const urlPattern = /https?:\/\/[^/]+/;
+          return url.replace(urlPattern, baseUrl);
         }
       }
       
       // Se é um caminho relativo que já começa com /static/, adicionar baseUrl
       if (url.startsWith('/static/')) {
-        return `${baseUrl}${url}`;
+        const normalized = `${baseUrl}${url}`;
+        console.log(`🔗 [ADMIN] URL relativa normalizada: ${url} -> ${normalized}`);
+        return normalized;
       }
       
       // Se é um caminho relativo sem /static/, adicionar
       if (url.startsWith('/')) {
-        // Se não tem /static/ no caminho, adicionar
+        // Se não tem /static/ no caminho, adicionar baseado na categoria
         if (!url.includes('/static/')) {
-          // Tentar determinar a categoria pelo caminho
-          if (url.includes('documents') || url.includes('document')) {
-            return `${baseUrl}/static/images/documents${url}`;
+          let categoryPath = 'images/documents'; // padrão
+          if (category === 'profile' || url.includes('profile')) {
+            categoryPath = 'images/profiles';
+          } else if (url.includes('documents') || url.includes('document')) {
+            categoryPath = 'images/documents';
           }
-          if (url.includes('profiles') || url.includes('profile')) {
-            return `${baseUrl}/static/images/profiles${url}`;
-          }
-          return `${baseUrl}/static${url}`;
+          const normalized = `${baseUrl}/static/${categoryPath}${url}`;
+          console.log(`🔗 [ADMIN] URL relativa sem /static/ normalizada: ${url} -> ${normalized}`);
+          return normalized;
         }
         return `${baseUrl}${url}`;
       }
       
       // Se não começa com /, assumir que é apenas o nome do arquivo
-      // Tentar adicionar /static/images/documents/ por padrão para documentos
-      return `${baseUrl}/static/images/documents/${url}`;
+      // Usar categoria para determinar o caminho
+      const categoryPath = category === 'profile' ? 'images/profiles' : 'images/documents';
+      const normalized = `${baseUrl}/static/${categoryPath}/${url}`;
+      console.log(`🔗 [ADMIN] Nome de arquivo normalizado: ${url} -> ${normalized}`);
+      return normalized;
     };
     
-    const documentImageUrl = normalizeUrl(user.documentImage?.url);
-    const crefImageUrl = normalizeUrl(user.crefImage?.url);
-    const profileImageUrl = normalizeUrl(user.profileImage?.url);
+    const documentImageUrl = normalizeUrl(user.documentImage?.url, 'document');
+    const crefImageUrl = normalizeUrl(user.crefImage?.url, 'document');
+    const profileImageUrl = normalizeUrl(user.profileImage?.url, 'profile');
 
     // Log para debug
     if (documentImageUrl) {
