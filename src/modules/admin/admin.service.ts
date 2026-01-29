@@ -192,46 +192,67 @@ export class AdminService {
     // Processar URLs das imagens
     const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
     
-    let documentImageUrl = null;
-    if (user.documentImage?.url) {
-      try {
-        const original = new URL(user.documentImage.url);
-        const normalizedBase = new URL(baseUrl);
-        documentImageUrl = `${normalizedBase.origin}${original.pathname}`;
-      } catch (_) {
-        documentImageUrl = user.documentImage.url.replace(
-          'https://api.treinopro.com',
-          baseUrl,
-        );
+    const normalizeUrl = (url: string | null | undefined): string | null => {
+      if (!url) return null;
+      
+      // Se a URL já é completa e válida
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        try {
+          const urlObj = new URL(url);
+          const normalizedBase = new URL(baseUrl);
+          
+          // Se o hostname é diferente, normalizar mantendo o pathname
+          if (urlObj.hostname !== normalizedBase.hostname) {
+            const normalized = `${normalizedBase.origin}${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
+            console.log(`🔄 [ADMIN] URL normalizada: ${url} -> ${normalized}`);
+            return normalized;
+          }
+          
+          // Se já está correto, retornar como está
+          return url;
+        } catch (e) {
+          console.warn(`⚠️ [ADMIN] Erro ao fazer parse da URL: ${url}`, e);
+          // Tentar substituir o hostname
+          return url.replace(/https?:\/\/[^/]+/, baseUrl);
+        }
       }
-    }
+      
+      // Se é um caminho relativo que já começa com /static/, adicionar baseUrl
+      if (url.startsWith('/static/')) {
+        return `${baseUrl}${url}`;
+      }
+      
+      // Se é um caminho relativo sem /static/, adicionar
+      if (url.startsWith('/')) {
+        // Se não tem /static/ no caminho, adicionar
+        if (!url.includes('/static/')) {
+          // Tentar determinar a categoria pelo caminho
+          if (url.includes('documents') || url.includes('document')) {
+            return `${baseUrl}/static/images/documents${url}`;
+          }
+          if (url.includes('profiles') || url.includes('profile')) {
+            return `${baseUrl}/static/images/profiles${url}`;
+          }
+          return `${baseUrl}/static${url}`;
+        }
+        return `${baseUrl}${url}`;
+      }
+      
+      // Se não começa com /, assumir que é apenas o nome do arquivo
+      // Tentar adicionar /static/images/documents/ por padrão para documentos
+      return `${baseUrl}/static/images/documents/${url}`;
+    };
+    
+    const documentImageUrl = normalizeUrl(user.documentImage?.url);
+    const crefImageUrl = normalizeUrl(user.crefImage?.url);
+    const profileImageUrl = normalizeUrl(user.profileImage?.url);
 
-    let crefImageUrl = null;
-    if (user.crefImage?.url) {
-      try {
-        const original = new URL(user.crefImage.url);
-        const normalizedBase = new URL(baseUrl);
-        crefImageUrl = `${normalizedBase.origin}${original.pathname}`;
-      } catch (_) {
-        crefImageUrl = user.crefImage.url.replace(
-          'https://api.treinopro.com',
-          baseUrl,
-        );
-      }
+    // Log para debug
+    if (documentImageUrl) {
+      console.log(`📄 [ADMIN] DocumentImageUrl para usuário ${id}:`, documentImageUrl);
     }
-
-    let profileImageUrl = null;
-    if (user.profileImage?.url) {
-      try {
-        const original = new URL(user.profileImage.url);
-        const normalizedBase = new URL(baseUrl);
-        profileImageUrl = `${normalizedBase.origin}${original.pathname}`;
-      } catch (_) {
-        profileImageUrl = user.profileImage.url.replace(
-          'https://api.treinopro.com',
-          baseUrl,
-        );
-      }
+    if (crefImageUrl) {
+      console.log(`📄 [ADMIN] CrefImageUrl para usuário ${id}:`, crefImageUrl);
     }
 
     return {
