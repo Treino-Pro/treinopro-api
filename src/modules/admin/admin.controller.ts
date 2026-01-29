@@ -4,6 +4,7 @@ import {
   Put,
   Param,
   Body,
+  Query,
   UseGuards,
   Post,
   Request,
@@ -14,6 +15,7 @@ import {
   ApiTags,
   ApiResponse,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -237,6 +239,75 @@ export class AdminController {
   })
   async getAnalytics(): Promise<AnalyticsResponseDto> {
     return this.adminService.getAnalytics();
+  }
+
+  @Get('charts')
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    type: Number,
+    description: 'Número de dias para buscar dados (padrão: 30)',
+  })
+  @ApiOperation({
+    summary: 'Obter dados para gráficos',
+    description:
+      'Retorna dados de séries temporais para gráficos: receita, atividade de aulas e cadastros',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Dados de gráficos retornados com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        revenue: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              date: { type: 'string' },
+              revenue: { type: 'number' },
+            },
+          },
+        },
+        classesActivity: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              date: { type: 'string' },
+              scheduled: { type: 'number' },
+              pending_confirmation: { type: 'number' },
+              active: { type: 'number' },
+              completed: { type: 'number' },
+              cancelled: { type: 'number' },
+              no_show_dispute: { type: 'number' },
+            },
+          },
+        },
+        registrations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              date: { type: 'string' },
+              count: { type: 'number' },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido ou expirado',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
+  async getChartsData(@Query('days') days?: string): Promise<any> {
+    const daysNum = days ? parseInt(days, 10) : 30;
+    return this.adminService.getChartsData(daysNum);
   }
 
   // ===== ENDPOINTS DE TRANSFERÊNCIA REAL =====

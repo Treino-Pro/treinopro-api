@@ -212,4 +212,108 @@ export class AdminService {
       payments: paymentsAgg || {},
     };
   }
+
+  async getChartsData(days: number = 30) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+    const startDateStr = startDate.toISOString().split('T')[0];
+
+    // Receita por dia (últimos N dias)
+    const revenueData = await this.db
+      .select({
+        date: sql<string>`DATE(${payments.createdAt})::text`,
+        revenue: sum(payments.totalAmount),
+      })
+      .from(payments)
+      .where(sql`DATE(${payments.createdAt}) >= ${startDateStr}`)
+      .groupBy(sql`DATE(${payments.createdAt})`)
+      .orderBy(sql`DATE(${payments.createdAt})`);
+
+    // Atividade de aulas por status por dia
+    const classesActivityData = await this.db
+      .select({
+        date: sql<string>`DATE(${classes.createdAt})::text`,
+        status: classes.status,
+        count: count(),
+      })
+      .from(classes)
+      .where(sql`DATE(${classes.createdAt}) >= ${startDateStr}`)
+      .groupBy(sql`DATE(${classes.createdAt})`, classes.status)
+      .orderBy(sql`DATE(${classes.createdAt})`);
+
+    // Cadastros por dia
+    const registrationsData = await this.db
+      .select({
+        date: sql<string>`DATE(${users.createdAt})::text`,
+        count: count(),
+      })
+      .from(users)
+      .where(sql`DATE(${users.createdAt}) >= ${startDateStr}`)
+      .groupBy(sql`DATE(${users.createdAt})`)
+      .orderBy(sql`DATE(${users.createdAt})`);
+
+    // Criar mapa de todas as datas no período
+    const allDates: string[] = [];
+    for (let i = 0; i < days; i++) {
+      const date = new Date(startDate);
+      date.setDate(date.getDate() + i);
+      allDates.push(date.toISOString().split('T')[0]);
+    }
+
+    // Processar dados de receita (preencher dias sem dados com 0)
+    const revenueMap = new Map<string, number>();
+    revenueData.forEach((row: any) => {
+      revenueMap.set(row.date, Number(row.revenue || 0));
+    });
+    const revenueChart = allDates.map((date) => ({
+      date,
+      revenue: revenueMap.get(date) || 0,
+    }));
+
+    // Processar dados de atividade de aulas (agrupar por data e status)
+    const activityMap = new Map<string, Record<string, number>>();
+    classesActivityData.forEach((row: any) => {
+      const date = row.date;
+      if (!activityMap.has(date)) {
+        activityMap.set(date, {
+          scheduled: 0,
+          pending_confirmation: 0,
+          active: 0,
+          completed: 0,
+          cancelled: 0,
+          no_show_dispute: 0,
+        });
+      }
+      const statusMap = activityMap.get(date)!;
+      statusMap[row.status as string] = Number(row.count || 0);
+    });
+    const classesActivityChart = allDates.map((date) => {
+      const statuses = activityMap.get(date) || {
+        scheduled: 0,
+        pending_confirmation: 0,
+        active: 0,
+        completed: 0,
+        cancelled: 0,
+        no_show_dispute: 0,
+      };
+      return { date, ...statuses };
+    });
+
+    // Processar dados de cadastros (preencher dias sem dados com 0)
+    const registrationsMap = new Map<string, number>();
+    registrationsData.forEach((row: any) => {
+      registrationsMap.set(row.date, Number(row.count || 0));
+    });
+    const registrationsChart = allDates.map((date) => ({
+      date,
+      count: registrationsMap.get(date) || 0,
+    }));
+
+    return {
+      revenue: revenueChart,
+      classesActivity: classesActivityChart,
+      registrations: registrationsChart,
+    };
+  }
 }
