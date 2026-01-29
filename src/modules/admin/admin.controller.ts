@@ -25,6 +25,7 @@ import { PaymentsService } from '../payments/payments.service';
 import {
   DashboardSummaryResponseDto,
   UserListResponseDto,
+  UserItemDto,
   UpdateUserDto,
   FinancialSummaryResponseDto,
   MissionListResponseDto,
@@ -72,14 +73,50 @@ export class AdminController {
   }
 
   @Get('users')
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Número da página (padrão: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Itens por página (padrão: 20)',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Busca por nome ou email',
+  })
+  @ApiQuery({
+    name: 'userType',
+    required: false,
+    enum: ['student', 'personal', 'admin'],
+    description: 'Filtro por tipo de usuário',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'inactive', 'suspended'],
+    description: 'Filtro por status',
+  })
+  @ApiQuery({
+    name: 'isVerified',
+    required: false,
+    type: Boolean,
+    description: 'Filtro por verificação (true/false)',
+  })
   @ApiOperation({
     summary: 'Listar usuários da plataforma',
-    description: 'Retorna lista de todos os usuários com informações básicas',
+    description: 'Retorna lista paginada de usuários com filtros e busca',
   })
   @ApiResponse({
     status: 200,
     description: 'Lista de usuários retornada com sucesso',
-    type: [UserListResponseDto],
+    type: UserListResponseDto,
   })
   @ApiResponse({
     status: 401,
@@ -89,8 +126,54 @@ export class AdminController {
     status: 403,
     description: 'Acesso negado - apenas administradores',
   })
-  async listUsers(): Promise<UserListResponseDto[]> {
-    return this.adminService.listUsers();
+  async listUsers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('userType') userType?: string,
+    @Query('status') status?: string,
+    @Query('isVerified') isVerified?: string,
+  ): Promise<UserListResponseDto> {
+    const filters = {
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      search,
+      userType,
+      status,
+      isVerified: isVerified === 'true' ? true : isVerified === 'false' ? false : undefined,
+    };
+    return this.adminService.listUsers(filters);
+  }
+
+  @Get('users/:id')
+  @ApiOperation({
+    summary: 'Obter detalhes de um usuário',
+    description: 'Retorna informações completas de um usuário específico',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID do usuário',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Detalhes do usuário retornados com sucesso',
+    type: UserItemDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token JWT inválido ou expirado',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Usuário não encontrado',
+  })
+  async getUserById(@Param('id') id: string): Promise<any> {
+    return this.adminService.getUserById(id);
   }
 
   @Put('users/:id')
@@ -107,7 +190,7 @@ export class AdminController {
   @ApiResponse({
     status: 200,
     description: 'Usuário atualizado com sucesso',
-    type: UserListResponseDto,
+    type: UserItemDto,
   })
   @ApiResponse({
     status: 400,
@@ -128,7 +211,7 @@ export class AdminController {
   async updateUser(
     @Param('id') id: string,
     @Body() body: UpdateUserDto,
-  ): Promise<UserListResponseDto> {
+  ): Promise<UserItemDto> {
     return this.adminService.updateUser(id, body);
   }
 

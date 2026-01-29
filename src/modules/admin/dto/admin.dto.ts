@@ -80,19 +80,28 @@ export class DashboardSummaryResponseDto {
     personalName?: string | null;
     mpPaymentId?: string | null;
   }>;
+
+  @ApiProperty({
+    description: 'Quantidade de disputas não resolvidas',
+    example: 5,
+  })
+  unresolvedDisputes: number;
 }
 
 // ===== USER DTOs =====
 
-export class UserListResponseDto {
+export class UserItemDto {
   @ApiProperty({ description: 'ID do usuário' })
   id: string;
 
   @ApiProperty({ description: 'Email do usuário' })
   email: string;
 
-  @ApiProperty({ description: 'Nome completo' })
-  fullName: string;
+  @ApiProperty({ description: 'Primeiro nome' })
+  firstName: string;
+
+  @ApiProperty({ description: 'Sobrenome' })
+  lastName: string;
 
   @ApiProperty({
     description: 'Tipo de usuário',
@@ -106,14 +115,34 @@ export class UserListResponseDto {
   })
   status: string;
 
+  @ApiProperty({ description: 'Se o usuário está verificado' })
+  isVerified: boolean;
+
   @ApiProperty({ description: 'Data de criação' })
   createdAt: string;
 
-  @ApiProperty({ description: 'Última atividade' })
-  lastActivity: string;
+  @ApiProperty({ description: 'Data de atualização' })
+  updatedAt: string;
+}
 
-  @ApiProperty({ description: 'Se o usuário está verificado' })
-  isVerified: boolean;
+export class UserListResponseDto {
+  @ApiProperty({
+    description: 'Lista de usuários',
+    type: [UserItemDto],
+  })
+  users: UserItemDto[];
+
+  @ApiProperty({ description: 'Total de registros' })
+  total: number;
+
+  @ApiProperty({ description: 'Página atual' })
+  page: number;
+
+  @ApiProperty({ description: 'Itens por página' })
+  limit: number;
+
+  @ApiProperty({ description: 'Total de páginas' })
+  totalPages: number;
 }
 
 export class UpdateUserDto {

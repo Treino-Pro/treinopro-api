@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { users, proposals, classes, payments } from '../../database/schema';
-import { count, desc, eq, sql, sum } from 'drizzle-orm';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { users, proposals, classes, payments, paymentDisputes } from '../../database/schema';
+import { count, desc, eq, sql, sum, or, and, like, ilike } from 'drizzle-orm';
 import { missions } from '../../database/schema/gamification';
 
 @Injectable()
@@ -8,7 +8,7 @@ export class AdminService {
   constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
   async getDashboardSummary() {
-    const [userCount, proposalStats, classStats, paymentStats] =
+    const [userCount, proposalStats, classStats, paymentStats, disputesCount] =
       await Promise.all([
         this.db.select({ total: count() }).from(users),
         this.db
@@ -43,6 +43,28 @@ export class AdminService {
               limit: 5,
             })
           : Promise.resolve([]),
+        // Contar disputas não resolvidas: payment disputes (pending/under_review) + no-show disputes em classes
+        Promise.all([
+          // Disputas de pagamento não resolvidas
+          this.db
+            .select({ count: count() })
+            .from(paymentDisputes)
+            .where(
+              or(
+                eq(paymentDisputes.status, 'pending'),
+                eq(paymentDisputes.status, 'under_review')
+              )
+            ),
+          // Disputas de no-show em classes (status = 'no_show_dispute')
+          this.db
+            .select({ count: count() })
+            .from(classes)
+            .where(eq(classes.status, 'no_show_dispute')),
+        ]).then(([paymentDisputesResult, noShowDisputesResult]) => {
+          const paymentDisputesCount = paymentDisputesResult[0]?.count ?? 0;
+          const noShowDisputesCount = noShowDisputesResult[0]?.count ?? 0;
+          return paymentDisputesCount + noShowDisputesCount;
+        }),
       ]);
 
     // Formatar pagamentos com nomes dos usuários
@@ -74,35 +96,145 @@ export class AdminService {
       proposals: proposalStats[0] ?? {},
       classes: classStats[0] ?? {},
       latestPayments: formattedPayments,
+      unresolvedDisputes: disputesCount ?? 0,
     };
   }
 
-  async listUsers() {
-    const list = await this.db
+  async listUsers(filters?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    userType?: string;
+    status?: string;
+    isVerified?: boolean;
+  }) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 20;
+    const offset = (page - 1) * limit;
+
+    // Construir condições de filtro
+    const conditions = [];
+
+    if (filters?.search) {
+      conditions.push(
+        or(
+          ilike(users.firstName, `%${filters.search}%`),
+          ilike(users.lastName, `%${filters.search}%`),
+          ilike(users.email, `%${filters.search}%`),
+        ),
+      );
+    }
+
+    if (filters?.userType) {
+      conditions.push(eq(users.userType, filters.userType));
+    }
+
+    if (filters?.status) {
+      conditions.push(eq(users.status, filters.status));
+    }
+
+    if (filters?.isVerified !== undefined) {
+      conditions.push(eq(users.isVerified, filters.isVerified));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Buscar usuários
+    const usersList = await this.db
       .select({
         id: users.id,
         email: users.email,
         firstName: users.firstName,
         lastName: users.lastName,
         userType: users.userType,
+        status: users.status,
+        isVerified: users.isVerified,
         createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
       })
       .from(users)
+      .where(whereClause)
       .orderBy(desc(users.createdAt))
-      .limit(50);
-    return list;
+      .limit(limit)
+      .offset(offset);
+
+    // Contar total
+    const totalResult = await this.db
+      .select({ total: count() })
+      .from(users)
+      .where(whereClause);
+
+    const total = totalResult[0]?.total ?? 0;
+
+    return {
+      users: usersList,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getUserById(id: string) {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, id),
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      userType: user.userType,
+      status: user.status,
+      isVerified: user.isVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      birthDate: user.birthDate,
+      documentType: user.documentType,
+      documentNumber: user.documentNumber,
+      cref: user.cref,
+      crefValidated: user.crefValidated,
+      specialties: user.specialties,
+      rating: user.rating ? parseFloat(user.rating.toString()) : 5.0,
+      totalRatings: user.totalRatings || 0,
+      isMinor: user.isMinor,
+      guardianName: user.guardianName,
+      guardianEmail: user.guardianEmail,
+      profileImageId: user.profileImageId,
+    };
   }
 
   async updateUser(id: string, body: any) {
-    const allowed = {
-      firstName: body.firstName,
-      lastName: body.lastName,
-      userType: body.userType, // cuidado: requer políticas adequadas
-    } as any;
+    const allowed: any = {
+      updatedAt: new Date(),
+    };
+
+    // Permitir atualizar status e isVerified conforme DTO
+    if (body.status !== undefined) {
+      allowed.status = body.status;
+    }
+    if (body.isVerified !== undefined) {
+      allowed.isVerified = body.isVerified;
+    }
+    // Campos adicionais (cuidado: requer políticas adequadas)
+    if (body.firstName !== undefined) {
+      allowed.firstName = body.firstName;
+    }
+    if (body.lastName !== undefined) {
+      allowed.lastName = body.lastName;
+    }
+    if (body.userType !== undefined) {
+      allowed.userType = body.userType;
+    }
 
     const [updated] = await this.db
       .update(users)
-      .set({ ...allowed, updatedAt: new Date() })
+      .set(allowed)
       .where(eq(users.id, id))
       .returning();
     return updated;
