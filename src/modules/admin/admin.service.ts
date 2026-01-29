@@ -1,7 +1,9 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { users, proposals, classes, payments, paymentDisputes } from '../../database/schema';
+import { users, proposals, classes, payments, paymentDisputes, files } from '../../database/schema';
 import { count, desc, eq, sql, sum, or, and, like, ilike } from 'drizzle-orm';
 import { missions } from '../../database/schema/gamification';
+import * as path from 'path';
+import * as fs from 'fs/promises';
 
 @Injectable()
 export class AdminService {
@@ -290,6 +292,36 @@ export class AdminService {
       guardianEmail: user.guardianEmail,
       profileImageId: user.profileImageId,
       profileImageUrl,
+    };
+  }
+
+  /**
+   * Retorna o caminho absoluto e o mimeType de um arquivo para streaming.
+   * Usado pelo endpoint GET /admin/files/:id para servir imagens/documentos com autenticação.
+   */
+  async getFileForStream(fileId: string): Promise<{ absolutePath: string; mimeType: string }> {
+    const fileRecord = await this.db.query.files.findFirst({
+      where: eq(files.id, fileId),
+    });
+
+    if (!fileRecord) {
+      throw new NotFoundException('Arquivo não encontrado');
+    }
+
+    const storedPath = fileRecord.path as string;
+    const absolutePath = path.isAbsolute(storedPath)
+      ? storedPath
+      : path.join(process.cwd(), storedPath);
+
+    try {
+      await fs.access(absolutePath);
+    } catch {
+      throw new NotFoundException('Arquivo não encontrado no servidor');
+    }
+
+    return {
+      absolutePath,
+      mimeType: fileRecord.mimeType as string,
     };
   }
 

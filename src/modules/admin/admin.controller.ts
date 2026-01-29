@@ -8,7 +8,9 @@ import {
   UseGuards,
   Post,
   Request,
+  StreamableFile,
 } from '@nestjs/common';
+import { createReadStream } from 'fs';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -71,6 +73,22 @@ export class AdminController {
   })
   async getDashboard(): Promise<DashboardSummaryResponseDto> {
     return this.adminService.getDashboardSummary();
+  }
+
+  @Get('files/:id')
+  @ApiOperation({
+    summary: 'Servir arquivo por ID (documentos, CREF, perfil)',
+    description:
+      'Retorna o conteúdo do arquivo com autenticação admin. Use para exibir imagens no painel.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do arquivo (UUID)' })
+  @ApiResponse({ status: 200, description: 'Conteúdo do arquivo' })
+  @ApiResponse({ status: 404, description: 'Arquivo não encontrado' })
+  async getFile(@Param('id') id: string): Promise<StreamableFile> {
+    const { absolutePath, mimeType } =
+      await this.adminService.getFileForStream(id);
+    const stream = createReadStream(absolutePath);
+    return new StreamableFile(stream, { type: mimeType });
   }
 
   @Get('users')
