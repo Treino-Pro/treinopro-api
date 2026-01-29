@@ -125,6 +125,59 @@ export class UserItemDto {
   updatedAt: string;
 }
 
+export class UserDetailsDto extends UserItemDto {
+  @ApiPropertyOptional({ description: 'Data de nascimento' })
+  birthDate?: string;
+
+  @ApiPropertyOptional({ description: 'Tipo de documento', enum: ['RG', 'CNH'] })
+  documentType?: string;
+
+  @ApiPropertyOptional({ description: 'Número do documento' })
+  documentNumber?: string;
+
+  @ApiPropertyOptional({ description: 'ID da imagem do documento' })
+  documentImageId?: string;
+
+  @ApiPropertyOptional({ description: 'URL da imagem do documento' })
+  documentImageUrl?: string;
+
+  @ApiPropertyOptional({ description: 'CREF (apenas para personais)' })
+  cref?: string;
+
+  @ApiPropertyOptional({ description: 'CREF validado' })
+  crefValidated?: boolean;
+
+  @ApiPropertyOptional({ description: 'ID da imagem do CREF' })
+  crefImageId?: string;
+
+  @ApiPropertyOptional({ description: 'URL da imagem do CREF' })
+  crefImageUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Especialidades', type: [String] })
+  specialties?: string[];
+
+  @ApiPropertyOptional({ description: 'Rating médio' })
+  rating?: number;
+
+  @ApiPropertyOptional({ description: 'Total de avaliações' })
+  totalRatings?: number;
+
+  @ApiPropertyOptional({ description: 'É menor de idade' })
+  isMinor?: boolean;
+
+  @ApiPropertyOptional({ description: 'Nome do responsável' })
+  guardianName?: string;
+
+  @ApiPropertyOptional({ description: 'Email do responsável' })
+  guardianEmail?: string;
+
+  @ApiPropertyOptional({ description: 'ID da imagem de perfil' })
+  profileImageId?: string;
+
+  @ApiPropertyOptional({ description: 'URL da imagem de perfil' })
+  profileImageUrl?: string;
+}
+
 export class UserListResponseDto {
   @ApiProperty({
     description: 'Lista de usuários',
@@ -158,6 +211,21 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   isVerified?: boolean;
+
+  @ApiPropertyOptional({ description: 'Primeiro nome' })
+  @IsOptional()
+  @IsString()
+  firstName?: string;
+
+  @ApiPropertyOptional({ description: 'Sobrenome' })
+  @IsOptional()
+  @IsString()
+  lastName?: string;
+
+  @ApiPropertyOptional({ description: 'Email do usuário' })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @ApiPropertyOptional({ description: 'Notas administrativas' })
   @IsOptional()

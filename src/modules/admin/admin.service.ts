@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { users, proposals, classes, payments, paymentDisputes } from '../../database/schema';
 import { count, desc, eq, sql, sum, or, and, like, ilike } from 'drizzle-orm';
 import { missions } from '../../database/schema/gamification';
@@ -178,10 +178,60 @@ export class AdminService {
   async getUserById(id: string) {
     const user = await this.db.query.users.findFirst({
       where: eq(users.id, id),
+      with: {
+        documentImage: true,
+        crefImage: true,
+        profileImage: true,
+      },
     });
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // Processar URLs das imagens
+    const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+    
+    let documentImageUrl = null;
+    if (user.documentImage?.url) {
+      try {
+        const original = new URL(user.documentImage.url);
+        const normalizedBase = new URL(baseUrl);
+        documentImageUrl = `${normalizedBase.origin}${original.pathname}`;
+      } catch (_) {
+        documentImageUrl = user.documentImage.url.replace(
+          'https://api.treinopro.com',
+          baseUrl,
+        );
+      }
+    }
+
+    let crefImageUrl = null;
+    if (user.crefImage?.url) {
+      try {
+        const original = new URL(user.crefImage.url);
+        const normalizedBase = new URL(baseUrl);
+        crefImageUrl = `${normalizedBase.origin}${original.pathname}`;
+      } catch (_) {
+        crefImageUrl = user.crefImage.url.replace(
+          'https://api.treinopro.com',
+          baseUrl,
+        );
+      }
+    }
+
+    let profileImageUrl = null;
+    if (user.profileImage?.url) {
+      try {
+        const original = new URL(user.profileImage.url);
+        const normalizedBase = new URL(baseUrl);
+        profileImageUrl = `${normalizedBase.origin}${original.pathname}`;
+      } catch (_) {
+        profileImageUrl = user.profileImage.url.replace(
+          'https://api.treinopro.com',
+          baseUrl,
+        );
+      }
     }
 
     return {
@@ -197,8 +247,12 @@ export class AdminService {
       birthDate: user.birthDate,
       documentType: user.documentType,
       documentNumber: user.documentNumber,
+      documentImageId: user.documentImageId,
+      documentImageUrl,
       cref: user.cref,
       crefValidated: user.crefValidated,
+      crefImageId: user.crefImageId,
+      crefImageUrl,
       specialties: user.specialties,
       rating: user.rating ? parseFloat(user.rating.toString()) : 5.0,
       totalRatings: user.totalRatings || 0,
@@ -206,10 +260,20 @@ export class AdminService {
       guardianName: user.guardianName,
       guardianEmail: user.guardianEmail,
       profileImageId: user.profileImageId,
+      profileImageUrl,
     };
   }
 
   async updateUser(id: string, body: any) {
+    // Verificar se usuário existe
+    const existingUser = await this.db.query.users.findFirst({
+      where: eq(users.id, id),
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
     const allowed: any = {
       updatedAt: new Date(),
     };
@@ -221,13 +285,31 @@ export class AdminService {
     if (body.isVerified !== undefined) {
       allowed.isVerified = body.isVerified;
     }
-    // Campos adicionais (cuidado: requer políticas adequadas)
-    if (body.firstName !== undefined) {
-      allowed.firstName = body.firstName;
+
+    // Campos editáveis básicos
+    if (body.firstName !== undefined && body.firstName.trim()) {
+      allowed.firstName = body.firstName.trim();
     }
-    if (body.lastName !== undefined) {
-      allowed.lastName = body.lastName;
+    if (body.lastName !== undefined && body.lastName.trim()) {
+      allowed.lastName = body.lastName.trim();
     }
+
+    // Email - verificar se já existe antes de atualizar
+    if (body.email !== undefined && body.email.trim()) {
+      const emailToUpdate = body.email.trim().toLowerCase();
+      if (emailToUpdate !== existingUser.email) {
+        // Verificar se email já está em uso por outro usuário
+        const emailExists = await this.db.query.users.findFirst({
+          where: eq(users.email, emailToUpdate),
+        });
+        if (emailExists && emailExists.id !== id) {
+          throw new ConflictException('Email já está em uso por outro usuário');
+        }
+        allowed.email = emailToUpdate;
+      }
+    }
+
+    // Tipo de usuário (cuidado: requer políticas adequadas)
     if (body.userType !== undefined) {
       allowed.userType = body.userType;
     }

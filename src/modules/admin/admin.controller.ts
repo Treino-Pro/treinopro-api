@@ -26,6 +26,7 @@ import {
   DashboardSummaryResponseDto,
   UserListResponseDto,
   UserItemDto,
+  UserDetailsDto,
   UpdateUserDto,
   FinancialSummaryResponseDto,
   MissionListResponseDto,
@@ -158,7 +159,7 @@ export class AdminController {
   @ApiResponse({
     status: 200,
     description: 'Detalhes do usuário retornados com sucesso',
-    type: UserItemDto,
+    type: UserDetailsDto,
   })
   @ApiResponse({
     status: 401,
@@ -172,7 +173,7 @@ export class AdminController {
     status: 404,
     description: 'Usuário não encontrado',
   })
-  async getUserById(@Param('id') id: string): Promise<any> {
+  async getUserById(@Param('id') id: string): Promise<UserDetailsDto> {
     return this.adminService.getUserById(id);
   }
 
