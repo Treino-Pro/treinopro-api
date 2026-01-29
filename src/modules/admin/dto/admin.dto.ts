@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsUUID,
   IsDateString,
+  IsEmail,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
