@@ -531,12 +531,19 @@ export class AdminService {
       };
     } catch (e) {
       return {
-        summary: {},
+        summary: {
+          totalPayments: 0,
+          totalAmount: 0,
+          platformFees: 0,
+          personalAmounts: 0,
+        },
         latest: [],
         total: 0,
         page: 1,
         limit: 20,
         totalPages: 0,
+        startDate: undefined,
+        endDate: undefined,
       };
     }
   }

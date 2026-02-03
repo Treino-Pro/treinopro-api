@@ -3,21 +3,19 @@
  * Uso: npx ts-node scripts/check-file.ts <file-id>
  */
 
-import { drizzle } from 'drizzle-orm/node-postgres';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import * as schema from '../src/database/schema';
 import { files } from '../src/database/schema';
 import { eq } from 'drizzle-orm';
-import * as pg from 'pg';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-const { Pool } = pg;
-
 async function checkFile(fileId: string) {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/treinopro',
-  });
-
-  const db = drizzle(pool);
+  const connectionString =
+    process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/treinopro';
+  const sql = postgres(connectionString);
+  const db = drizzle(sql, { schema });
 
   try {
     const fileRecord = await db.query.files.findFirst({
@@ -85,7 +83,7 @@ async function checkFile(fileId: string) {
   } catch (error) {
     console.error('❌ Erro:', error);
   } finally {
-    await pool.end();
+    await sql.end();
   }
 }
 
