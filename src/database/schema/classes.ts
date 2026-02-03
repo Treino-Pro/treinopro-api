@@ -48,6 +48,8 @@ export const classes = pgTable('classes', {
   confirmedAt: timestamp('confirmed_at'),
   noShowReportedAt: timestamp('no_show_reported_at'),
   noShowReportedBy: varchar('no_show_reported_by', { length: 20 }), // 'student' ou 'personal'
+  noShowReason: text('no_show_reason'), // motivo/descrição ao criar a disputa
+  noShowNotes: text('no_show_notes'), // observações ao criar a disputa
   disputeStatus: classDisputeStatusEnum('dispute_status'),
   custodyExpiresAt: timestamp('custody_expires_at'),
   evidenceDeadline: timestamp('evidence_deadline'),

@@ -38,6 +38,7 @@ import {
   MissionListResponseDto,
   UpdateMissionDto,
   AnalyticsResponseDto,
+  ResolveClassDisputeDto,
 } from './dto/admin.dto';
 import {
   ApproveWithdrawalDto,
@@ -283,7 +284,7 @@ export class AdminController {
   @Get('disputes/classes')
   @ApiOperation({
     summary: 'Listar disputas de aula (no-show)',
-    description: 'Retorna lista paginada de aulas em disputa (status no_show_dispute). Resolução é feita pelo aluno/personal no app.',
+    description: 'Retorna lista paginada de aulas em disputa (status no_show_dispute). Resolução é feita pelo admin.',
   })
   @ApiQuery({ name: 'page', required: false, description: 'Página' })
   @ApiQuery({ name: 'limit', required: false, description: 'Itens por página' })
@@ -298,6 +299,24 @@ export class AdminController {
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
     if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.adminService.listClassDisputes(filters);
+  }
+
+  @Post('disputes/classes/:id/resolve')
+  @ApiOperation({
+    summary: 'Resolver disputa de aula (no-show)',
+    description: 'Admin resolve a disputa a favor do aluno ou do personal.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da aula em disputa' })
+  @ApiResponse({ status: 200, description: 'Disputa resolvida' })
+  @ApiResponse({ status: 400, description: 'Aula não está em disputa' })
+  @ApiResponse({ status: 404, description: 'Aula não encontrada' })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
+  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  async resolveClassDispute(
+    @Param('id') id: string,
+    @Body() body: ResolveClassDisputeDto,
+  ) {
+    return this.adminService.resolveClassDispute(id, body);
   }
 
   @Get('disputes')

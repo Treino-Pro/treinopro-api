@@ -582,6 +582,8 @@ export class AdminService {
       disputeStatus: c.disputeStatus,
       noShowReportedBy: c.noShowReportedBy,
       noShowReportedAt: c.noShowReportedAt,
+      noShowReason: c.noShowReason,
+      noShowNotes: c.noShowNotes,
       evidenceDeadline: c.evidenceDeadline,
       studentEvidence: c.studentEvidence,
       personalEvidence: c.personalEvidence,
@@ -596,6 +598,48 @@ export class AdminService {
       createdAt: c.createdAt,
     }));
     return { items, total, totalPages };
+  }
+
+  async resolveClassDispute(
+    classId: string,
+    body: { resolution: 'resolved_for_student' | 'resolved_for_personal'; adminNotes?: string },
+  ) {
+    const [classRow] = await this.db
+      .select()
+      .from(classes)
+      .where(eq(classes.id, classId))
+      .limit(1);
+
+    if (!classRow) {
+      throw new NotFoundException('Aula não encontrada');
+    }
+
+    if (classRow.status !== 'no_show_dispute') {
+      throw new BadRequestException('A aula não está em disputa');
+    }
+
+    const resolution = body.resolution;
+    const newDisputeStatus = resolution;
+    const newClassStatus =
+      resolution === 'resolved_for_personal' ? 'completed' : 'custody';
+
+    await this.db
+      .update(classes)
+      .set({
+        disputeStatus: newDisputeStatus,
+        status: newClassStatus,
+        resolution: body.adminNotes ?? null,
+        resolvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(classes.id, classId));
+
+    return {
+      id: classId,
+      disputeStatus: newDisputeStatus,
+      status: newClassStatus,
+      resolvedAt: new Date().toISOString(),
+    };
   }
 
   async listMissions() {

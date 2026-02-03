@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsArray,
   IsEnum,
+  IsIn,
   IsUUID,
   IsDateString,
   IsEmail,
@@ -443,4 +444,24 @@ export class AnalyticsResponseDto {
     averageTransactionValue: number;
     paymentSuccessRate: number;
   };
+}
+
+// ===== DISPUTA DE AULA (NO-SHOW) =====
+
+export class ResolveClassDisputeDto {
+  @ApiProperty({
+    description: 'Resolução da disputa de aula',
+    enum: ['resolved_for_student', 'resolved_for_personal'],
+    example: 'resolved_for_personal',
+  })
+  @IsString()
+  @IsIn(['resolved_for_student', 'resolved_for_personal'])
+  resolution: 'resolved_for_student' | 'resolved_for_personal';
+
+  @ApiPropertyOptional({
+    description: 'Notas do admin sobre a resolução',
+  })
+  @IsString()
+  @IsOptional()
+  adminNotes?: string;
 }

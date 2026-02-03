@@ -1145,6 +1145,8 @@ export class ClassesService {
         status: ClassStatus.NO_SHOW_DISPUTE,
         noShowReportedAt: new Date(),
         noShowReportedBy: 'personal',
+        noShowReason: reportDto.reason ?? null,
+        noShowNotes: reportDto.notes ?? null,
         disputeStatus: ClassDisputeStatus.PENDING,
         custodyExpiresAt: new Date(now.getTime() + 48 * 60 * 60 * 1000), // 48h
         evidenceDeadline: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24h
@@ -1286,6 +1288,8 @@ export class ClassesService {
         status: ClassStatus.NO_SHOW_DISPUTE,
         noShowReportedAt: new Date(),
         noShowReportedBy: 'student',
+        noShowReason: reportDto.reason ?? null,
+        noShowNotes: reportDto.notes ?? null,
         disputeStatus: ClassDisputeStatus.PENDING,
         custodyExpiresAt: new Date(now.getTime() + 48 * 60 * 60 * 1000), // 48h
         evidenceDeadline: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24h
