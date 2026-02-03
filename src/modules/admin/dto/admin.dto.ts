@@ -265,6 +265,9 @@ export class FinancialSummaryResponseDto {
         personalAmount: { type: 'number' },
         status: { type: 'string' },
         createdAt: { type: 'string' },
+        studentName: { type: 'string' },
+        personalName: { type: 'string' },
+        mpPaymentId: { type: 'string' },
       },
     },
   })
@@ -275,7 +278,28 @@ export class FinancialSummaryResponseDto {
     personalAmount: number;
     status: string;
     createdAt: string;
+    studentName: string | null;
+    personalName: string | null;
+    mpPaymentId: string | null;
   }>;
+
+  @ApiPropertyOptional({ description: 'Total de pagamentos no período filtrado' })
+  total?: number;
+
+  @ApiPropertyOptional({ description: 'Página atual' })
+  page?: number;
+
+  @ApiPropertyOptional({ description: 'Itens por página' })
+  limit?: number;
+
+  @ApiPropertyOptional({ description: 'Total de páginas' })
+  totalPages?: number;
+
+  @ApiPropertyOptional({ description: 'Data inicial do filtro (YYYY-MM-DD)' })
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: 'Data final do filtro (YYYY-MM-DD)' })
+  endDate?: string;
 }
 
 // ===== MISSION DTOs =====
@@ -299,11 +323,17 @@ export class MissionListResponseDto {
   @ApiProperty({ description: 'Se a missão está ativa' })
   isActive: boolean;
 
+  @ApiPropertyOptional({ description: 'Data de início da missão' })
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: 'Data de fim da missão' })
+  endDate?: string;
+
   @ApiProperty({ description: 'Data de criação' })
   createdAt: string;
 
-  @ApiProperty({ description: 'Número de usuários que completaram' })
-  completions: number;
+  @ApiPropertyOptional({ description: 'Data de atualização' })
+  updatedAt?: string;
 }
 
 export class UpdateMissionDto {
@@ -322,10 +352,29 @@ export class UpdateMissionDto {
   @IsNumber()
   xpReward?: number;
 
+  @ApiPropertyOptional({ description: 'Tipo da missão' })
+  @IsOptional()
+  @IsString()
+  type?: string;
+
   @ApiPropertyOptional({ description: 'Se a missão está ativa' })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Data de início da missão (null = fixa)' })
+  @IsOptional()
+  @IsDateString()
+  startDate?: string | null;
+
+  @ApiPropertyOptional({ description: 'Data de fim da missão (null = fixa)' })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string | null;
+
+  @ApiPropertyOptional({ description: 'Requisitos da missão' })
+  @IsOptional()
+  requirements?: { action: string; count: number; timeframe?: string; conditions?: Record<string, any> };
 }
 
 // ===== ANALYTICS DTOs =====

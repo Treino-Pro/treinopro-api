@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { eq, and, or, desc, count, sum, sql } from 'drizzle-orm';
+import { eq, and, or, desc, count, sum, sql, inArray } from 'drizzle-orm';
 import {
   payments,
   paymentDisputes,
@@ -556,6 +556,71 @@ export class PaymentsService {
       .returning();
 
     return this.formatDisputeResponse(updatedDispute);
+  }
+
+  // Listar disputas (admin) com filtros e paginação
+  async listDisputes(filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ items: DisputeResponseDto[]; total: number; totalPages: number }> {
+    const pageNum = Math.max(1, filters?.page ?? 1);
+    const limitNum = Math.min(100, Math.max(1, filters?.limit ?? 20));
+    const offset = (pageNum - 1) * limitNum;
+
+    const whereConditions = [];
+    if (filters?.status) {
+      whereConditions.push(eq(paymentDisputes.status, filters.status as any));
+    }
+
+    const [itemsRaw, countResult] = await Promise.all([
+      this.db.query.paymentDisputes.findMany({
+        where: whereConditions.length ? and(...whereConditions) : undefined,
+        with: {
+          payment: {
+            with: {
+              student: true,
+              personal: true,
+            },
+          },
+          reportedByUser: true,
+        },
+        orderBy: [desc(paymentDisputes.createdAt)],
+        limit: limitNum,
+        offset,
+      }),
+      this.db
+        .select({ count: count() })
+        .from(paymentDisputes)
+        .where(whereConditions.length ? and(...whereConditions) : undefined),
+    ]);
+
+    const total = Number(countResult[0]?.count ?? 0);
+    const totalPages = Math.ceil(total / limitNum) || 1;
+    const items = itemsRaw.map((d) => this.formatDisputeResponse(d));
+    return { items, total, totalPages };
+  }
+
+  // Obter disputa por ID (admin)
+  async getDisputeById(disputeId: string): Promise<DisputeResponseDto> {
+    const dispute = await this.db.query.paymentDisputes.findFirst({
+      where: eq(paymentDisputes.id, disputeId),
+      with: {
+        payment: {
+          with: {
+            student: true,
+            personal: true,
+          },
+        },
+        reportedByUser: true,
+      },
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada');
+    }
+
+    return this.formatDisputeResponse(dispute);
   }
 
   // Resolver disputa (admin)
@@ -1230,14 +1295,20 @@ export class PaymentsService {
       student: payment.student
         ? {
             id: payment.student.id,
-            name: payment.student.name,
+            name:
+              payment.student.firstName != null && payment.student.lastName != null
+                ? `${payment.student.firstName} ${payment.student.lastName}`.trim()
+                : (payment.student as any).name ?? payment.student.email,
             email: payment.student.email,
           }
         : undefined,
       personal: payment.personal
         ? {
             id: payment.personal.id,
-            name: payment.personal.name,
+            name:
+              payment.personal.firstName != null && payment.personal.lastName != null
+                ? `${payment.personal.firstName} ${payment.personal.lastName}`.trim()
+                : (payment.personal as any).name ?? payment.personal.email,
             email: payment.personal.email,
           }
         : undefined,
@@ -1272,9 +1343,13 @@ export class PaymentsService {
       reportedByUser: dispute.reportedByUser
         ? {
             id: dispute.reportedByUser.id,
-            name: dispute.reportedByUser.name,
+            name:
+              dispute.reportedByUser.firstName != null &&
+              dispute.reportedByUser.lastName != null
+                ? `${dispute.reportedByUser.firstName} ${dispute.reportedByUser.lastName}`.trim()
+                : (dispute.reportedByUser as any).name ?? dispute.reportedByUser.email,
             email: dispute.reportedByUser.email,
-            role: dispute.reportedByUser.role,
+            role: (dispute.reportedByUser as any).role ?? dispute.reportedByUser.userType ?? 'user',
           }
         : undefined,
       createdAt: dispute.createdAt,
@@ -1595,19 +1670,60 @@ export class PaymentsService {
     }
   }
 
-  // Listar solicitações de saque pendentes (admin)
+  // Listar solicitações de saque pendentes (admin) – atalho para getWithdrawals({ status: 'pending' })
   async getPendingWithdrawals(): Promise<WithdrawalResponseDto[]> {
+    const result = await this.getWithdrawals({ status: 'pending', page: 1, limit: 500 });
+    return result.items;
+  }
+
+  // Listar saques com filtro por status e paginação (admin)
+  async getWithdrawals(filters?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{
+    items: WithdrawalResponseDto[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const page = Math.max(1, filters?.page ?? 1);
+    const limit = Math.min(100, Math.max(1, filters?.limit ?? 20));
+    const offset = (page - 1) * limit;
+
+    let statusWhere: ReturnType<typeof eq> | ReturnType<typeof inArray> | undefined;
+    if (filters?.status) {
+      const statuses = filters.status.split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        statusWhere = eq(withdrawalRequests.status, statuses[0]);
+      } else if (statuses.length > 1) {
+        statusWhere = inArray(withdrawalRequests.status, statuses);
+      }
+    }
+
     const withdrawals = await this.db.query.withdrawalRequests.findMany({
-      where: eq(withdrawalRequests.status, 'pending'),
-      with: {
-        user: true,
-      },
+      where: statusWhere,
+      with: { user: true },
       orderBy: [desc(withdrawalRequests.createdAt)],
+      limit,
+      offset,
     });
 
-    return withdrawals.map((withdrawal) =>
-      this.formatWithdrawalResponse(withdrawal),
-    );
+    const totalResult = await this.db
+      .select({ count: count() })
+      .from(withdrawalRequests)
+      .where(statusWhere ?? undefined);
+    const total = Number(totalResult[0]?.count ?? 0);
+
+    const items = withdrawals.map((w) => this.formatWithdrawalResponse(w));
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
   }
 
   // Obter histórico de saques de um usuário
@@ -1665,6 +1781,13 @@ export class PaymentsService {
   }
 
   private formatWithdrawalResponse(withdrawal: any): WithdrawalResponseDto {
+    const userName =
+      withdrawal.user?.firstName != null && withdrawal.user?.lastName != null
+        ? `${withdrawal.user.firstName} ${withdrawal.user.lastName}`.trim()
+        : withdrawal.user?.firstName ||
+          withdrawal.user?.lastName ||
+          withdrawal.user?.email ||
+          undefined;
     return {
       id: withdrawal.id,
       userId: withdrawal.userId,
@@ -1682,9 +1805,9 @@ export class PaymentsService {
       user: withdrawal.user
         ? {
             id: withdrawal.user.id,
-            name: withdrawal.user.name,
-            email: withdrawal.user.email,
-            role: withdrawal.user.role,
+            name: userName ?? '',
+            email: withdrawal.user.email ?? '',
+            role: withdrawal.user.role ?? '',
             userType: withdrawal.user.userType,
           }
         : undefined,
