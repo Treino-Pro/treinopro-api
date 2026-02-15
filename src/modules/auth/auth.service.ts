@@ -10,7 +10,7 @@ import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { users } from '../../database/schema';
 import { files } from '../../database/schema/files';
 import {
@@ -20,6 +20,7 @@ import {
   ResetPasswordDto,
   ChangePasswordDto,
   CreateAdminDto,
+  DocumentType,
 } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
 import { EmailVerificationService } from './services/email-verification.service';
@@ -795,7 +796,10 @@ export class AuthService {
   ): Promise<{ message: string; expiresAt: Date }> {
     // Normalizar email
     const normalizedEmail = this.normalizeEmail(email);
-    console.log('📧 [AUTH] Enviando código de verificação para:', normalizedEmail);
+    console.log(
+      '📧 [AUTH] Enviando código de verificação para:',
+      normalizedEmail,
+    );
 
     // Validar formato do email
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -827,7 +831,12 @@ export class AuthService {
   ): Promise<{ message: string; verified: boolean }> {
     // Normalizar email
     const normalizedEmail = this.normalizeEmail(email);
-    console.log('🔍 [AUTH] Verificando código para:', normalizedEmail, 'Código:', code);
+    console.log(
+      '🔍 [AUTH] Verificando código para:',
+      normalizedEmail,
+      'Código:',
+      code,
+    );
     return this.emailVerificationService.verifyCode(normalizedEmail, code);
   }
 
@@ -840,6 +849,30 @@ export class AuthService {
       columns: { id: true },
     });
 
+    return { exists: !!user };
+  }
+
+  async checkDocument(
+    documentType: DocumentType,
+    documentNumber: string,
+  ): Promise<{ exists: boolean }> {
+    // Normalizar número do documento (remover espaços e caracteres especiais)
+    const normalizedDocNumber = documentNumber.replace(/\D/g, '');
+    console.log(
+      `🔍 [AUTH] Verificando existência do documento: ${documentType} ${normalizedDocNumber}`,
+    );
+
+    const user = await this.db.query.users.findFirst({
+      where: and(
+        eq(users.documentType, documentType),
+        eq(users.documentNumber, normalizedDocNumber),
+      ),
+      columns: { id: true },
+    });
+
+    console.log(
+      `🔍 [AUTH] Documento ${documentType} ${normalizedDocNumber} ${user ? 'JÁ EXISTE' : 'disponível'}`,
+    );
     return { exists: !!user };
   }
 

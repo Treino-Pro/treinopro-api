@@ -32,64 +32,66 @@ export const users = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     email: varchar('email', { length: 255 }).notNull(),
     passwordHash: text('password_hash').notNull(),
-  userType: userTypeEnum('user_type').notNull(),
-  firstName: varchar('first_name', { length: 100 }).notNull(),
-  lastName: varchar('last_name', { length: 100 }).notNull(),
-  birthDate: timestamp('birth_date').notNull(),
+    userType: userTypeEnum('user_type').notNull(),
+    firstName: varchar('first_name', { length: 100 }).notNull(),
+    lastName: varchar('last_name', { length: 100 }).notNull(),
+    birthDate: timestamp('birth_date').notNull(),
 
-  // Documentos de identificação (obrigatórios)
-  documentType: documentTypeEnum('document_type').notNull(),
-  documentNumber: varchar('document_number', { length: 20 }).notNull(),
-  documentImageId: uuid('document_image_id').references(() => files.id),
+    // Documentos de identificação (obrigatórios)
+    documentType: documentTypeEnum('document_type').notNull(),
+    documentNumber: varchar('document_number', { length: 20 }).notNull(),
+    documentImageId: uuid('document_image_id').references(() => files.id),
 
-  // Campos específicos para Personal Trainers
-  cref: varchar('cref', { length: 20 }), // Formato completo: SP-106227
-  crefUf: varchar('cref_uf', { length: 2 }), // UF separada: SP
-  crefNumber: varchar('cref_number', { length: 10 }), // Número separado: 106227
-  crefImageId: uuid('cref_image_id').references(() => files.id),
-  crefValidated: boolean('cref_validated').default(false),
-  crefValidatedAt: timestamp('cref_validated_at'),
-  crefValidatedName: varchar('cref_validated_name', { length: 200 }), // Nome do CONFEF
-  crefValidatedSituation: varchar('cref_validated_situation', { length: 100 }), // Situação do CONFEF
-  specialties: json('specialties').$type<string[]>(),
+    // Campos específicos para Personal Trainers
+    cref: varchar('cref', { length: 20 }), // Formato completo: SP-106227
+    crefUf: varchar('cref_uf', { length: 2 }), // UF separada: SP
+    crefNumber: varchar('cref_number', { length: 10 }), // Número separado: 106227
+    crefImageId: uuid('cref_image_id').references(() => files.id),
+    crefValidated: boolean('cref_validated').default(false),
+    crefValidatedAt: timestamp('cref_validated_at'),
+    crefValidatedName: varchar('cref_validated_name', { length: 200 }), // Nome do CONFEF
+    crefValidatedSituation: varchar('cref_validated_situation', {
+      length: 100,
+    }), // Situação do CONFEF
+    specialties: json('specialties').$type<string[]>(),
 
-  // Campos para menores de idade
-  isMinor: boolean('is_minor').default(false),
-  guardianName: varchar('guardian_name', { length: 200 }),
-  guardianEmail: varchar('guardian_email', { length: 255 }),
-  guardianConsent: boolean('guardian_consent').default(false),
-  guardianConsentDate: timestamp('guardian_consent_date'),
+    // Campos para menores de idade
+    isMinor: boolean('is_minor').default(false),
+    guardianName: varchar('guardian_name', { length: 200 }),
+    guardianEmail: varchar('guardian_email', { length: 255 }),
+    guardianConsent: boolean('guardian_consent').default(false),
+    guardianConsentDate: timestamp('guardian_consent_date'),
 
-  // Termos e políticas (obrigatórios)
-  termsAccepted: boolean('terms_accepted').default(false).notNull(),
-  privacyPolicyAccepted: boolean('privacy_policy_accepted')
-    .default(false)
-    .notNull(),
-  termsAcceptedDate: timestamp('terms_accepted_date'),
+    // Termos e políticas (obrigatórios)
+    termsAccepted: boolean('terms_accepted').default(false).notNull(),
+    privacyPolicyAccepted: boolean('privacy_policy_accepted')
+      .default(false)
+      .notNull(),
+    termsAcceptedDate: timestamp('terms_accepted_date'),
 
-  // Rating do usuário (como Uber - todos começam com 5.0)
-  rating: decimal('rating', { precision: 3, scale: 2 }).default('5.00'),
-  totalRatings: integer('total_ratings').default(0),
+    // Rating do usuário (como Uber - todos começam com 5.0)
+    rating: decimal('rating', { precision: 3, scale: 2 }).default('5.00'),
+    totalRatings: integer('total_ratings').default(0),
 
-  // Outros campos
-  profileImageId: uuid('profile_image_id').references(() => files.id),
-  isVerified: boolean('is_verified').default(false),
-  status: userStatusEnum('status').default('active'),
+    // Outros campos
+    profileImageId: uuid('profile_image_id').references(() => files.id),
+    isVerified: boolean('is_verified').default(false),
+    status: userStatusEnum('status').default('active'),
 
-  // Firebase Cloud Messaging
-  fcmToken: text('fcm_token'),
+    // Firebase Cloud Messaging
+    fcmToken: text('fcm_token'),
 
-  // Campos para localização e raio de atendimento do personal
-  serviceLocationLat: decimal('service_location_lat', {
-    precision: 10,
-    scale: 8,
-  }),
-  serviceLocationLng: decimal('service_location_lng', {
-    precision: 11,
-    scale: 8,
-  }),
-  serviceRadiusKm: decimal('service_radius_km', { precision: 5, scale: 2 }), // até 999.99 km
-  isPersonalOnline: boolean('is_personal_online').default(false), // Status online/offline do personal
+    // Campos para localização e raio de atendimento do personal
+    serviceLocationLat: decimal('service_location_lat', {
+      precision: 10,
+      scale: 8,
+    }),
+    serviceLocationLng: decimal('service_location_lng', {
+      precision: 11,
+      scale: 8,
+    }),
+    serviceRadiusKm: decimal('service_radius_km', { precision: 5, scale: 2 }), // até 999.99 km
+    isPersonalOnline: boolean('is_personal_online').default(false), // Status online/offline do personal
 
     // Timestamps
     createdAt: timestamp('created_at').defaultNow().notNull(),

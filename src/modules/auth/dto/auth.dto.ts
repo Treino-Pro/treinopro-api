@@ -331,3 +331,15 @@ export class VerifyCodeDto {
   @MinLength(6, { message: 'Código deve ter 6 dígitos' })
   code: string;
 }
+
+export class CheckDocumentDto {
+  @ApiProperty({ example: 'CPF', description: 'Tipo de documento', enum: DocumentType })
+  @IsEnum(DocumentType, { message: 'Tipo de documento inválido' })
+  @IsNotEmpty({ message: 'Tipo de documento é obrigatório' })
+  documentType: DocumentType;
+
+  @ApiProperty({ example: '12345678900', description: 'Número do documento' })
+  @IsString()
+  @IsNotEmpty({ message: 'Número do documento é obrigatório' })
+  documentNumber: string;
+}

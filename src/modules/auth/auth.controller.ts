@@ -22,6 +22,7 @@ import {
   ChangePasswordDto,
   CreateAdminDto,
   CheckEmailDto,
+  CheckDocumentDto,
   SendVerificationCodeDto,
   VerifyCodeDto,
 } from './dto/auth.dto';
@@ -168,6 +169,25 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Verificação realizada com sucesso' })
   async checkEmail(@Body() dto: CheckEmailDto) {
     return this.authService.checkEmail(dto.email);
+  }
+
+  @Post('check-document')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar se um documento já está cadastrado' })
+  @ApiResponse({
+    status: 200,
+    description: 'Verificação realizada com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        exists: { type: 'boolean', example: false },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async checkDocument(@Body() dto: CheckDocumentDto) {
+    return this.authService.checkDocument(dto.documentType, dto.documentNumber);
   }
 
   @Post('send-guardian-authorization')
