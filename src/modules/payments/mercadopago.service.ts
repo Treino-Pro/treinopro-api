@@ -58,7 +58,7 @@ export class MercadoPagoService {
       this.logger.log(
         `✅ MercadoPago Service - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`,
       );
-      
+
       // ✅ AVISO: Se estiver em produção, alertar sobre cartões de teste
       if (!isTestMode) {
         this.logger.warn(
@@ -683,13 +683,18 @@ export class MercadoPagoService {
           type: cardData.identificationType,
           number: cardData.identificationNumber.replace(/\D/g, ''), // Remove formatação (pontos, traços)
         };
-        
+
         this.logger.log(`🔍 [MP CARD TOKEN] Identification incluído:`, {
           type: cardData.identificationType,
-          number_masked: cardData.identificationNumber.replace(/\d(?=\d{4})/g, '*'),
+          number_masked: cardData.identificationNumber.replace(
+            /\d(?=\d{4})/g,
+            '*',
+          ),
         });
       } else {
-        this.logger.warn('⚠️ [MP CARD TOKEN] Identification não fornecido - pode causar erro 400');
+        this.logger.warn(
+          '⚠️ [MP CARD TOKEN] Identification não fornecido - pode causar erro 400',
+        );
       }
 
       this.logger.log(`🔍 [MP CARD TOKEN] Payload:`, {
@@ -709,30 +714,46 @@ export class MercadoPagoService {
       // O SDK pode usar credenciais diferentes internamente
       const accessToken = process.env.MP_ACCESS_TOKEN;
       if (!accessToken) {
-        throw new BadRequestException('Token de acesso do Mercado Pago não configurado');
+        throw new BadRequestException(
+          'Token de acesso do Mercado Pago não configurado',
+        );
       }
 
-      this.logger.log(`🌐 [MP CARD TOKEN] Criando token via API REST diretamente`);
-      this.logger.log(`🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`);
+      this.logger.log(
+        `🌐 [MP CARD TOKEN] Criando token via API REST diretamente`,
+      );
+      this.logger.log(
+        `🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`,
+      );
 
       // ✅ ADICIONAR: Log do payload completo sendo enviado
-      this.logger.log(`📤 [MP CARD TOKEN] Payload completo enviado:`, JSON.stringify(cardTokenRequest, null, 2));
+      this.logger.log(
+        `📤 [MP CARD TOKEN] Payload completo enviado:`,
+        JSON.stringify(cardTokenRequest, null, 2),
+      );
 
-      const response = await fetch('https://api.mercadopago.com/v1/card_tokens', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        'https://api.mercadopago.com/v1/card_tokens',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(cardTokenRequest),
         },
-        body: JSON.stringify(cardTokenRequest),
-      });
+      );
 
       const responseText = await response.text();
-      
+
       // ✅ ADICIONAR: Log detalhado da resposta
-      this.logger.log(`📥 [MP CARD TOKEN] Response status: ${response.status} ${response.statusText}`);
-      this.logger.log(`📥 [MP CARD TOKEN] Response body (primeiros 500 chars): ${responseText.substring(0, 500)}`);
-      
+      this.logger.log(
+        `📥 [MP CARD TOKEN] Response status: ${response.status} ${response.statusText}`,
+      );
+      this.logger.log(
+        `📥 [MP CARD TOKEN] Response body (primeiros 500 chars): ${responseText.substring(0, 500)}`,
+      );
+
       if (!response.ok) {
         let errorData;
         try {
@@ -740,21 +761,21 @@ export class MercadoPagoService {
         } catch {
           errorData = { message: responseText, raw: true };
         }
-        
+
         this.logger.error(`❌ [MP CARD TOKEN] Erro ao criar token:`, {
           status: response.status,
           statusText: response.statusText,
           error: errorData,
           cause: errorData.cause || [],
         });
-        
+
         throw new BadRequestException(
           `Erro ao processar cartão: ${errorData.message || 'Erro desconhecido'}`,
         );
       }
 
       const tokenData = JSON.parse(responseText);
-      
+
       // ✅ ADICIONAR: Log completo dos dados retornados
       this.logger.log(`✅ [MP CARD TOKEN] Token criado com sucesso:`, {
         id: tokenData.id,
@@ -771,16 +792,16 @@ export class MercadoPagoService {
         luhn_validation: tokenData.luhn_validation,
         live_mode: tokenData.live_mode,
       });
-      
+
       return tokenData.id;
     } catch (error) {
       this.logger.error(`Erro ao criar token de cartão:`, error);
-      
+
       // Se já for BadRequestException, propagar
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       throw new BadRequestException(
         `Erro ao processar cartão: ${error.message}`,
       );
@@ -1017,7 +1038,10 @@ export class MercadoPagoService {
       });
       if (searchData?.results && searchData.results.length > 0) {
         const existingCustomer = searchData.results[0];
-        console.log('✅ [MP CUSTOMER] Customer encontrado:', existingCustomer.id);
+        console.log(
+          '✅ [MP CUSTOMER] Customer encontrado:',
+          existingCustomer.id,
+        );
         return { id: existingCustomer.id };
       }
 
@@ -1092,8 +1116,11 @@ export class MercadoPagoService {
         cardData.identificationNumber
       ) {
         // ✅ IMPORTANTE: Garantir que o número de identification está sem formatação
-        const cleanIdentificationNumber = cardData.identificationNumber.replace(/\D/g, '');
-        
+        const cleanIdentificationNumber = cardData.identificationNumber.replace(
+          /\D/g,
+          '',
+        );
+
         cardPayload.cardholder = {
           name: cardData.cardholderName,
           identification: {
@@ -1127,7 +1154,8 @@ export class MercadoPagoService {
         hasCardholder: !!cardPayload.cardholder,
         cardholderName: cardPayload.cardholder?.name,
         identificationType: cardPayload.cardholder?.identification?.type,
-        identificationNumberLength: cardPayload.cardholder?.identification?.number?.length || 0,
+        identificationNumberLength:
+          cardPayload.cardholder?.identification?.number?.length || 0,
       });
 
       const accessToken = process.env.MP_ACCESS_TOKEN;
@@ -1159,8 +1187,7 @@ export class MercadoPagoService {
           error?.response?.status ||
           error?.cause?.status ||
           error?.response?.data?.status;
-        const errorData =
-          error?.response?.data || error?.cause || error || {};
+        const errorData = error?.response?.data || error?.cause || error || {};
 
         console.error('❌ [MP CARD] Erro ao salvar cartão (SDK):', {
           status,

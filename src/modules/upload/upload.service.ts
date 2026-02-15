@@ -9,7 +9,6 @@ import { files, users } from '../../database/schema';
 import { FileStorageUtil } from './utils/file-storage.util';
 import { ImageProcessingUtil } from './utils/image-processing.util';
 import {
-  FileUploadResult,
   FileValidationOptions,
   ImageProcessingOptions,
 } from './interfaces/file.interface';
@@ -39,7 +38,7 @@ export class UploadService {
         category: uploadDto.category,
       };
 
-      this.fileStorageUtil.validateFile(
+      await this.fileStorageUtil.validateFile(
         file.buffer,
         file.mimetype,
         validationOptions,
@@ -182,8 +181,6 @@ export class UploadService {
 
   async cleanupTempFiles(): Promise<number> {
     // Deletar arquivos temporários mais antigos que 24 horas
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
     const tempFiles = await this.db.query.files.findMany({
       where: and(
         eq(files.category, 'temp'),

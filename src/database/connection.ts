@@ -30,8 +30,11 @@ if (useMockDatabase) {
   // Para 500k usuários simultâneos, precisamos de um pool maior
   // Fórmula recomendada: (cores * 2) + effective_spindle_count
   // Para produção com alta carga: 20-100 conexões
-  const maxConnections = parseInt(process.env.DATABASE_MAX_CONNECTIONS || '50', 10);
-  
+  const maxConnections = parseInt(
+    process.env.DATABASE_MAX_CONNECTIONS || '50',
+    10,
+  );
+
   try {
     client = postgres(connectionString, {
       max: maxConnections, // ✅ Aumentado de 1 para suportar alta concorrência
@@ -53,7 +56,10 @@ if (useMockDatabase) {
 
     // Fallback para conexão local sem autenticação
     try {
-      const maxConnections = parseInt(process.env.DATABASE_MAX_CONNECTIONS || '50', 10);
+      const maxConnections = parseInt(
+        process.env.DATABASE_MAX_CONNECTIONS || '50',
+        10,
+      );
       client = postgres('postgresql://localhost:5433/treinopro', {
         max: maxConnections, // ✅ Aumentado de 1 para suportar alta concorrência
         idle_timeout: 20,
@@ -79,3 +85,4 @@ if (useMockDatabase) {
 }
 
 export const db = client ? drizzle(client, { schema }) : null;
+export { client };

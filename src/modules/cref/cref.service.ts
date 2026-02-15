@@ -274,7 +274,8 @@ export class CrefService {
   private extractErrorInfo(error: unknown): { message: string; code: string } {
     if (error instanceof AxiosError) {
       return {
-        message: error.message || error.response?.statusText || 'Erro desconhecido',
+        message:
+          error.message || error.response?.statusText || 'Erro desconhecido',
         code: error.code || 'UNKNOWN',
       };
     }
@@ -370,9 +371,7 @@ export class CrefService {
       );
     }
 
-    this.logger.log(
-      `🔄 [CREF] GET ${redirectCount + 1} para: ${targetUrl}`,
-    );
+    this.logger.log(`🔄 [CREF] GET ${redirectCount + 1} para: ${targetUrl}`);
 
     const headers = headersOverride || this.getPageHeaders(cookies);
     const response = await axios.get(targetUrl, {
@@ -425,7 +424,11 @@ export class CrefService {
       );
     }
 
-    return { data: response.data, status: response.status, cookies: allCookies };
+    return {
+      data: response.data,
+      status: response.status,
+      cookies: allCookies,
+    };
   }
 
   private async establishSession(): Promise<string[]> {
@@ -596,7 +599,8 @@ export class CrefService {
       // Se o redirect for "/", voltar para a URL original da API
       const nextUrl =
         redirectUrl === '/' ||
-        redirectUrl === '/confefv2/includes/api/registrados_pf/get_registrados.php'
+        redirectUrl ===
+          '/confefv2/includes/api/registrados_pf/get_registrados.php'
           ? this.API_URL
           : this.normalizeUrl(redirectUrl);
 
@@ -614,14 +618,13 @@ export class CrefService {
     }
 
     // Se a resposta é HTML em vez de JSON, pode ser um redirect não detectado
-    if (
-      typeof response.data === 'string' &&
-      response.data.includes('<html>')
-    ) {
+    if (typeof response.data === 'string' && response.data.includes('<html>')) {
       this.logger.warn(
         `⚠️ [CREF] Resposta é HTML. Tentando extrair redirect do HTML...`,
       );
-      const locationMatch = response.data.match(/location\s*=\s*['"]([^'"]+)['"]/i);
+      const locationMatch = response.data.match(
+        /location\s*=\s*['"]([^'"]+)['"]/i,
+      );
       if (locationMatch && locationMatch[1]) {
         return this.followRedirect(
           locationMatch[1],
@@ -779,5 +782,4 @@ export class CrefService {
       'obter token',
     );
   }
-
 }

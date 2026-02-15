@@ -129,12 +129,16 @@ export class ChatService {
       });
 
       // Criar notificação in-app
-      await this.notificationsService.sendInAppNotification(receiverId, 'new-message', {
-        senderId: userId,
-        senderName: senderName,
-        classId: classId,
-        messagePreview: messagePreview,
-      });
+      await this.notificationsService.sendInAppNotification(
+        receiverId,
+        'new-message',
+        {
+          senderId: userId,
+          senderName: senderName,
+          classId: classId,
+          messagePreview: messagePreview,
+        },
+      );
     } catch (error) {
       console.error('❌ Erro ao enviar notificação de mensagem:', error);
       // Não bloquear o envio da mensagem se notificação falhar

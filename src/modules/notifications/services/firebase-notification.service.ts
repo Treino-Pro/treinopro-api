@@ -74,7 +74,7 @@ export class FirebaseNotificationService {
    * Delay helper para retry logic
    */
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -103,7 +103,10 @@ export class FirebaseNotificationService {
 
       this.logger.warn(`🗑️ Token FCM inválido removido para usuário ${userId}`);
     } catch (error) {
-      this.logger.error(`Erro ao remover token inválido para ${userId}:`, error);
+      this.logger.error(
+        `Erro ao remover token inválido para ${userId}:`,
+        error,
+      );
     }
   }
 
@@ -128,10 +131,7 @@ export class FirebaseNotificationService {
         error.message,
       );
     } else {
-      this.logger.error(
-        `❌ Erro ao enviar notificação para ${userId}:`,
-        error,
-      );
+      this.logger.error(`❌ Erro ao enviar notificação para ${userId}:`, error);
     }
   }
 
@@ -165,7 +165,7 @@ export class FirebaseNotificationService {
         const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
         this.logger.warn(
           `⚠️ Tentativa ${attempt}/${maxRetries} falhou para ${userId}. ` +
-          `Retentando em ${delayMs}ms... Erro: ${error.code}`,
+            `Retentando em ${delayMs}ms... Erro: ${error.code}`,
         );
         await this.delay(delayMs);
       }
@@ -224,7 +224,7 @@ export class FirebaseNotificationService {
         data: {
           ...sanitizedData,
           title: notification.title, // Para Flutter criar notificação local customizada
-          body: notification.body,   // Para Flutter criar notificação local customizada
+          body: notification.body, // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -235,11 +235,12 @@ export class FirebaseNotificationService {
           // Garante que notificação aparece mesmo após reinicialização
           directBootOk: true,
           // ✅ CRÍTICO: collapseKey para agrupar notificações e evitar perda em Doze Mode
-          collapseKey: sanitizedData.type === 'new_message'
-            ? `message_${sanitizedData.classId || 'default'}`
-            : sanitizedData.proposalId
-              ? `proposal_${sanitizedData.proposalId}`
-              : 'default',
+          collapseKey:
+            sanitizedData.type === 'new_message'
+              ? `message_${sanitizedData.classId || 'default'}`
+              : sanitizedData.proposalId
+                ? `proposal_${sanitizedData.proposalId}`
+                : 'default',
           // ✅ notification: Garante exibição imediata no Android
           notification: {
             title: notification.title,
@@ -267,11 +268,15 @@ export class FirebaseNotificationService {
               contentAvailable: true, // Permite que handler de background execute
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
-            threadId: sanitizedData.proposalId ? `proposta_${sanitizedData.proposalId}` : undefined,
+            threadId: sanitizedData.proposalId
+              ? `proposta_${sanitizedData.proposalId}`
+              : undefined,
           },
           headers: {
             // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
             // ✅ APNS Priority: 10 (alta prioridade)
             'apns-priority': '10',
           },
@@ -285,7 +290,10 @@ export class FirebaseNotificationService {
       }
       return response;
     } catch (error) {
-      this.logger.error(`❌ Erro inesperado ao enviar notificação para ${userId}:`, error);
+      this.logger.error(
+        `❌ Erro inesperado ao enviar notificação para ${userId}:`,
+        error,
+      );
       return null;
     }
   }
@@ -340,9 +348,8 @@ export class FirebaseNotificationService {
     const priceFormatted = `R$ ${parseFloat(proposal.price.toString()).toFixed(2).replace('.', ',')}`;
     const expiresInMinutes = Math.floor(proposal.expiresIn / 60);
     const expiresInSeconds = proposal.expiresIn % 60;
-    const expiresText = expiresInMinutes > 0
-      ? `${expiresInMinutes}min`
-      : `${expiresInSeconds}s`;
+    const expiresText =
+      expiresInMinutes > 0 ? `${expiresInMinutes}min` : `${expiresInSeconds}s`;
 
     // ✅ Garantir que studentName e location não sejam vazios
     const studentName = proposal.studentName || 'Aluno não informado';
@@ -386,7 +393,7 @@ export class FirebaseNotificationService {
         data: {
           ...sanitizedData,
           title, // Para Flutter criar notificação local customizada
-          body,  // Para Flutter criar notificação local customizada
+          body, // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -429,7 +436,9 @@ export class FirebaseNotificationService {
           },
           headers: {
             // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
             'apns-priority': '10', // ✅ Alta prioridade
           },
         },
@@ -586,7 +595,7 @@ export class FirebaseNotificationService {
         data: {
           ...sanitizedData,
           title: item.notification.title, // Para Flutter criar notificação local customizada
-          body: item.notification.body,   // Para Flutter criar notificação local customizada
+          body: item.notification.body, // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
         token: user.fcmToken,
@@ -622,7 +631,9 @@ export class FirebaseNotificationService {
             },
           },
           headers: {
-            'apns-expiration': String(Math.floor(Date.now() / 1000) + (24 * 60 * 60)),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
             'apns-priority': '10', // ✅ Alta prioridade
           },
         },

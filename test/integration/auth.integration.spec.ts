@@ -8,10 +8,14 @@ import { AuthModule } from '../../src/modules/auth/auth.module';
 import { DatabaseModule } from '../../src/database/database.module';
 import { HealthController } from '../../src/common/health/health.controller';
 import { UserType, DocumentType } from '../../src/modules/auth/dto/auth.dto';
+import { client } from '../../src/database/connection';
 
 describe('Auth Integration Tests', () => {
   let app: INestApplication;
   let moduleRef: TestingModule;
+
+  // Aumentar timeout para o setup inicial e para a suite
+  jest.setTimeout(60000);
 
   beforeAll(async () => {
     // Configurar módulo de teste com dependências reais
@@ -19,13 +23,21 @@ describe('Auth Integration Tests', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          envFilePath: '.env.test',
+          envFilePath: '.env', // Usar o .env real para os testes de integração conforme solicitado
         }),
         DatabaseModule,
         AuthModule,
       ],
       controllers: [HealthController],
-    }).compile();
+    })
+    .overrideProvider('CACHE_MANAGER')
+    .useValue({
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
+      reset: jest.fn(),
+    })
+    .compile();
 
     app = moduleRef.createNestApplication();
 
@@ -48,6 +60,16 @@ describe('Auth Integration Tests', () => {
   });
 
   afterAll(async () => {
+    // Garantir que a conexão com o banco seja fechada
+    try {
+      if (client) {
+        await client.end();
+        console.log('🔌 [AUTH TEST] Conexões com o banco encerradas');
+      }
+    } catch (e) {
+      console.log('ℹ️ [AUTH TEST] Erro ao fechar client:', e.message);
+    }
+    
     await app.close();
     await moduleRef.close();
   });

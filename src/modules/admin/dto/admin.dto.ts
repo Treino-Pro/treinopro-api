@@ -131,7 +131,10 @@ export class UserDetailsDto extends UserItemDto {
   @ApiPropertyOptional({ description: 'Data de nascimento' })
   birthDate?: string;
 
-  @ApiPropertyOptional({ description: 'Tipo de documento', enum: ['RG', 'CNH'] })
+  @ApiPropertyOptional({
+    description: 'Tipo de documento',
+    enum: ['RG', 'CNH'],
+  })
   documentType?: string;
 
   @ApiPropertyOptional({ description: 'Número do documento' })
@@ -284,7 +287,9 @@ export class FinancialSummaryResponseDto {
     mpPaymentId: string | null;
   }>;
 
-  @ApiPropertyOptional({ description: 'Total de pagamentos no período filtrado' })
+  @ApiPropertyOptional({
+    description: 'Total de pagamentos no período filtrado',
+  })
   total?: number;
 
   @ApiPropertyOptional({ description: 'Página atual' })
@@ -363,7 +368,9 @@ export class UpdateMissionDto {
   @IsBoolean()
   isActive?: boolean;
 
-  @ApiPropertyOptional({ description: 'Data de início da missão (null = fixa)' })
+  @ApiPropertyOptional({
+    description: 'Data de início da missão (null = fixa)',
+  })
   @IsOptional()
   @IsDateString()
   startDate?: string | null;
@@ -375,7 +382,12 @@ export class UpdateMissionDto {
 
   @ApiPropertyOptional({ description: 'Requisitos da missão' })
   @IsOptional()
-  requirements?: { action: string; count: number; timeframe?: string; conditions?: Record<string, any> };
+  requirements?: {
+    action: string;
+    count: number;
+    timeframe?: string;
+    conditions?: Record<string, any>;
+  };
 }
 
 // ===== ANALYTICS DTOs =====

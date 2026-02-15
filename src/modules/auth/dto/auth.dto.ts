@@ -64,7 +64,7 @@ function isValidCNH(cnh: string): boolean {
   for (let i = 0; i < 9; i++) {
     sum1 += digits[i] * (9 - i);
   }
-  let rest1 = sum1 % 11;
+  const rest1 = sum1 % 11;
   let desc = 0;
   let dv1: number;
   if (rest1 > 9) {
@@ -79,7 +79,7 @@ function isValidCNH(cnh: string): boolean {
   for (let i = 0; i < 9; i++) {
     sum2 += digits[i] * (1 + i);
   }
-  let rest2 = sum2 % 11;
+  const rest2 = sum2 % 11;
   let dv2 = rest2 - desc;
   if (dv2 < 0 || dv2 > 9) {
     dv2 = 0;
@@ -95,7 +95,7 @@ function isValidCNH(cnh: string): boolean {
  * RG: apenas valida formato básico (7 a 11 dígitos).
  */
 function IsValidDocument(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       name: 'isValidDocument',
       target: object.constructor,
@@ -172,7 +172,9 @@ export class RegisterDto {
   @ApiProperty({ example: '12345678901' })
   @IsString()
   @IsNotEmpty()
-  @IsValidDocument({ message: 'Número de documento inválido para o tipo selecionado.' })
+  @IsValidDocument({
+    message: 'Número de documento inválido para o tipo selecionado.',
+  })
   documentNumber: string;
 
   @ApiProperty({

@@ -17,7 +17,7 @@ export interface InAppNotification {
 export class InAppNotificationService {
   private readonly logger = new Logger(InAppNotificationService.name);
 
-  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) { }
+  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
   // ===== MÉTODOS PRINCIPAIS =====
 
@@ -72,7 +72,10 @@ export class InAppNotificationService {
 
       return notifications;
     } catch (error) {
-      this.logger.error(`Erro ao buscar notificações do usuário ${userId}:`, error);
+      this.logger.error(
+        `Erro ao buscar notificações do usuário ${userId}:`,
+        error,
+      );
       return [];
     }
   }
@@ -89,7 +92,10 @@ export class InAppNotificationService {
 
       return notifications;
     } catch (error) {
-      this.logger.error(`Erro ao buscar notificações não lidas do usuário ${userId}:`, error);
+      this.logger.error(
+        `Erro ao buscar notificações não lidas do usuário ${userId}:`,
+        error,
+      );
       return [];
     }
   }
@@ -105,7 +111,10 @@ export class InAppNotificationService {
 
       return count;
     } catch (error) {
-      this.logger.error(`Erro ao contar notificações não lidas do usuário ${userId}:`, error);
+      this.logger.error(
+        `Erro ao contar notificações não lidas do usuário ${userId}:`,
+        error,
+      );
       return 0;
     }
   }
@@ -124,7 +133,10 @@ export class InAppNotificationService {
 
       this.logger.log(`✅ Notificação ${notificationId} marcada como lida`);
     } catch (error) {
-      this.logger.error(`Erro ao marcar notificação ${notificationId} como lida:`, error);
+      this.logger.error(
+        `Erro ao marcar notificação ${notificationId} como lida:`,
+        error,
+      );
     }
   }
 
@@ -144,7 +156,10 @@ export class InAppNotificationService {
         `✅ Todas as notificações marcadas como lidas para usuário ${userId}`,
       );
     } catch (error) {
-      this.logger.error(`Erro ao marcar todas as notificações como lidas para ${userId}:`, error);
+      this.logger.error(
+        `Erro ao marcar todas as notificações como lidas para ${userId}:`,
+        error,
+      );
     }
   }
 
@@ -164,7 +179,10 @@ export class InAppNotificationService {
 
       this.logger.log(`🗑️ Notificação ${notificationId} deletada`);
     } catch (error) {
-      this.logger.error(`Erro ao deletar notificação ${notificationId}:`, error);
+      this.logger.error(
+        `Erro ao deletar notificação ${notificationId}:`,
+        error,
+      );
     }
   }
 
@@ -494,7 +512,7 @@ export class InAppNotificationService {
       });
 
       const total = allNotifications.length;
-      const unread = allNotifications.filter(n => !n.isRead).length;
+      const unread = allNotifications.filter((n) => !n.isRead).length;
       const byType = allNotifications.reduce(
         (acc, n) => {
           acc[n.type] = (acc[n.type] || 0) + 1;
@@ -505,7 +523,7 @@ export class InAppNotificationService {
 
       const lastWeekDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const lastWeek = allNotifications.filter(
-        n => n.createdAt >= lastWeekDate,
+        (n) => n.createdAt >= lastWeekDate,
       ).length;
 
       return {
@@ -533,15 +551,13 @@ export class InAppNotificationService {
     try {
       const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
 
-      const result = await this.db
-        .delete(inAppNotifications)
-        .where(
-          and(
-            eq(inAppNotifications.isRead, true),
-            // Note: usando '<' para deletar notificações mais antigas que cutoffDate
-            // Drizzle não tem operador '<', então invertemos a lógica
-          ),
-        );
+      const result = await this.db.delete(inAppNotifications).where(
+        and(
+          eq(inAppNotifications.isRead, true),
+          // Note: usando '<' para deletar notificações mais antigas que cutoffDate
+          // Drizzle não tem operador '<', então invertemos a lógica
+        ),
+      );
 
       const removedCount = result.rowCount || 0;
       this.logger.log(`🧹 ${removedCount} notificações antigas removidas`);

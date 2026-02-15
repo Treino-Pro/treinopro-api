@@ -510,13 +510,16 @@ export class UsersService {
     };
 
     if (updateServiceLocationDto.serviceLocationLat !== undefined) {
-      updateData.serviceLocationLat = updateServiceLocationDto.serviceLocationLat.toString();
+      updateData.serviceLocationLat =
+        updateServiceLocationDto.serviceLocationLat.toString();
     }
     if (updateServiceLocationDto.serviceLocationLng !== undefined) {
-      updateData.serviceLocationLng = updateServiceLocationDto.serviceLocationLng.toString();
+      updateData.serviceLocationLng =
+        updateServiceLocationDto.serviceLocationLng.toString();
     }
     if (updateServiceLocationDto.serviceRadiusKm !== undefined) {
-      updateData.serviceRadiusKm = updateServiceLocationDto.serviceRadiusKm.toString();
+      updateData.serviceRadiusKm =
+        updateServiceLocationDto.serviceRadiusKm.toString();
     }
 
     // Atualizar localização

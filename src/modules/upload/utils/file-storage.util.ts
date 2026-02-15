@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as sharp from 'sharp';
 import { FileValidationOptions } from '../interfaces/file.interface';
 
 @Injectable()
@@ -76,7 +77,7 @@ export class FileStorageUtil {
 
     try {
       await fs.writeFile(filePath, buffer);
-      this.logger.log(`💾 Arquivo salvo: ${filePath}`);
+      this.logger.log(`💾 Arquivo salvo: ${filePath} (${mimeType})`);
 
       return {
         storedName,
@@ -99,11 +100,11 @@ export class FileStorageUtil {
     }
   }
 
-  validateFile(
+  async validateFile(
     buffer: Buffer,
     mimeType: string,
     options: FileValidationOptions,
-  ): void {
+  ): Promise<void> {
     // Validar tamanho
     if (buffer.length > options.maxSize) {
       throw new Error(`Arquivo muito grande. Máximo: ${options.maxSize} bytes`);
@@ -116,8 +117,26 @@ export class FileStorageUtil {
 
     // Validar dimensões para imagens
     if (options.maxDimensions && mimeType.startsWith('image/')) {
-      // TODO: Implementar validação de dimensões com sharp
-      this.logger.warn('⚠️ Validação de dimensões não implementada ainda');
+      try {
+        const metadata = await sharp(buffer).metadata();
+
+        if (metadata.width && metadata.height) {
+          if (
+            metadata.width > options.maxDimensions.width ||
+            metadata.height > options.maxDimensions.height
+          ) {
+            throw new Error(
+              `Imagem muito grande. Dimensões máximas permitidas: ${options.maxDimensions.width}x${options.maxDimensions.height}px. Sua imagem: ${metadata.width}x${metadata.height}px`,
+            );
+          }
+        }
+      } catch (error) {
+        if (error.message.includes('Imagem muito grande')) {
+          throw error;
+        }
+        this.logger.error('❌ Erro ao validar dimensões da imagem:', error);
+        throw new Error('Erro ao validar dimensões da imagem');
+      }
     }
   }
 

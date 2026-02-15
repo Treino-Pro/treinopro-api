@@ -1,6 +1,32 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { users, proposals, classes, payments, paymentDisputes, files } from '../../database/schema';
-import { count, desc, eq, sql, sum, or, and, like, ilike, gte, lte, inArray } from 'drizzle-orm';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
+import {
+  users,
+  proposals,
+  classes,
+  payments,
+  paymentDisputes,
+  files,
+} from '../../database/schema';
+import {
+  count,
+  desc,
+  eq,
+  sql,
+  sum,
+  or,
+  and,
+  like,
+  ilike,
+  gte,
+  lte,
+  inArray,
+} from 'drizzle-orm';
 import { missions } from '../../database/schema/gamification';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -61,7 +87,10 @@ export class AdminService {
               .from(payments)
               .innerJoin(users, eq(payments.personalId, users.id))
               .where(inArray(payments.id, paymentIds));
-            const personalsMap = new Map<string, { firstName: string; lastName: string; email: string }>();
+            const personalsMap = new Map<
+              string,
+              { firstName: string; lastName: string; email: string }
+            >();
             personalsRaw.forEach((r: any) => {
               personalsMap.set(r.paymentId, {
                 firstName: r.firstName ?? '',
@@ -73,17 +102,26 @@ export class AdminService {
               const studentName =
                 row.studentFirstName != null && row.studentLastName != null
                   ? `${row.studentFirstName} ${row.studentLastName}`.trim()
-                  : row.studentFirstName || row.studentLastName || row.studentEmail || null;
+                  : row.studentFirstName ||
+                    row.studentLastName ||
+                    row.studentEmail ||
+                    null;
               const personalData = personalsMap.get(row.id);
               const personalName =
-                personalData?.firstName != null && personalData?.lastName != null
+                personalData?.firstName != null &&
+                personalData?.lastName != null
                   ? `${personalData.firstName} ${personalData.lastName}`.trim()
-                  : personalData?.firstName || personalData?.lastName || personalData?.email || null;
+                  : personalData?.firstName ||
+                    personalData?.lastName ||
+                    personalData?.email ||
+                    null;
               return {
                 id: row.id,
                 totalAmount: row.totalAmount ? Number(row.totalAmount) : 0,
                 status: row.status || 'pending',
-                createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+                createdAt: row.createdAt
+                  ? new Date(row.createdAt).toISOString()
+                  : new Date().toISOString(),
                 studentName: studentName || null,
                 personalName: personalName || null,
                 mpPaymentId: row.mpPaymentId || null,
@@ -99,8 +137,8 @@ export class AdminService {
             .where(
               or(
                 eq(paymentDisputes.status, 'pending'),
-                eq(paymentDisputes.status, 'under_review')
-              )
+                eq(paymentDisputes.status, 'under_review'),
+              ),
             ),
           // Disputas de no-show em classes (status = 'no_show_dispute')
           this.db
@@ -217,23 +255,29 @@ export class AdminService {
 
     // Processar URLs das imagens
     const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
-    
-    const normalizeUrl = (url: string | null | undefined, category?: string): string | null => {
+
+    const normalizeUrl = (
+      url: string | null | undefined,
+      category?: string,
+    ): string | null => {
       if (!url) return null;
-      
+
       // Se a URL já é completa e válida
       if (url.startsWith('http://') || url.startsWith('https://')) {
         try {
           const urlObj = new URL(url);
           const normalizedBase = new URL(baseUrl);
-          
+
           // Se o hostname é diferente, normalizar mantendo o pathname completo
-          if (urlObj.hostname !== normalizedBase.hostname || urlObj.port !== normalizedBase.port) {
+          if (
+            urlObj.hostname !== normalizedBase.hostname ||
+            urlObj.port !== normalizedBase.port
+          ) {
             const normalized = `${normalizedBase.origin}${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
             console.log(`🔄 [ADMIN] URL normalizada: ${url} -> ${normalized}`);
             return normalized;
           }
-          
+
           // Se já está correto, retornar como está
           console.log(`✅ [ADMIN] URL já está correta: ${url}`);
           return url;
@@ -244,14 +288,16 @@ export class AdminService {
           return url.replace(urlPattern, baseUrl);
         }
       }
-      
+
       // Se é um caminho relativo que já começa com /static/, adicionar baseUrl
       if (url.startsWith('/static/')) {
         const normalized = `${baseUrl}${url}`;
-        console.log(`🔗 [ADMIN] URL relativa normalizada: ${url} -> ${normalized}`);
+        console.log(
+          `🔗 [ADMIN] URL relativa normalizada: ${url} -> ${normalized}`,
+        );
         return normalized;
       }
-      
+
       // Se é um caminho relativo sem /static/, adicionar
       if (url.startsWith('/')) {
         // Se não tem /static/ no caminho, adicionar baseado na categoria
@@ -263,27 +309,35 @@ export class AdminService {
             categoryPath = 'images/documents';
           }
           const normalized = `${baseUrl}/static/${categoryPath}${url}`;
-          console.log(`🔗 [ADMIN] URL relativa sem /static/ normalizada: ${url} -> ${normalized}`);
+          console.log(
+            `🔗 [ADMIN] URL relativa sem /static/ normalizada: ${url} -> ${normalized}`,
+          );
           return normalized;
         }
         return `${baseUrl}${url}`;
       }
-      
+
       // Se não começa com /, assumir que é apenas o nome do arquivo
       // Usar categoria para determinar o caminho
-      const categoryPath = category === 'profile' ? 'images/profiles' : 'images/documents';
+      const categoryPath =
+        category === 'profile' ? 'images/profiles' : 'images/documents';
       const normalized = `${baseUrl}/static/${categoryPath}/${url}`;
-      console.log(`🔗 [ADMIN] Nome de arquivo normalizado: ${url} -> ${normalized}`);
+      console.log(
+        `🔗 [ADMIN] Nome de arquivo normalizado: ${url} -> ${normalized}`,
+      );
       return normalized;
     };
-    
+
     const documentImageUrl = normalizeUrl(user.documentImage?.url, 'document');
     const crefImageUrl = normalizeUrl(user.crefImage?.url, 'document');
     const profileImageUrl = normalizeUrl(user.profileImage?.url, 'profile');
 
     // Log para debug
     if (documentImageUrl) {
-      console.log(`📄 [ADMIN] DocumentImageUrl para usuário ${id}:`, documentImageUrl);
+      console.log(
+        `📄 [ADMIN] DocumentImageUrl para usuário ${id}:`,
+        documentImageUrl,
+      );
     }
     if (crefImageUrl) {
       console.log(`📄 [ADMIN] CrefImageUrl para usuário ${id}:`, crefImageUrl);
@@ -323,7 +377,9 @@ export class AdminService {
    * Retorna o caminho absoluto e o mimeType de um arquivo para streaming.
    * Usado pelo endpoint GET /admin/files/:id para servir imagens/documentos com autenticação.
    */
-  async getFileForStream(fileId: string): Promise<{ absolutePath: string; mimeType: string }> {
+  async getFileForStream(
+    fileId: string,
+  ): Promise<{ absolutePath: string; mimeType: string }> {
     const fileRecord = await this.db.query.files.findFirst({
       where: eq(files.id, fileId),
     });
@@ -424,7 +480,9 @@ export class AdminService {
       const offset = (page - 1) * limit;
 
       const hasDateFilter =
-        filters?.startDate && filters?.endDate && filters.startDate <= filters.endDate;
+        filters?.startDate &&
+        filters?.endDate &&
+        filters.startDate <= filters.endDate;
       const startDateStr = hasDateFilter ? filters.startDate! : null;
       const endDateStr = hasDateFilter ? filters.endDate! : null;
 
@@ -437,7 +495,10 @@ export class AdminService {
 
       const baseWhere =
         hasDateFilter && startOfStart && endOfEnd
-          ? and(gte(payments.createdAt, startOfStart), lte(payments.createdAt, endOfEnd))
+          ? and(
+              gte(payments.createdAt, startOfStart),
+              lte(payments.createdAt, endOfEnd),
+            )
           : undefined;
 
       const [summary] = await this.db
@@ -475,7 +536,10 @@ export class AdminService {
 
       // Segunda query para personal (não dá para fazer dois joins na mesma tabela sem alias)
       const paymentIds = latestRaw.map((r: any) => r.id);
-      const personalsMap = new Map<string, { firstName: string; lastName: string; email: string }>();
+      const personalsMap = new Map<
+        string,
+        { firstName: string; lastName: string; email: string }
+      >();
       if (paymentIds.length > 0) {
         const personalsRaw = await this.db
           .select({
@@ -500,19 +564,27 @@ export class AdminService {
         const studentName =
           row.studentFirstName != null && row.studentLastName != null
             ? `${row.studentFirstName} ${row.studentLastName}`.trim()
-            : row.studentFirstName || row.studentLastName || row.studentEmail || null;
+            : row.studentFirstName ||
+              row.studentLastName ||
+              row.studentEmail ||
+              null;
         const personalData = personalsMap.get(row.id);
         const personalName =
           personalData?.firstName != null && personalData?.lastName != null
             ? `${personalData.firstName} ${personalData.lastName}`.trim()
-            : personalData?.firstName || personalData?.lastName || personalData?.email || null;
+            : personalData?.firstName ||
+              personalData?.lastName ||
+              personalData?.email ||
+              null;
         return {
           id: row.id,
           totalAmount: row.totalAmount ? Number(row.totalAmount) : 0,
           platformFee: row.platformFee ? Number(row.platformFee) : 0,
           personalAmount: row.personalAmount ? Number(row.personalAmount) : 0,
           status: row.status || 'pending',
-          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+          createdAt: row.createdAt
+            ? new Date(row.createdAt).toISOString()
+            : new Date().toISOString(),
           studentName: studentName || null,
           personalName: personalName || null,
           mpPaymentId: row.mpPaymentId || null,
@@ -590,11 +662,11 @@ export class AdminService {
       studentName:
         c.student?.firstName != null && c.student?.lastName != null
           ? `${c.student.firstName} ${c.student.lastName}`.trim()
-          : c.student?.email ?? null,
+          : (c.student?.email ?? null),
       personalName:
         c.personal?.firstName != null && c.personal?.lastName != null
           ? `${c.personal.firstName} ${c.personal.lastName}`.trim()
-          : c.personal?.email ?? null,
+          : (c.personal?.email ?? null),
       createdAt: c.createdAt,
     }));
     return { items, total, totalPages };
@@ -602,7 +674,10 @@ export class AdminService {
 
   async resolveClassDispute(
     classId: string,
-    body: { resolution: 'resolved_for_student' | 'resolved_for_personal'; adminNotes?: string },
+    body: {
+      resolution: 'resolved_for_student' | 'resolved_for_personal';
+      adminNotes?: string;
+    },
   ) {
     const [classRow] = await this.db
       .select()
@@ -669,8 +744,18 @@ export class AdminService {
       xpReward: body.xpReward,
       type: body.type,
       isActive: body.isActive,
-      startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : undefined,
-      endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : undefined,
+      startDate:
+        body.startDate !== undefined
+          ? body.startDate
+            ? new Date(body.startDate)
+            : null
+          : undefined,
+      endDate:
+        body.endDate !== undefined
+          ? body.endDate
+            ? new Date(body.endDate)
+            : null
+          : undefined,
       requirements: body.requirements,
       updatedAt: new Date(),
     } as any;

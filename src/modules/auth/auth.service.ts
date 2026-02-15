@@ -104,7 +104,9 @@ export class AuthService {
       // Isso previne problemas se usuário deletou conta e está recriando com mesmo email
       try {
         await this.invalidateUserCache(undefined, email);
-        console.log('✅ [AUTH] Cache invalidado para email antes de criar novo usuário');
+        console.log(
+          '✅ [AUTH] Cache invalidado para email antes de criar novo usuário',
+        );
       } catch (error) {
         console.warn('⚠️ [AUTH] Erro ao invalidar cache:', error);
         // Continuar mesmo se invalidação de cache falhar
@@ -335,7 +337,7 @@ export class AuthService {
    */
   private async getUserByEmail(email: string): Promise<any> {
     const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`;
-    
+
     // Tentar buscar do cache primeiro
     try {
       const cachedUser = await this.cacheManager.get<any>(cacheKey);
@@ -347,9 +349,11 @@ export class AuthService {
           where: eq(users.id, cachedUser.id),
           columns: { id: true },
         });
-        
+
         if (!userStillExists) {
-          console.warn('⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache');
+          console.warn(
+            '⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache',
+          );
           await this.invalidateUserCache(cachedUser.id, email);
           // Continuar para buscar do banco (retornará null)
         } else {
@@ -401,13 +405,18 @@ export class AuthService {
   /**
    * Invalida cache de um usuário (por ID ou email)
    */
-  private async invalidateUserCache(userId?: string, email?: string): Promise<void> {
+  private async invalidateUserCache(
+    userId?: string,
+    email?: string,
+  ): Promise<void> {
     try {
       if (userId) {
         await this.cacheManager.del(`${this.USER_CACHE_PREFIX}${userId}`);
       }
       if (email) {
-        await this.cacheManager.del(`${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`);
+        await this.cacheManager.del(
+          `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`,
+        );
       }
       console.log('✅ [AUTH][Service] Cache invalidado para usuário');
     } catch (error) {
@@ -423,7 +432,7 @@ export class AuthService {
 
     try {
       const startTime = Date.now();
-      
+
       // ✅ OTIMIZAÇÃO: Buscar usuário com cache
       const user = await this.getUserByEmail(email);
 
@@ -487,11 +496,11 @@ export class AuthService {
       };
     } catch (error) {
       console.error('❌ [AUTH][Service] Erro no login:', error);
-      
+
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      
+
       throw new BadRequestException(
         'Erro ao processar login. Tente novamente em alguns instantes.',
       );
@@ -684,7 +693,10 @@ export class AuthService {
           }
         }
       } catch (error) {
-        console.warn('⚠️ [AUTH][Service] Erro ao buscar usuário (cache/banco):', error);
+        console.warn(
+          '⚠️ [AUTH][Service] Erro ao buscar usuário (cache/banco):',
+          error,
+        );
         // Se cache/banco falhar, usar dados do token (já validado)
         user = {
           id: payload.sub,

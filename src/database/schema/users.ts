@@ -23,7 +23,7 @@ export const userStatusEnum = pgEnum('user_status', [
   'inactive',
   'suspended',
 ]);
-export const documentTypeEnum = pgEnum('document_type', ['RG', 'CNH']);
+export const documentTypeEnum = pgEnum('document_type', ['RG', 'CNH', 'CPF']);
 
 // Users table
 export const users = pgTable('users', {
@@ -78,8 +78,14 @@ export const users = pgTable('users', {
   fcmToken: text('fcm_token'),
 
   // Campos para localização e raio de atendimento do personal
-  serviceLocationLat: decimal('service_location_lat', { precision: 10, scale: 8 }),
-  serviceLocationLng: decimal('service_location_lng', { precision: 11, scale: 8 }),
+  serviceLocationLat: decimal('service_location_lat', {
+    precision: 10,
+    scale: 8,
+  }),
+  serviceLocationLng: decimal('service_location_lng', {
+    precision: 11,
+    scale: 8,
+  }),
   serviceRadiusKm: decimal('service_radius_km', { precision: 5, scale: 2 }), // até 999.99 km
   isPersonalOnline: boolean('is_personal_online').default(false), // Status online/offline do personal
 

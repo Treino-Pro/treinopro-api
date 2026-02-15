@@ -241,15 +241,19 @@ export class ProposalsService {
     let finalLocationId = createProposalDto.locationId;
 
     // Se não tem locationId, tentar criar/atualizar local com coordenadas
-    if (!finalLocationId && createProposalDto.locationName && createProposalDto.locationAddress) {
+    if (
+      !finalLocationId &&
+      createProposalDto.locationName &&
+      createProposalDto.locationAddress
+    ) {
       console.log(
         `📍 [PROPOSALS] Proposta sem locationId, tentando criar/atualizar local com coordenadas...`,
       );
-      
+
       // ✅ Usar coordenadas do DTO se disponíveis, senão fazer geocoding
       const locationLat = createProposalDto.locationLat;
       const locationLng = createProposalDto.locationLng;
-      
+
       if (locationLat && locationLng) {
         console.log(
           `✅ [PROPOSALS] Coordenadas recebidas do app: lat=${locationLat}, lng=${locationLng}`,
@@ -259,9 +263,11 @@ export class ProposalsService {
           `⚠️ [PROPOSALS] Coordenadas não fornecidas pelo app, será feito geocoding do endereço`,
         );
       }
-      
+
       try {
-        const locationsService = this.moduleRef.get(LocationsService, { strict: false });
+        const locationsService = this.moduleRef.get(LocationsService, {
+          strict: false,
+        });
         finalLocationId = await locationsService.createOrUpdateLocation(
           createProposalDto.locationName,
           createProposalDto.locationAddress,
@@ -279,10 +285,7 @@ export class ProposalsService {
           );
         }
       } catch (error) {
-        console.error(
-          `❌ [PROPOSALS] Erro ao criar/atualizar local:`,
-          error,
-        );
+        console.error(`❌ [PROPOSALS] Erro ao criar/atualizar local:`, error);
         // Continuar mesmo se falhar - FCM será bloqueado depois
       }
     }
@@ -468,7 +471,8 @@ export class ProposalsService {
             }
 
             // Verificar se proposta está dentro do raio de atendimento do personal
-            const proposalCoords = this.extractProposalCoordinates(proposalResponse);
+            const proposalCoords =
+              this.extractProposalCoordinates(proposalResponse);
 
             // ✅ CRÍTICO: Se proposta não tem coordenadas, NÃO enviar FCM
             if (!proposalCoords.lat || !proposalCoords.lng) {
@@ -492,7 +496,11 @@ export class ProposalsService {
               .where(eq(users.id, personalId))
               .limit(1);
 
-            if (personalData?.serviceLocationLat && personalData?.serviceLocationLng && personalData?.serviceRadiusKm) {
+            if (
+              personalData?.serviceLocationLat &&
+              personalData?.serviceLocationLng &&
+              personalData?.serviceRadiusKm
+            ) {
               const personalLat = parseFloat(personalData.serviceLocationLat);
               const personalLng = parseFloat(personalData.serviceLocationLng);
               const radiusKm = parseFloat(personalData.serviceRadiusKm);
@@ -1193,181 +1201,182 @@ export class ProposalsService {
         });
       }
 
-    // ===== VALIDAR CONFLITOS DE HORÁRIO =====
-    try {
-      // Montar intervalo do dia da proposta
-      const proposedTrainingDate = new Date(proposal.trainingDate);
-      const startOfDay = new Date(proposedTrainingDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(proposedTrainingDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      // ===== VALIDAR CONFLITOS DE HORÁRIO =====
+      try {
+        // Montar intervalo do dia da proposta
+        const proposedTrainingDate = new Date(proposal.trainingDate);
+        const startOfDay = new Date(proposedTrainingDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(proposedTrainingDate);
+        endOfDay.setHours(23, 59, 59, 999);
 
-      // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
-      // Buscar aulas do personal no mesmo dia com status relevantes
-      const existingClasses = await tx
-        .select()
-        .from(classes)
-        .where(
-          and(
-            eq(classes.personalId, personalId),
-            gte(classes.date, startOfDay),
-            lte(classes.date, endOfDay),
-            or(
-              eq(classes.status, 'scheduled'),
-              eq(classes.status, 'pending_confirmation'),
-              eq(classes.status, 'active'),
+        // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
+        // Buscar aulas do personal no mesmo dia com status relevantes
+        const existingClasses = await tx
+          .select()
+          .from(classes)
+          .where(
+            and(
+              eq(classes.personalId, personalId),
+              gte(classes.date, startOfDay),
+              lte(classes.date, endOfDay),
+              or(
+                eq(classes.status, 'scheduled'),
+                eq(classes.status, 'pending_confirmation'),
+                eq(classes.status, 'active'),
+              ),
             ),
-          ),
-        );
-
-      console.log(
-        `  - Aulas do personal encontradas: ${existingClasses.length}`,
-      );
-
-      // 2. VALIDAR CONFLITOS DO ALUNO
-      // Buscar propostas existentes do aluno para o mesmo dia
-      let existingProposals = await tx
-        .select()
-        .from(proposals)
-        .where(
-          and(
-            eq(proposals.studentId, proposal.studentId),
-            gte(proposals.trainingDate, startOfDay),
-            lte(proposals.trainingDate, endOfDay),
-            or(
-              eq(proposals.status, 'pending'),
-              eq(proposals.status, 'matched'),
-            ),
-            // Excluir a proposta atual
-            sql`${proposals.id} != ${id}`,
-          ),
-        );
-
-      console.log(
-        `  - Propostas do aluno encontradas: ${existingProposals.length}`,
-      );
-
-      // Ignorar propostas matched cujas aulas estão em disputa de no-show
-      const disputedClasses = await tx.query.classes.findMany({
-        where: and(
-          sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
-          eq(classes.studentId, proposal.studentId as any),
-          eq(classes.status, 'no_show_dispute'),
-        ),
-        columns: { proposalId: true },
-      });
-      const disputedProposalIds = new Set(
-        disputedClasses.map((c) => c.proposalId).filter(Boolean),
-      );
-      if (disputedProposalIds.size > 0) {
-        const beforeFilter = existingProposals.length;
-        existingProposals = existingProposals.filter(
-          (p) => !disputedProposalIds.has(p.id),
-        );
-        console.log(
-          `  - Propostas filtradas (aulas em disputa): ${beforeFilter} → ${existingProposals.length}`,
-        );
-      }
-
-      // Calcular janela de tempo da proposta aceita
-      // Combinar data com horário (formato HH:MM)
-      const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
-      const proposedStart = new Date(proposedTrainingDate);
-      proposedStart.setHours(hours, minutes, 0, 0);
-      const proposedEnd = new Date(
-        proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000,
-      );
-
-      console.log(
-        `  - Proposta: ${proposal.trainingTime} (${proposedStart.toISOString()}) até ${proposedEnd.toISOString()}`,
-      );
-      console.log(`  - Duração: ${proposal.durationMinutes || 60} minutos`);
-
-      // Verificar conflitos com aulas do personal
-      const hasClassConflict = existingClasses.some((cls: any) => {
-        // Combinar data da aula com horário
-        const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
-        const classStart = new Date(cls.date);
-        classStart.setHours(clsHours, clsMinutes, 0, 0);
-        const classEnd = new Date(
-          classStart.getTime() + (cls.duration || 60) * 60 * 1000,
-        );
+          );
 
         console.log(
-          `    - Aula existente: ${cls.time} (${classStart.toISOString()}) até ${classEnd.toISOString()}, status: ${cls.status}`,
+          `  - Aulas do personal encontradas: ${existingClasses.length}`,
         );
 
-        // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
-        const now = new Date();
-        const isClassExpired = classEnd < now;
+        // 2. VALIDAR CONFLITOS DO ALUNO
+        // Buscar propostas existentes do aluno para o mesmo dia
+        let existingProposals = await tx
+          .select()
+          .from(proposals)
+          .where(
+            and(
+              eq(proposals.studentId, proposal.studentId),
+              gte(proposals.trainingDate, startOfDay),
+              lte(proposals.trainingDate, endOfDay),
+              or(
+                eq(proposals.status, 'pending'),
+                eq(proposals.status, 'matched'),
+              ),
+              // Excluir a proposta atual
+              sql`${proposals.id} != ${id}`,
+            ),
+          );
 
-        if (isClassExpired) {
-          console.log(`      ✓ Aula expirada, ignorando`);
-          return false; // Não há conflito com aulas expiradas
+        console.log(
+          `  - Propostas do aluno encontradas: ${existingProposals.length}`,
+        );
+
+        // Ignorar propostas matched cujas aulas estão em disputa de no-show
+        const disputedClasses = await tx.query.classes.findMany({
+          where: and(
+            sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
+            eq(classes.studentId, proposal.studentId as any),
+            eq(classes.status, 'no_show_dispute'),
+          ),
+          columns: { proposalId: true },
+        });
+        const disputedProposalIds = new Set(
+          disputedClasses.map((c) => c.proposalId).filter(Boolean),
+        );
+        if (disputedProposalIds.size > 0) {
+          const beforeFilter = existingProposals.length;
+          existingProposals = existingProposals.filter(
+            (p) => !disputedProposalIds.has(p.id),
+          );
+          console.log(
+            `  - Propostas filtradas (aulas em disputa): ${beforeFilter} → ${existingProposals.length}`,
+          );
         }
 
-        // Verificar sobreposição
-        const overlaps = !(
-          proposedEnd <= classStart || proposedStart >= classEnd
-        );
-        console.log(
-          `      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'} (proposta: ${proposedStart.toISOString()} - ${proposedEnd.toISOString()}, aula: ${classStart.toISOString()} - ${classEnd.toISOString()})`,
-        );
-        return overlaps;
-      });
-
-      // Verificar conflitos com propostas do aluno
-      const hasProposalConflict = existingProposals.some((prop: any) => {
-        const [propHours, propMinutes] = prop.trainingTime
-          .split(':')
-          .map(Number);
-        const propStart = new Date(prop.trainingDate);
-        propStart.setHours(propHours, propMinutes, 0, 0);
-        const propEnd = new Date(
-          propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000,
+        // Calcular janela de tempo da proposta aceita
+        // Combinar data com horário (formato HH:MM)
+        const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
+        const proposedStart = new Date(proposedTrainingDate);
+        proposedStart.setHours(hours, minutes, 0, 0);
+        const proposedEnd = new Date(
+          proposedStart.getTime() +
+            (proposal.durationMinutes || 60) * 60 * 1000,
         );
 
         console.log(
-          `    - Proposta existente: ${prop.trainingTime} (${propStart.toISOString()}) até ${propEnd.toISOString()}, status: ${prop.status}`,
+          `  - Proposta: ${proposal.trainingTime} (${proposedStart.toISOString()}) até ${proposedEnd.toISOString()}`,
+        );
+        console.log(`  - Duração: ${proposal.durationMinutes || 60} minutos`);
+
+        // Verificar conflitos com aulas do personal
+        const hasClassConflict = existingClasses.some((cls: any) => {
+          // Combinar data da aula com horário
+          const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
+          const classStart = new Date(cls.date);
+          classStart.setHours(clsHours, clsMinutes, 0, 0);
+          const classEnd = new Date(
+            classStart.getTime() + (cls.duration || 60) * 60 * 1000,
+          );
+
+          console.log(
+            `    - Aula existente: ${cls.time} (${classStart.toISOString()}) até ${classEnd.toISOString()}, status: ${cls.status}`,
+          );
+
+          // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
+          const now = new Date();
+          const isClassExpired = classEnd < now;
+
+          if (isClassExpired) {
+            console.log(`      ✓ Aula expirada, ignorando`);
+            return false; // Não há conflito com aulas expiradas
+          }
+
+          // Verificar sobreposição
+          const overlaps = !(
+            proposedEnd <= classStart || proposedStart >= classEnd
+          );
+          console.log(
+            `      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'} (proposta: ${proposedStart.toISOString()} - ${proposedEnd.toISOString()}, aula: ${classStart.toISOString()} - ${classEnd.toISOString()})`,
+          );
+          return overlaps;
+        });
+
+        // Verificar conflitos com propostas do aluno
+        const hasProposalConflict = existingProposals.some((prop: any) => {
+          const [propHours, propMinutes] = prop.trainingTime
+            .split(':')
+            .map(Number);
+          const propStart = new Date(prop.trainingDate);
+          propStart.setHours(propHours, propMinutes, 0, 0);
+          const propEnd = new Date(
+            propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000,
+          );
+
+          console.log(
+            `    - Proposta existente: ${prop.trainingTime} (${propStart.toISOString()}) até ${propEnd.toISOString()}, status: ${prop.status}`,
+          );
+
+          // Verificar sobreposição
+          const overlaps = !(
+            proposedEnd <= propStart || proposedStart >= propEnd
+          );
+          console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'}`);
+          return overlaps;
+        });
+
+        console.log(`  - Conflito com aulas do personal: ${hasClassConflict}`);
+        console.log(
+          `  - Conflito com propostas do aluno: ${hasProposalConflict}`,
         );
 
-        // Verificar sobreposição
-        const overlaps = !(
-          proposedEnd <= propStart || proposedStart >= propEnd
+        if (hasClassConflict) {
+          throw new BadRequestException(
+            'Conflito de horário: o personal trainer já possui uma aula agendada nesse período.',
+          );
+        }
+
+        if (hasProposalConflict) {
+          throw new BadRequestException(
+            'Conflito de horário: o aluno já possui uma proposta ou aula agendada nesse período.',
+          );
+        }
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        // Em caso de erro inesperado na verificação, não bloquear o fluxo com mensagem genérica
+        console.error(
+          '❌ [PROPOSALS] Erro ao validar conflito de horário:',
+          error,
         );
-        console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'}`);
-        return overlaps;
-      });
-
-      console.log(`  - Conflito com aulas do personal: ${hasClassConflict}`);
-      console.log(
-        `  - Conflito com propostas do aluno: ${hasProposalConflict}`,
-      );
-
-      if (hasClassConflict) {
         throw new BadRequestException(
-          'Conflito de horário: o personal trainer já possui uma aula agendada nesse período.',
+          'Não foi possível validar conflitos de horário no momento. Tente novamente.',
         );
       }
-
-      if (hasProposalConflict) {
-        throw new BadRequestException(
-          'Conflito de horário: o aluno já possui uma proposta ou aula agendada nesse período.',
-        );
-      }
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      // Em caso de erro inesperado na verificação, não bloquear o fluxo com mensagem genérica
-      console.error(
-        '❌ [PROPOSALS] Erro ao validar conflito de horário:',
-        error,
-      );
-      throw new BadRequestException(
-        'Não foi possível validar conflitos de horário no momento. Tente novamente.',
-      );
-    }
 
       // Aceitar a proposta (mudar status para matched)
       const [acceptedProposal] = await tx
@@ -1437,7 +1446,10 @@ export class ProposalsService {
           console.log(
             '💰 [PROPOSALS] Capturando pagamento após criação da aula...',
           );
-          console.log('🔍 [PROPOSALS] Buscando pagamento para proposta ID:', id);
+          console.log(
+            '🔍 [PROPOSALS] Buscando pagamento para proposta ID:',
+            id,
+          );
 
           // Buscar pagamento da proposta
           const payment = await tx.query.payments.findFirst({
@@ -1464,50 +1476,52 @@ export class ProposalsService {
               })
               .where(eq(payments.id, payment.id));
 
-          // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
-          console.log(
-            'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
-          );
-        } else {
-          console.log(
-            '⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:',
-            payment?.status,
-          );
-        }
-      } catch (error) {
-        console.error(
-          '❌ [PROPOSALS] Erro ao capturar pagamento após criação da aula:',
-          error,
-        );
-        // Não falhar a operação se a captura de pagamento falhar
-        // Mas logar o erro para investigação
-      }
-
-      // Buscar dados do usuário para incluir na resposta (dentro da transação)
-      const [student] = await tx
-        .select()
-        .from(users)
-        .where(eq(users.id, acceptedProposal.studentId))
-        .limit(1);
-
-      // Retornar resultado da transação
-      return await this.mapToResponseDto(acceptedProposal, student);
+            // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
+            console.log(
+              'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
+            );
+          } else {
+            console.log(
+              '⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:',
+              payment?.status,
+            );
+          }
         } catch (error) {
-          console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
-          // Se falhar, reverter status da proposta dentro da transação
-          await tx
-            .update(proposals)
-            .set({
-              status: ProposalStatus.PENDING,
-              updatedAt: new Date(),
-            })
-            .where(eq(proposals.id, id));
+          console.error(
+            '❌ [PROPOSALS] Erro ao capturar pagamento após criação da aula:',
+            error,
+          );
+          // Não falhar a operação se a captura de pagamento falhar
+          // Mas logar o erro para investigação
+        }
 
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar aula';
-      throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
-    }
-      },
-    );
+        // Buscar dados do usuário para incluir na resposta (dentro da transação)
+        const [student] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, acceptedProposal.studentId))
+          .limit(1);
+
+        // Retornar resultado da transação
+        return await this.mapToResponseDto(acceptedProposal, student);
+      } catch (error) {
+        console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
+        // Se falhar, reverter status da proposta dentro da transação
+        await tx
+          .update(proposals)
+          .set({
+            status: ProposalStatus.PENDING,
+            updatedAt: new Date(),
+          })
+          .where(eq(proposals.id, id));
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Erro desconhecido ao criar aula';
+        throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
+      }
+    });
 
     // ===== EMITIR EVENTOS WEBSOCKET (fora da transação) =====
     // Buscar novamente os dados para eventos WebSocket após transação
@@ -1562,7 +1576,10 @@ export class ProposalsService {
       if (studentForEvents) {
         this.chatGateway.server.emit('proposal_update', {
           action: 'proposal_accepted',
-          proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+          proposal: await this.mapToResponseDto(
+            proposalForEvents,
+            studentForEvents,
+          ),
           personal: {
             id: personal?.id,
             name: personal?.name,
@@ -1578,10 +1595,14 @@ export class ProposalsService {
       if (studentForEvents && personal) {
         try {
           await this.proposalsGateway.sendProposalAccepted({
-            proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+            proposal: await this.mapToResponseDto(
+              proposalForEvents,
+              studentForEvents,
+            ),
             personal: {
               id: personal.id,
-              name: personal.name || `${personal.firstName} ${personal.lastName}`,
+              name:
+                personal.name || `${personal.firstName} ${personal.lastName}`,
               firstName: personal.firstName,
               lastName: personal.lastName,
               photo: personal.profileImageUrl,
@@ -1589,9 +1610,14 @@ export class ProposalsService {
             },
             studentId: studentForEvents.id,
           });
-          console.log('✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita');
+          console.log(
+            '✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita',
+          );
         } catch (error) {
-          console.error('❌ [PROPOSALS] Erro ao enviar notificação push:', error);
+          console.error(
+            '❌ [PROPOSALS] Erro ao enviar notificação push:',
+            error,
+          );
           // Não falhar a operação por causa de problemas de notificação
         }
       }
@@ -1606,7 +1632,10 @@ export class ProposalsService {
       // Evento de match confirmado para ambos
       const matchData = {
         action: 'match_confirmed',
-        proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+        proposal: await this.mapToResponseDto(
+          proposalForEvents,
+          studentForEvents,
+        ),
         student: {
           id: studentForEvents?.id,
           name: studentForEvents?.name,
@@ -2646,7 +2675,9 @@ export class ProposalsService {
     let locationLat: number | null = null;
     let locationLng: number | null = null;
     try {
-      const locId = (proposal.locationId || proposal.location_id) as string | undefined;
+      const locId = (proposal.locationId || proposal.location_id) as
+        | string
+        | undefined;
       if (locId) {
         const [loc] = await this.db
           .select({ lat: locations.lat, lng: locations.lng })
@@ -3054,10 +3085,17 @@ export class ProposalsService {
   /**
    * Extrai coordenadas da proposta
    */
-  private extractProposalCoordinates(proposal: any): { lat?: number; lng?: number } {
+  private extractProposalCoordinates(proposal: any): {
+    lat?: number;
+    lng?: number;
+  } {
     // Tentar extrair de locationLat/locationLng
-    let lat = proposal.locationLat ? parseFloat(proposal.locationLat) : undefined;
-    let lng = proposal.locationLng ? parseFloat(proposal.locationLng) : undefined;
+    let lat = proposal.locationLat
+      ? parseFloat(proposal.locationLat)
+      : undefined;
+    let lng = proposal.locationLng
+      ? parseFloat(proposal.locationLng)
+      : undefined;
 
     // Se não encontrou, tentar do objeto location
     if ((!lat || !lng) && proposal.location) {

@@ -467,18 +467,23 @@ export class PaymentsService {
 
     // Criar notificação in-app para o outro usuário (que não criou a disputa)
     try {
-      const otherUserId = payment.studentId === userId ? payment.personalId : payment.studentId;
+      const otherUserId =
+        payment.studentId === userId ? payment.personalId : payment.studentId;
       const classData = await this.db.query.classes.findFirst({
         where: eq(classes.id, payment.classId),
       });
-      
-      await this.notificationsService.sendInAppNotification(otherUserId, 'dispute-created', {
-        disputeId: newDispute.id,
-        classId: payment.classId,
-        paymentId: createDto.paymentId,
-        reason: createDto.reason,
-        message: `Uma disputa foi criada sobre sua aula${classData ? ` de ${classData.date}` : ''}`,
-      });
+
+      await this.notificationsService.sendInAppNotification(
+        otherUserId,
+        'dispute-created',
+        {
+          disputeId: newDispute.id,
+          classId: payment.classId,
+          paymentId: createDto.paymentId,
+          reason: createDto.reason,
+          message: `Uma disputa foi criada sobre sua aula${classData ? ` de ${classData.date}` : ''}`,
+        },
+      );
     } catch (error) {
       console.error('❌ Erro ao criar notificação in-app de disputa:', error);
       // Não bloquear a criação da disputa se notificação falhar
@@ -563,7 +568,11 @@ export class PaymentsService {
     status?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ items: DisputeResponseDto[]; total: number; totalPages: number }> {
+  }): Promise<{
+    items: DisputeResponseDto[];
+    total: number;
+    totalPages: number;
+  }> {
     const pageNum = Math.max(1, filters?.page ?? 1);
     const limitNum = Math.min(100, Math.max(1, filters?.limit ?? 20));
     const offset = (pageNum - 1) * limitNum;
@@ -1296,9 +1305,10 @@ export class PaymentsService {
         ? {
             id: payment.student.id,
             name:
-              payment.student.firstName != null && payment.student.lastName != null
+              payment.student.firstName != null &&
+              payment.student.lastName != null
                 ? `${payment.student.firstName} ${payment.student.lastName}`.trim()
-                : (payment.student as any).name ?? payment.student.email,
+                : ((payment.student as any).name ?? payment.student.email),
             email: payment.student.email,
           }
         : undefined,
@@ -1306,9 +1316,10 @@ export class PaymentsService {
         ? {
             id: payment.personal.id,
             name:
-              payment.personal.firstName != null && payment.personal.lastName != null
+              payment.personal.firstName != null &&
+              payment.personal.lastName != null
                 ? `${payment.personal.firstName} ${payment.personal.lastName}`.trim()
-                : (payment.personal as any).name ?? payment.personal.email,
+                : ((payment.personal as any).name ?? payment.personal.email),
             email: payment.personal.email,
           }
         : undefined,
@@ -1347,9 +1358,13 @@ export class PaymentsService {
               dispute.reportedByUser.firstName != null &&
               dispute.reportedByUser.lastName != null
                 ? `${dispute.reportedByUser.firstName} ${dispute.reportedByUser.lastName}`.trim()
-                : (dispute.reportedByUser as any).name ?? dispute.reportedByUser.email,
+                : ((dispute.reportedByUser as any).name ??
+                  dispute.reportedByUser.email),
             email: dispute.reportedByUser.email,
-            role: (dispute.reportedByUser as any).role ?? dispute.reportedByUser.userType ?? 'user',
+            role:
+              (dispute.reportedByUser as any).role ??
+              dispute.reportedByUser.userType ??
+              'user',
           }
         : undefined,
       createdAt: dispute.createdAt,
@@ -1672,7 +1687,11 @@ export class PaymentsService {
 
   // Listar solicitações de saque pendentes (admin) – atalho para getWithdrawals({ status: 'pending' })
   async getPendingWithdrawals(): Promise<WithdrawalResponseDto[]> {
-    const result = await this.getWithdrawals({ status: 'pending', page: 1, limit: 500 });
+    const result = await this.getWithdrawals({
+      status: 'pending',
+      page: 1,
+      limit: 500,
+    });
     return result.items;
   }
 
@@ -1692,9 +1711,15 @@ export class PaymentsService {
     const limit = Math.min(100, Math.max(1, filters?.limit ?? 20));
     const offset = (page - 1) * limit;
 
-    let statusWhere: ReturnType<typeof eq> | ReturnType<typeof inArray> | undefined;
+    let statusWhere:
+      | ReturnType<typeof eq>
+      | ReturnType<typeof inArray>
+      | undefined;
     if (filters?.status) {
-      const statuses = filters.status.split(',').map((s) => s.trim()).filter(Boolean);
+      const statuses = filters.status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       if (statuses.length === 1) {
         statusWhere = eq(withdrawalRequests.status, statuses[0]);
       } else if (statuses.length > 1) {

@@ -120,7 +120,7 @@ export class ChatGateway
       // Quando o app vai para background/terminated, o WebSocket desconecta, mas o estado
       // do toggle deve persistir. Quando o app volta ao foreground e reconecta, o frontend
       // reenvia o status correto baseado no estado persistido localmente.
-      
+
       this.connectedUsers.delete(client.userId);
 
       // Notificar que o usuário desconectou (mas não necessariamente está offline)
@@ -130,7 +130,9 @@ export class ChatGateway
         timestamp: new Date(),
       });
 
-      this.logger.log(`User ${client.userId} disconnected (WebSocket desconectado, mas status online/offline mantido)`);
+      this.logger.log(
+        `User ${client.userId} disconnected (WebSocket desconectado, mas status online/offline mantido)`,
+      );
     }
   }
 
@@ -457,15 +459,26 @@ export class ChatGateway
   @SubscribeMessage('personal_online')
   async handlePersonalOnline(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { action: string; radiusKm?: number; center?: { lat: number; lng: number } },
+    @MessageBody()
+    data: {
+      action: string;
+      radiusKm?: number;
+      center?: { lat: number; lng: number };
+    },
   ) {
     try {
       if (!client.userId || client.userType !== 'personal') {
-        client.emit('error', { message: 'Apenas personals podem usar este evento' });
+        client.emit('error', {
+          message: 'Apenas personals podem usar este evento',
+        });
         return;
       }
 
-      if (data.action === 'set_radius' && data.center && data.radiusKm !== undefined) {
+      if (
+        data.action === 'set_radius' &&
+        data.center &&
+        data.radiusKm !== undefined
+      ) {
         // Atualizar no banco de dados (localização, raio e status online)
         await this.db
           .update(users)
@@ -499,12 +512,12 @@ export class ChatGateway
    * Handler para personal_offline - marca personal como offline no banco
    */
   @SubscribeMessage('personal_offline')
-  async handlePersonalOffline(
-    @ConnectedSocket() client: AuthenticatedSocket,
-  ) {
+  async handlePersonalOffline(@ConnectedSocket() client: AuthenticatedSocket) {
     try {
       if (!client.userId || client.userType !== 'personal') {
-        client.emit('error', { message: 'Apenas personals podem usar este evento' });
+        client.emit('error', {
+          message: 'Apenas personals podem usar este evento',
+        });
         return;
       }
 
@@ -517,9 +530,7 @@ export class ChatGateway
         })
         .where(eq(users.id, client.userId));
 
-      this.logger.log(
-        `📴 Personal ${client.userId} foi marcado como OFFLINE`,
-      );
+      this.logger.log(`📴 Personal ${client.userId} foi marcado como OFFLINE`);
 
       client.emit('personal_offline_confirmed', {
         success: true,

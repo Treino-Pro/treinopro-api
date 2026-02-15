@@ -959,14 +959,23 @@ export class GamificationService {
 
         // Criar notificação in-app para missão completada
         try {
-          await this.notificationsService.sendInAppNotification(userId, 'mission-completed', {
-            missionId: userMission.missions.id,
-            title: userMission.missions.title,
-            xpReward: userMission.missions.xpReward,
-          });
-          this.logger.log(`🔔 [GAMIFICATION] Notificação in-app criada para missão completada`);
+          await this.notificationsService.sendInAppNotification(
+            userId,
+            'mission-completed',
+            {
+              missionId: userMission.missions.id,
+              title: userMission.missions.title,
+              xpReward: userMission.missions.xpReward,
+            },
+          );
+          this.logger.log(
+            `🔔 [GAMIFICATION] Notificação in-app criada para missão completada`,
+          );
         } catch (error) {
-          this.logger.error(`❌ [GAMIFICATION] Erro ao criar notificação in-app:`, error);
+          this.logger.error(
+            `❌ [GAMIFICATION] Erro ao criar notificação in-app:`,
+            error,
+          );
           // Não bloquear o fluxo se notificação falhar
         }
 

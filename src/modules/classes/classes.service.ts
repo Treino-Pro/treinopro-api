@@ -498,11 +498,15 @@ export class ClassesService {
               },
             });
             // Criar notificação in-app
-            await this.notificationsService.sendInAppNotification(userId, 'payment-received', {
-              classId: id,
-              amount: personalAmount.toFixed(2),
-              description: `Repasse da aula ${classData.date}`,
-            });
+            await this.notificationsService.sendInAppNotification(
+              userId,
+              'payment-received',
+              {
+                classId: id,
+                amount: personalAmount.toFixed(2),
+                description: `Repasse da aula ${classData.date}`,
+              },
+            );
             console.log('✅ [COMPLETE_CLASS] Notificação de repasse enviada');
           } catch (error) {
             console.error(

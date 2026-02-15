@@ -311,7 +311,10 @@ export class NotificationsService {
         break;
 
       case 'mission-completed':
-        await this.inAppService.createMissionCompletedNotification(userId, data);
+        await this.inAppService.createMissionCompletedNotification(
+          userId,
+          data,
+        );
         break;
 
       default:
@@ -538,10 +541,7 @@ export class NotificationsService {
         })
         .from(users)
         .where(
-          and(
-            inArray(users.id, userIds),
-            sql`${users.fcmToken} IS NOT NULL`,
-          ),
+          and(inArray(users.id, userIds), sql`${users.fcmToken} IS NOT NULL`),
         );
 
       const tokens = usersWithTokens

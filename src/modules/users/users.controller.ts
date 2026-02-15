@@ -341,7 +341,8 @@ export class UsersController {
   @Patch('profile/me/service-location')
   @ApiOperation({
     summary: 'Atualizar localização de atendimento do personal',
-    description: 'Atualiza a localização e raio de atendimento do personal trainer',
+    description:
+      'Atualiza a localização e raio de atendimento do personal trainer',
   })
   @ApiResponse({
     status: 200,
@@ -350,7 +351,8 @@ export class UsersController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Apenas personal trainers podem atualizar localização de atendimento',
+    description:
+      'Apenas personal trainers podem atualizar localização de atendimento',
   })
   async updateServiceLocation(
     @Request() req: any,
@@ -358,15 +360,18 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const userId = req.user.sub;
     const userType = req.user.userType;
-    
+
     // ✅ Apenas personals podem atualizar localização de atendimento
     if (userType !== 'personal') {
       throw new ForbiddenException(
         'Apenas personal trainers podem atualizar localização de atendimento',
       );
     }
-    
-    return this.usersService.updateServiceLocation(userId, updateServiceLocationDto);
+
+    return this.usersService.updateServiceLocation(
+      userId,
+      updateServiceLocationDto,
+    );
   }
 
   // ===== MÉTODOS AUXILIARES =====
