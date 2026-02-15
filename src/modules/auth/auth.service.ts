@@ -47,7 +47,14 @@ export class AuthService {
     console.log('🚀 [AUTH] Iniciando processo de registro...');
     console.log(
       '📝 [AUTH] Dados recebidos:',
-      JSON.stringify(registerDto, null, 2),
+      JSON.stringify({
+        email: registerDto.email,
+        userType: registerDto.userType,
+        firstName: registerDto.firstName,
+        lastName: registerDto.lastName,
+        documentType: registerDto.documentType,
+        isMinor: registerDto.isMinor,
+      }),
     );
 
     try {

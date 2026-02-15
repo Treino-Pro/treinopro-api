@@ -10,6 +10,9 @@ import {
   ValidateIf,
   IsNotEmpty,
   IsUUID,
+  registerDecorator,
+  ValidationOptions,
+  ValidationArguments,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -20,8 +23,116 @@ export enum UserType {
 }
 
 export enum DocumentType {
+  CPF = 'CPF',
   RG = 'RG',
   CNH = 'CNH',
+}
+
+// ===== Validadores de documento =====
+
+function isValidCPF(cpf: string): boolean {
+  const clean = cpf.replace(/\D/g, '');
+  if (clean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(clean)) return false; // sequência repetida
+
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(clean[i]) * (10 - i);
+  }
+  let rest = sum % 11;
+  const dv1 = rest < 2 ? 0 : 11 - rest;
+  if (parseInt(clean[9]) !== dv1) return false;
+
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += parseInt(clean[i]) * (11 - i);
+  }
+  rest = sum % 11;
+  const dv2 = rest < 2 ? 0 : 11 - rest;
+  return parseInt(clean[10]) === dv2;
+}
+
+function isValidCNH(cnh: string): boolean {
+  const clean = cnh.replace(/\D/g, '');
+  if (clean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(clean)) return false;
+
+  const digits = clean.split('').map(Number);
+
+  // DV1 (pesos 9 -> 1)
+  let sum1 = 0;
+  for (let i = 0; i < 9; i++) {
+    sum1 += digits[i] * (9 - i);
+  }
+  let rest1 = sum1 % 11;
+  let desc = 0;
+  let dv1: number;
+  if (rest1 > 9) {
+    dv1 = 0;
+    desc = 2;
+  } else {
+    dv1 = rest1;
+  }
+
+  // DV2 (pesos 1 -> 9)
+  let sum2 = 0;
+  for (let i = 0; i < 9; i++) {
+    sum2 += digits[i] * (1 + i);
+  }
+  let rest2 = sum2 % 11;
+  let dv2 = rest2 - desc;
+  if (dv2 < 0 || dv2 > 9) {
+    dv2 = 0;
+  }
+
+  return digits[9] === dv1 && digits[10] === dv2;
+}
+
+/**
+ * Decorator customizado que valida documentNumber baseado no documentType.
+ * CPF: algoritmo módulo 11 com 2 dígitos verificadores.
+ * CNH: algoritmo módulo 11 com ajuste desc.
+ * RG: apenas valida formato básico (7 a 11 dígitos).
+ */
+function IsValidDocument(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isValidDocument',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, args: ValidationArguments) {
+          const obj = args.object as any;
+          const docType = obj.documentType;
+          const clean = (value || '').replace(/\D/g, '');
+
+          switch (docType) {
+            case DocumentType.CPF:
+              return isValidCPF(clean);
+            case DocumentType.CNH:
+              return isValidCNH(clean);
+            case DocumentType.RG:
+              return clean.length >= 7 && clean.length <= 14;
+            default:
+              return clean.length >= 7 && clean.length <= 14;
+          }
+        },
+        defaultMessage(args: ValidationArguments) {
+          const obj = args.object as any;
+          const docType = obj.documentType;
+          switch (docType) {
+            case DocumentType.CPF:
+              return 'CPF inválido. Verifique os dígitos e tente novamente.';
+            case DocumentType.CNH:
+              return 'CNH inválida. Verifique o número de registro e tente novamente.';
+            default:
+              return 'Número de documento inválido.';
+          }
+        },
+      },
+    });
+  };
 }
 
 export class RegisterDto {
@@ -61,6 +172,7 @@ export class RegisterDto {
   @ApiProperty({ example: '12345678901' })
   @IsString()
   @IsNotEmpty()
+  @IsValidDocument({ message: 'Número de documento inválido para o tipo selecionado.' })
   documentNumber: string;
 
   @ApiProperty({
