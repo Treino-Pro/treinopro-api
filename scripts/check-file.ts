@@ -13,7 +13,8 @@ import * as path from 'path';
 
 async function checkFile(fileId: string) {
   const connectionString =
-    process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/treinopro';
+    process.env.DATABASE_URL ||
+    'postgresql://postgres:postgres@localhost:5432/treinopro';
   const sql = postgres(connectionString);
   const db = drizzle(sql, { schema });
 
@@ -32,8 +33,9 @@ async function checkFile(fileId: string) {
 
     // Verificar se o arquivo existe no disco
     const storedPath = fileRecord.path as string;
-    const storageBase = process.env.STORAGE_PATH || path.join(process.cwd(), 'storage');
-    
+    const storageBase =
+      process.env.STORAGE_PATH || path.join(process.cwd(), 'storage');
+
     let absolutePath: string;
     if (path.isAbsolute(storedPath)) {
       absolutePath = storedPath;
@@ -47,7 +49,9 @@ async function checkFile(fileId: string) {
 
     console.log('\n🔍 Verificando arquivo no disco:');
     console.log(`- Path no banco: ${storedPath}`);
-    console.log(`- STORAGE_PATH: ${process.env.STORAGE_PATH || 'não definido'}`);
+    console.log(
+      `- STORAGE_PATH: ${process.env.STORAGE_PATH || 'não definido'}`,
+    );
     console.log(`- process.cwd(): ${process.cwd()}`);
     console.log(`- Caminho absoluto calculado: ${absolutePath}`);
 
@@ -65,9 +69,23 @@ async function checkFile(fileId: string) {
       const alternatives = [
         storedPath, // Caminho exato do banco
         path.join(process.cwd(), storedPath), // CWD + path do banco
-        path.join(process.cwd(), 'storage', 'images', 'documents', fileRecord.storedName as string),
-        path.join('/var/opt/treinopro/treinopro-api', storedPath.replace(/^(\.\/)?storage\/?/, '')),
-        path.join('/var/opt/treinopro/treinopro-api/storage', 'images', 'documents', fileRecord.storedName as string),
+        path.join(
+          process.cwd(),
+          'storage',
+          'images',
+          'documents',
+          fileRecord.storedName as string,
+        ),
+        path.join(
+          '/var/opt/treinopro/treinopro-api',
+          storedPath.replace(/^(\.\/)?storage\/?/, ''),
+        ),
+        path.join(
+          '/var/opt/treinopro/treinopro-api/storage',
+          'images',
+          'documents',
+          fileRecord.storedName as string,
+        ),
       ];
 
       for (const altPath of alternatives) {

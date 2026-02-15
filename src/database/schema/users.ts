@@ -26,10 +26,12 @@ export const userStatusEnum = pgEnum('user_status', [
 export const documentTypeEnum = pgEnum('document_type', ['RG', 'CNH', 'CPF']);
 
 // Users table
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: varchar('email', { length: 255 }).notNull(),
+    passwordHash: text('password_hash').notNull(),
   userType: userTypeEnum('user_type').notNull(),
   firstName: varchar('first_name', { length: 100 }).notNull(),
   lastName: varchar('last_name', { length: 100 }).notNull(),
@@ -89,10 +91,13 @@ export const users = pgTable('users', {
   serviceRadiusKm: decimal('service_radius_km', { precision: 5, scale: 2 }), // até 999.99 km
   isPersonalOnline: boolean('is_personal_online').default(false), // Status online/offline do personal
 
-  // Timestamps
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+    // Timestamps
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  // Note: Case-insensitive unique index on email is created via migration
+  // See: drizzle/0005_add_email_case_insensitive_unique.sql
+);
 
 // Relations
 export const usersRelations = relations(users, ({ many, one }) => ({

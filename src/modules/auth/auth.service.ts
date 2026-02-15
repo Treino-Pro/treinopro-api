@@ -43,6 +43,13 @@ export class AuthService {
     private notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * Normaliza email para garantir consistência (trim + lowercase)
+   */
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   async register(registerDto: RegisterDto) {
     console.log('🚀 [AUTH] Iniciando processo de registro...');
     console.log(
@@ -59,7 +66,6 @@ export class AuthService {
 
     try {
       const {
-        email,
         password,
         firstName,
         lastName,
@@ -79,8 +85,11 @@ export class AuthService {
         privacyPolicyAccepted,
       } = registerDto;
 
+      // Normalizar email
+      const email = this.normalizeEmail(registerDto.email);
+
       console.log('🔍 [AUTH] Verificando se usuário já existe...');
-      console.log('🔍 [AUTH] Email a verificar:', email);
+      console.log('🔍 [AUTH] Email a verificar (normalizado):', email);
       console.log('🔍 [AUTH] Tipo de usuário:', userType);
 
       // Verificar se o usuário já existe
@@ -336,7 +345,9 @@ export class AuthService {
    * Busca usuário do cache ou do banco de dados
    */
   private async getUserByEmail(email: string): Promise<any> {
-    const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`;
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${normalizedEmail}`;
 
     // Tentar buscar do cache primeiro
     try {
@@ -354,7 +365,7 @@ export class AuthService {
           console.warn(
             '⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache',
           );
-          await this.invalidateUserCache(cachedUser.id, email);
+          await this.invalidateUserCache(cachedUser.id, normalizedEmail);
           // Continuar para buscar do banco (retornará null)
         } else {
           return cachedUser;
@@ -368,7 +379,7 @@ export class AuthService {
     // Buscar do banco de dados
     // ✅ OTIMIZAÇÃO: Buscar apenas campos necessários para login
     const user = await this.db.query.users.findFirst({
-      where: eq(users.email, email),
+      where: eq(users.email, normalizedEmail),
       columns: {
         id: true,
         email: true,
@@ -559,7 +570,7 @@ export class AuthService {
   }
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
-    const { password, token } = resetPasswordDto;
+    const { token } = resetPasswordDto;
 
     console.log(`🔐 [AUTH] Iniciando reset de senha com token: ${token}`);
 
@@ -782,17 +793,19 @@ export class AuthService {
   async sendVerificationCode(
     email: string,
   ): Promise<{ message: string; expiresAt: Date }> {
-    console.log('📧 [AUTH] Enviando código de verificação para:', email);
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log('📧 [AUTH] Enviando código de verificação para:', normalizedEmail);
 
     // Validar formato do email
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       throw new BadRequestException('Formato de email inválido');
     }
 
     // Verificar se o email já está em uso
     const existingUser = await this.db.query.users.findFirst({
-      where: eq(users.email, email),
+      where: eq(users.email, normalizedEmail),
     });
 
     if (existingUser) {
@@ -803,8 +816,8 @@ export class AuthService {
 
     // Enviar código de verificação (usar email como firstName temporariamente)
     return this.emailVerificationService.sendVerificationCode(
-      email,
-      email.split('@')[0],
+      normalizedEmail,
+      normalizedEmail.split('@')[0],
     );
   }
 
@@ -812,12 +825,27 @@ export class AuthService {
     email: string,
     code: string,
   ): Promise<{ message: string; verified: boolean }> {
-    console.log('🔍 [AUTH] Verificando código para:', email, 'Código:', code);
-    return this.emailVerificationService.verifyCode(email, code);
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log('🔍 [AUTH] Verificando código para:', normalizedEmail, 'Código:', code);
+    return this.emailVerificationService.verifyCode(normalizedEmail, code);
+  }
+
+  async checkEmail(email: string): Promise<{ exists: boolean }> {
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log('🔍 [AUTH] Verificando existência do email:', normalizedEmail);
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.email, normalizedEmail),
+      columns: { id: true },
+    });
+
+    return { exists: !!user };
   }
 
   async isEmailVerified(email: string): Promise<boolean> {
-    return this.emailVerificationService.isEmailVerified(email);
+    const normalizedEmail = this.normalizeEmail(email);
+    return this.emailVerificationService.isEmailVerified(normalizedEmail);
   }
 
   // ===== MÉTODOS PARA ADMIN =====
@@ -826,16 +854,18 @@ export class AuthService {
    * Criar usuário admin (método interno/sistema)
    */
   async createAdmin(createAdminDto: CreateAdminDto) {
+    // Normalizar email
+    const email = this.normalizeEmail(createAdminDto.email);
     console.log('👑 [AUTH] Criando usuário admin...');
-    console.log('👑 [AUTH] Email:', createAdminDto.email);
+    console.log('👑 [AUTH] Email (normalizado):', email);
 
     // Verificar se email já existe
     const existingUser = await this.db.query.users.findFirst({
-      where: eq(users.email, createAdminDto.email),
+      where: eq(users.email, email),
     });
 
     if (existingUser) {
-      console.log('❌ [AUTH] Email já existe:', createAdminDto.email);
+      console.log('❌ [AUTH] Email já existe:', email);
       throw new ConflictException('Email já está em uso');
     }
 
@@ -845,7 +875,7 @@ export class AuthService {
 
     // Preparar dados para inserção (campos mínimos para admin)
     const adminData = {
-      email: createAdminDto.email,
+      email,
       passwordHash,
       firstName: createAdminDto.firstName,
       lastName: createAdminDto.lastName,

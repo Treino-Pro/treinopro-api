@@ -304,3 +304,30 @@ export class ChangePasswordDto {
   @MinLength(6)
   newPassword: string;
 }
+
+export class CheckEmailDto {
+  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email para verificar disponibilidade' })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+}
+
+export class SendVerificationCodeDto {
+  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email para enviar código de verificação' })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+}
+
+export class VerifyCodeDto {
+  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email cadastrado' })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+
+  @ApiProperty({ example: '123456', description: 'Código de verificação de 6 dígitos' })
+  @IsString()
+  @IsNotEmpty({ message: 'Código é obrigatório' })
+  @MinLength(6, { message: 'Código deve ter 6 dígitos' })
+  code: string;
+}
