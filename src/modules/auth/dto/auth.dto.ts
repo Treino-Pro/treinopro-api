@@ -15,6 +15,7 @@ import {
   ValidationArguments,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { isValidCPF } from '../../../common/utils/document.utils';
 
 export enum UserType {
   STUDENT = 'student',
@@ -29,28 +30,6 @@ export enum DocumentType {
 }
 
 // ===== Validadores de documento =====
-
-function isValidCPF(cpf: string): boolean {
-  const clean = cpf.replace(/\D/g, '');
-  if (clean.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(clean)) return false; // sequência repetida
-
-  let sum = 0;
-  for (let i = 0; i < 9; i++) {
-    sum += parseInt(clean[i]) * (10 - i);
-  }
-  let rest = sum % 11;
-  const dv1 = rest < 2 ? 0 : 11 - rest;
-  if (parseInt(clean[9]) !== dv1) return false;
-
-  sum = 0;
-  for (let i = 0; i < 10; i++) {
-    sum += parseInt(clean[i]) * (11 - i);
-  }
-  rest = sum % 11;
-  const dv2 = rest < 2 ? 0 : 11 - rest;
-  return parseInt(clean[10]) === dv2;
-}
 
 function isValidCNH(cnh: string): boolean {
   const clean = cnh.replace(/\D/g, '');
@@ -306,26 +285,38 @@ export class ChangePasswordDto {
 }
 
 export class CheckEmailDto {
-  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email para verificar disponibilidade' })
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email para verificar disponibilidade',
+  })
   @IsEmail({}, { message: 'Formato de email inválido' })
   @IsNotEmpty({ message: 'Email é obrigatório' })
   email: string;
 }
 
 export class SendVerificationCodeDto {
-  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email para enviar código de verificação' })
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email para enviar código de verificação',
+  })
   @IsEmail({}, { message: 'Formato de email inválido' })
   @IsNotEmpty({ message: 'Email é obrigatório' })
   email: string;
 }
 
 export class VerifyCodeDto {
-  @ApiProperty({ example: 'usuario@exemplo.com', description: 'Email cadastrado' })
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email cadastrado',
+  })
   @IsEmail({}, { message: 'Formato de email inválido' })
   @IsNotEmpty({ message: 'Email é obrigatório' })
   email: string;
 
-  @ApiProperty({ example: '123456', description: 'Código de verificação de 6 dígitos' })
+  @ApiProperty({
+    example: '123456',
+    description: 'Código de verificação de 6 dígitos',
+  })
   @IsString()
   @IsNotEmpty({ message: 'Código é obrigatório' })
   @MinLength(6, { message: 'Código deve ter 6 dígitos' })
@@ -333,7 +324,11 @@ export class VerifyCodeDto {
 }
 
 export class CheckDocumentDto {
-  @ApiProperty({ example: 'CPF', description: 'Tipo de documento', enum: DocumentType })
+  @ApiProperty({
+    example: 'CPF',
+    description: 'Tipo de documento',
+    enum: DocumentType,
+  })
   @IsEnum(DocumentType, { message: 'Tipo de documento inválido' })
   @IsNotEmpty({ message: 'Tipo de documento é obrigatório' })
   documentType: DocumentType;

@@ -7,7 +7,6 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   Request,
   HttpCode,
   HttpStatus,
@@ -34,7 +33,6 @@ import {
   ProposalListResponseDto,
   PaymentStatusWebhookDto,
 } from './dto/proposals.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Proposals')
 @Controller('proposals')
@@ -504,7 +502,6 @@ export class ProposalsController {
     await this.proposalsService.updatePaymentStatus(
       webhookData.proposalId,
       webhookData.paymentStatus,
-      webhookData.mpPaymentId,
     );
 
     return { message: 'Status do pagamento atualizado com sucesso' };

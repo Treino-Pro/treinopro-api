@@ -27,6 +27,7 @@ import {
   sql,
   or,
   lt,
+  inArray,
 } from 'drizzle-orm';
 import {
   CreateProposalDto,
@@ -45,7 +46,6 @@ import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsGateway } from './proposals.gateway';
 import { NonceService } from '../notifications/services/nonce.service';
 import { ConflictException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { LocationsService } from '../locations/locations.service';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
@@ -330,11 +330,13 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar.
+      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
       // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
-      const statusOk = ['authorized', 'approved', 'captured'].includes(
-        String(paymentResult.status || '').toLowerCase(),
-      );
+      const paymentStatus = String(paymentResult.status || '').toLowerCase();
+      const isPix = createProposalDto.paymentMethod === 'pix';
+      const statusOk =
+        ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -618,7 +620,8 @@ export class ProposalsService {
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
+          expiresAt:
+            paymentResult.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000),
         },
       };
     } catch (error) {
@@ -732,11 +735,13 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar.
+      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
       // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
-      const statusOk = ['authorized', 'approved', 'captured'].includes(
-        String(paymentResult.status || '').toLowerCase(),
-      );
+      const paymentStatus = String(paymentResult.status || '').toLowerCase();
+      const isPix = createRecontractDto.paymentMethod === 'pix';
+      const statusOk =
+        ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -863,7 +868,8 @@ export class ProposalsService {
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
+          expiresAt:
+            paymentResult.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000),
         },
       };
     } catch (error) {
@@ -1721,7 +1727,6 @@ export class ProposalsService {
   async updatePaymentStatus(
     proposalId: string,
     paymentStatus: string,
-    mpPaymentId?: string,
   ): Promise<void> {
     // Validar parâmetros obrigatórios
     if (!proposalId || !paymentStatus) {
@@ -1792,23 +1797,19 @@ export class ProposalsService {
         return { cancelled: 0 };
       }
 
-      // Cancelar propostas expiradas
-      const cancelledCount = await this.db
+      const ids = expiredProposals.map((p) => p.id);
+
+      // 1. Cancelar todas as propostas expiradas no banco (status e paymentStatus)
+      await this.db
         .update(proposals)
         .set({
           status: ProposalStatus.CANCELLED,
           paymentStatus: 'expired',
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            eq(proposals.status, ProposalStatus.PENDING),
-            eq(proposals.paymentStatus, 'pending'),
-            lte(proposals.createdAt, thirtyMinutesAgo),
-          ),
-        );
+        .where(inArray(proposals.id, ids));
 
-      // Processar reembolsos automáticos
+      // 2. Tentar reembolso para as que já possuem pagamento registrado
       for (const proposal of expiredProposals) {
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
           try {
@@ -1823,7 +1824,7 @@ export class ProposalsService {
               error,
             );
 
-            // Marcar como erro para análise manual
+            // Marcar como erro para análise manual (status já é CANCELLED)
             await this.db
               .update(proposals)
               .set({
@@ -1929,6 +1930,10 @@ export class ProposalsService {
 
       return payment;
     } catch (error) {
+      console.error(
+        `❌ [PROPOSALS] Erro ao buscar pagamento por external reference ${externalReference}:`,
+        error,
+      );
       return null;
     }
   }
@@ -2120,7 +2125,65 @@ export class ProposalsService {
         }
       }
 
-      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (PIX, Mercado Pago, ou cartão sem ID) =====
+      // ===== PIX: CRIAR PAGAMENTO PIX VIA API MP =====
+      if (createProposalDto.paymentMethod === 'pix') {
+        console.log('🔵 [PROPOSALS] Iniciando pagamento PIX real...');
+
+        // Proteção defensiva: PIX não deve carregar cardId
+        if (createProposalDto.cardId) {
+          console.warn('⚠️ [PROPOSALS] cardId ignorado pois paymentMethod=pix');
+          createProposalDto.cardId = undefined;
+        }
+
+        if (!createProposalDto.payerEmail) {
+          throw new BadRequestException(
+            'payerEmail é obrigatório para pagamento via PIX',
+          );
+        }
+
+        const notificationUrl = process.env.API_URL
+          ? `${process.env.API_URL}/webhooks/mercadopago`
+          : undefined;
+
+        const pixResult = await this.paymentsService.createPixPayment({
+          amount: createProposalDto.price,
+          description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
+          externalReference: proposalId,
+          payerEmail: createProposalDto.payerEmail,
+          payerCpf: createProposalDto.payerCpf,
+          notificationUrl,
+        });
+
+        console.log('✅ [PROPOSALS] Pagamento PIX criado:', {
+          paymentId: pixResult.paymentId,
+          status: pixResult.status,
+          hasQrCode: !!pixResult.qrCode,
+          hasQrCodeBase64: !!pixResult.qrCodeBase64,
+        });
+
+        const pixResponse = {
+          success: true,
+          paymentId: pixResult.paymentId,
+          status: pixResult.status,
+          method: 'pix',
+          amount: createProposalDto.price,
+          qrCode: pixResult.qrCode,
+          qrCodeBase64: pixResult.qrCodeBase64,
+          checkoutUrl: pixResult.ticketUrl,
+          platformFee,
+          personalAmount,
+          message:
+            'Proposta criada com sucesso. PIX gerado; conclua o pagamento para confirmar.',
+          expiresAt: pixResult.expiresAt
+            ? new Date(pixResult.expiresAt)
+            : new Date(Date.now() + 30 * 60 * 1000),
+        };
+
+        console.log('🏁 [PROPOSALS] ===== FIM DO PAGAMENTO PIX =====');
+        return pixResponse;
+      }
+
+      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (Mercado Pago checkout ou cartão sem ID) =====
       console.log('🔄 [PROPOSALS] Iniciando fallback para Mercado Pago...');
       console.log('🔄 [PROPOSALS] Motivo do fallback:', {
         hasCardId,
@@ -2146,9 +2209,7 @@ export class ProposalsService {
 
       // Criar preferência no Mercado Pago
       const mpPreference =
-        await this.paymentsService['mercadoPagoService'].createPreference(
-          preferenceData,
-        );
+        await this.paymentsService.createMpPreference(preferenceData);
 
       console.log('✅ [PROPOSALS] Preferência MP criada:', {
         id: mpPreference.id,
@@ -2184,20 +2245,6 @@ export class ProposalsService {
         `Erro ao processar pagamento: ${error.message}`,
       );
     }
-  }
-
-  // ===== MÉTODO DE SIMULAÇÃO DESABILITADO =====
-  // Este método foi desabilitado para evitar criação de propostas sem pagamento real
-  // Em caso de erro de pagamento, a proposta não deve ser criada
-
-  private simulatePaymentForProposal(
-    createProposalDto: CreateProposalDto,
-    proposalId: string,
-  ): any {
-    // MÉTODO DESABILITADO - Não deve ser usado em produção
-    throw new BadRequestException(
-      'Simulação de pagamento desabilitada. Pagamento real é obrigatório.',
-    );
   }
 
   async getProposalStats(userId: string, userType: string): Promise<any> {
@@ -2659,7 +2706,8 @@ export class ProposalsService {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             studentProfilePicture = `${normalizedBase.origin}${original.pathname}`;
-          } catch (_) {
+          } catch (e) {
+            console.error('⚠️ Erro ao normalizar URL da imagem do aluno:', e);
             studentProfilePicture = file.url.replace(
               'https://api.treinopro.com',
               baseUrl,
@@ -2690,6 +2738,7 @@ export class ProposalsService {
         }
       }
     } catch (e) {
+      console.error('⚠️ Falha ao buscar coordenadas do local:', e);
       // Silencioso: sem coordenadas
     }
 
@@ -2915,7 +2964,11 @@ export class ProposalsService {
           }
 
           return isExpired;
-        } catch (_) {
+        } catch (e) {
+          console.error(
+            `⚠️ [PROPOSALS] Erro ao processar proposta ${p.id} para verificação de expiração:`,
+            e,
+          );
           return false;
         }
       });

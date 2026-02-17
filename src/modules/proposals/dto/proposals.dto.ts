@@ -13,8 +13,32 @@ import {
   IsEmail,
   Length,
   Matches,
+  registerDecorator,
+  ValidationOptions,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { isValidCPF } from '../../../common/utils/document.utils';
+
+function IsCpfValid(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isCpfValid',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: 'CPF inválido',
+        ...validationOptions,
+      },
+      constraints: [],
+      validator: {
+        validate(value: any) {
+          if (!value) return true; // campo opcional, deixar @IsOptional lidar
+          return isValidCPF(String(value));
+        },
+      },
+    });
+  };
+}
 
 export enum ProposalStatus {
   PENDING = 'pending',
@@ -206,6 +230,7 @@ export class CreateProposalDto {
   @IsString()
   @Length(11, 11, { message: 'CPF deve ter 11 dígitos' })
   @Matches(/^\d+$/, { message: 'CPF deve conter apenas dígitos' })
+  @IsCpfValid()
   payerCpf?: string;
 }
 

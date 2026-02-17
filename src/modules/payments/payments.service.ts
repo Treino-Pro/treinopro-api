@@ -21,12 +21,11 @@ import {
 import {
   MercadoPagoService,
   CreatePreferenceData,
+  MPPreferenceResponse,
 } from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
-  CreatePaymentDto,
   CreatePaymentPreferenceDto,
-  UpdatePaymentDto,
   CreateDisputeDto,
   SubmitEvidenceDto,
   ResolveDisputeDto,
@@ -37,9 +36,7 @@ import {
   WalletResponseDto,
   TransactionResponseDto,
   PaymentStatsDto,
-  WalletStatsDto,
   PaymentFiltersDto,
-  DisputeFiltersDto,
   PaymentStatus,
   PaymentType,
   DisputeStatus,
@@ -58,6 +55,42 @@ export class PaymentsService {
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // Delegador público para createPixPayment (evita acesso por string de index)
+  async createPixPayment(pixData: {
+    amount: number;
+    description: string;
+    externalReference: string;
+    payerEmail: string;
+    payerFirstName?: string;
+    payerLastName?: string;
+    payerCpf?: string;
+    notificationUrl?: string;
+  }): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  }> {
+    return this.mercadoPagoService.createPixPayment(pixData);
+  }
+
+  // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)
+  async getMpPayment(mpPaymentId: string): Promise<any> {
+    return this.mercadoPagoService.getPayment(mpPaymentId);
+  }
+
+  mapMpPaymentStatus(mpStatus: string): string {
+    return this.mercadoPagoService.mapPaymentStatus(mpStatus);
+  }
+
+  async createMpPreference(
+    data: CreatePreferenceData,
+  ): Promise<MPPreferenceResponse> {
+    return this.mercadoPagoService.createPreference(data);
+  }
 
   // Criar preferência de pagamento no Mercado Pago
   async createPaymentPreference(
@@ -164,7 +197,7 @@ export class PaymentsService {
     webhookDto: MercadoPagoWebhookDto,
     headers?: any,
   ): Promise<void> {
-    const { id, type, action, data } = webhookDto;
+    const { id, type } = webhookDto;
 
     // Validar webhook
     if (
@@ -201,7 +234,6 @@ export class PaymentsService {
       // Mapear status do MP para nosso sistema
       const newStatus = this.mercadoPagoService.mapPaymentStatus(
         mpPaymentData.status,
-        mpPaymentData.status_detail,
       );
 
       // Atualizar status do pagamento
@@ -871,7 +903,6 @@ export class PaymentsService {
   async processNoShowDispute(
     disputeId: string,
     resolution: 'pro_student' | 'pro_personal',
-    adminNotes?: string,
   ): Promise<void> {
     const dispute = await this.db.query.paymentDisputes.findFirst({
       where: eq(paymentDisputes.id, disputeId),

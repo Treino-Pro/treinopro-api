@@ -62,4 +62,23 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  // Mercado Pago (obrigatórios)
+  @IsString()
+  MP_ACCESS_TOKEN: string;
+
+  @IsString()
+  MP_PUBLIC_KEY: string;
+
+  @IsString()
+  MP_WEBHOOK_SECRET: string;
+
+  // URLs externas
+  @IsString()
+  @IsOptional()
+  FRONTEND_URL?: string;
+
+  @IsString()
+  @IsOptional()
+  API_URL?: string;
 }

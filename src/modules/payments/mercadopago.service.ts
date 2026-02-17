@@ -86,10 +86,6 @@ export class MercadoPagoService {
     data: CreatePreferenceData,
   ): Promise<MPPreferenceResponse> {
     try {
-      const platformFeePercentage = parseFloat(
-        process.env.PLATFORM_FEE_PERCENTAGE || '10',
-      );
-
       // Configurar preferência com split
       const preferenceData = {
         items: [
@@ -321,7 +317,7 @@ export class MercadoPagoService {
   }
 
   // Mapear status do MP para status interno
-  mapPaymentStatus(mpStatus: string, mpStatusDetail?: string): string {
+  mapPaymentStatus(mpStatus: string): string {
     switch (mpStatus) {
       case 'pending':
         return 'authorized'; // Em custódia
@@ -358,6 +354,111 @@ export class MercadoPagoService {
     }
 
     return true;
+  }
+
+  // Criar pagamento via PIX (retorna QR Code)
+  async createPixPayment(pixData: {
+    amount: number;
+    description: string;
+    externalReference: string;
+    payerEmail: string;
+    payerFirstName?: string;
+    payerLastName?: string;
+    payerCpf?: string;
+    notificationUrl?: string;
+  }): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  }> {
+    const accessToken = process.env.MP_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new BadRequestException(
+        'Configuracao do Mercado Pago incompleta: MP_ACCESS_TOKEN, MP_PUBLIC_KEY e MP_WEBHOOK_SECRET sao obrigatorios.',
+      );
+    }
+
+    this.logger.log(
+      `🔵 [PIX] Criando pagamento PIX para referência: ${pixData.externalReference}`,
+    );
+
+    const body: any = {
+      transaction_amount: pixData.amount,
+      description: (pixData.description || 'Treino').slice(0, 60),
+      payment_method_id: 'pix',
+      external_reference: pixData.externalReference,
+      payer: {
+        email: pixData.payerEmail,
+        first_name: pixData.payerFirstName || 'Aluno',
+        last_name: pixData.payerLastName || 'TreinoPro',
+        ...(pixData.payerCpf
+          ? {
+              identification: {
+                type: 'CPF',
+                number: pixData.payerCpf.replace(/\D/g, ''),
+              },
+            }
+          : {}),
+      },
+    };
+
+    if (pixData.notificationUrl) {
+      body.notification_url = pixData.notificationUrl;
+    }
+
+    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': `pix_${pixData.externalReference}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { message: responseText };
+      }
+      this.logger.error(`❌ [PIX] Erro ao criar pagamento PIX:`, errorData);
+      throw new BadRequestException(
+        `Erro ao processar pagamento: ${errorData.message || 'Erro desconhecido'}`,
+      );
+    }
+
+    const data = JSON.parse(responseText);
+    const transactionData = data?.point_of_interaction?.transaction_data;
+
+    if (!transactionData?.qr_code) {
+      this.logger.error(
+        `❌ [PIX] Resposta sem QR Code. Status: ${data.status}`,
+        data,
+      );
+      throw new BadRequestException(
+        'Pagamento nao foi processado automaticamente. Por favor, escolha outro metodo de pagamento.',
+      );
+    }
+
+    this.logger.log(
+      `✅ [PIX] Pagamento PIX criado: ${data.id} | Status: ${data.status}`,
+    );
+
+    return {
+      paymentId: String(data.id),
+      status: data.status,
+      qrCode: transactionData.qr_code,
+      qrCodeBase64: transactionData.qr_code_base64 || '',
+      ticketUrl: transactionData.ticket_url,
+      expiresAt: data.date_of_expiration,
+    };
   }
 
   // Criar pagamento direto (autorização/captura)

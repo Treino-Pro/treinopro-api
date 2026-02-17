@@ -4,23 +4,17 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
+import { eq, and } from 'drizzle-orm';
 import {
   studentPaymentMethods,
   savedCards,
-  autoPaymentSettings,
   users,
   classes,
   payments,
-  studentPaymentMethodsRelations,
-  savedCardsRelations,
-  autoPaymentSettingsRelations,
 } from '../../database/schema';
 import { db } from '../../database/connection';
 import { MercadoPagoService } from './mercadopago.service';
 import { PaymentsService } from './payments.service';
-import { PaymentStatus } from './dto/payments.dto';
 import {
   SaveCardDto,
   UpdateStudentPaymentMethodsDto,
@@ -28,11 +22,7 @@ import {
   ProcessClassPaymentDto,
   PaymentProcessResponseDto,
   ValidateCardDto,
-  StudentPaymentHistoryDto,
-  StudentPaymentStatsDto,
-  AutoPaymentSettingsDto,
   RemoveCardDto,
-  UpdateCardDto,
   StudentPaymentMethod,
   CardBrand,
   CardType,
@@ -1080,7 +1070,7 @@ export class StudentPaymentMethodsService {
 
       case StudentPaymentMethod.PIX:
         console.log('📱 [PROPOSAL PAYMENT] Processando pagamento via PIX...');
-        return this.processPixPayment(userId, processDto, proposalData);
+        return this.processPixPayment();
 
       default:
         console.log(
@@ -1166,7 +1156,7 @@ export class StudentPaymentMethodsService {
 
       case StudentPaymentMethod.PIX:
         console.log('📱 [STUDENT PAYMENT] Processando pagamento via PIX...');
-        return this.processPixPayment(userId, processDto, classData);
+        return this.processPixPayment();
 
       default:
         console.log(
@@ -1371,7 +1361,6 @@ export class StudentPaymentMethodsService {
     // ✅ CORRIGIDO: Usar updatePaymentStatus para garantir repasse em simulações
     const mappedStatus = this.mercadoPagoService.mapPaymentStatus(
       mpPayment.status,
-      mpPayment.status_detail,
     );
 
     await this.paymentsService.updatePaymentStatus(
@@ -1841,11 +1830,7 @@ export class StudentPaymentMethodsService {
   }
 
   // Processar pagamento via PIX
-  private async processPixPayment(
-    userId: string,
-    processDto: ProcessClassPaymentDto,
-    classData: any,
-  ): Promise<PaymentProcessResponseDto> {
+  private async processPixPayment(): Promise<PaymentProcessResponseDto> {
     // TODO: Implementar geração de PIX via Mercado Pago
     const amount = 100;
     const mockQrCode = 'pix_qr_code_' + Date.now();

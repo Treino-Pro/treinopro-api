@@ -21,7 +21,6 @@ import { PaymentStatus } from './dto/payments.dto';
 import { db } from '../../database/connection';
 import { users } from '../../database/schema';
 import { eq } from 'drizzle-orm';
-import { Public } from '../../common/decorators/public.decorator';
 import { CardType } from './dto/student-payment-methods.dto';
 
 export interface RemoveCardDto {
@@ -54,31 +53,30 @@ export class PaymentsController {
   // ===== STUDENT PAYMENT METHODS =====
 
   @Get('test/public')
-  @Public()
   async publicTest() {
-    console.log('🌐 [PUBLIC TEST] Endpoint público chamado');
+    // Endpoint restrito a ambientes não-produção
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException('Endpoint indisponivel em producao');
+    }
 
     try {
       if (!db) {
         return { error: 'Conexão com banco não disponível' };
       }
 
-      // Teste simples de query
       const userCount = await db.select().from(users).limit(1);
 
       return {
         success: true,
-        message: 'Endpoint público funcionando',
+        message: 'Endpoint de diagnóstico (apenas desenvolvimento)',
         databaseConnected: true,
         userCount: userCount.length,
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      console.error('❌ [PUBLIC TEST] Erro:', error);
       return {
         success: false,
         error: error.message,
-        stack: error.stack,
       };
     }
   }
@@ -553,7 +551,6 @@ export class PaymentsController {
     @Request() req,
     @Param('classId') classId: string,
   ) {
-    const userId = req.user.sub;
     console.log(
       `🧪 [TEST_CAPTURE] Testando captura manual para aula ${classId}`,
     );

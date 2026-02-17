@@ -16,7 +16,7 @@ export class PaymentJobsProcessor {
 
   @Process('timeout-payment')
   async handlePaymentTimeout(job: Job<PaymentTimeoutJobData>): Promise<void> {
-    const { paymentId, proposalId, classId, timeoutMinutes } = job.data;
+    const { paymentId, proposalId, classId } = job.data;
 
     this.logger.log(`⏰ Processando timeout de pagamento: ${paymentId}`);
 
@@ -109,14 +109,14 @@ export class PaymentJobsProcessor {
       const payment = payments.find((p) => p.id === paymentId) || null;
 
       if (payment && payment.mpPaymentId) {
-        const mpPayment = await this.paymentsService[
-          'mercadoPagoService'
-        ].getPayment(payment.mpPaymentId);
+        const mpPayment = await this.paymentsService.getMpPayment(
+          payment.mpPaymentId,
+        );
 
         if (mpPayment) {
-          const newStatus = this.paymentsService[
-            'mercadoPagoService'
-          ].mapPaymentStatus(mpPayment.status, mpPayment.status_detail);
+          const newStatus = this.paymentsService.mapMpPaymentStatus(
+            mpPayment.status,
+          );
 
           if (newStatus !== payment.status) {
             // Comentando temporariamente até ajustar os tipos
