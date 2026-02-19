@@ -8,6 +8,7 @@ import {
   CrefFormatted,
 } from './interfaces/cref.interface';
 import { CrefCacheService } from './cref-cache.service';
+import { CrefTechnicalErrorException } from './exceptions/cref-technical.exception';
 
 @Injectable()
 export class CrefService {
@@ -89,11 +90,17 @@ export class CrefService {
       return validationResult;
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na validação: ${error.message}`);
+      // Erros de negócio (formato inválido, CREF não encontrado, não bacharel) propagam diretamente
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(
-        `Erro na validação do CREF: ${error.message}`,
+      // Erros técnicos recuperáveis (rede, timeout, serviço instável) são sinalizados via exceção própria
+      if (error instanceof CrefTechnicalErrorException) {
+        throw error;
+      }
+      throw new CrefTechnicalErrorException(
+        `Falha técnica ao validar CREF: ${error.message}`,
+        error,
       );
     }
   }
@@ -181,7 +188,7 @@ export class CrefService {
       return this.processConfefResponse(response.data, crefNumber);
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na consulta CONFEF: ${error.message}`);
-      throw new Error('Falha na consulta ao CONFEF');
+      throw new CrefTechnicalErrorException('Falha na consulta ao CONFEF', error);
     }
   }
 

@@ -9,6 +9,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto, UserType, DocumentType } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
+import { CrefTechnicalErrorException } from '../cref/exceptions/cref-technical.exception';
 import * as bcrypt from 'bcryptjs';
 
 // Mock do banco de dados
@@ -324,6 +325,116 @@ describe('AuthService', () => {
         BadRequestException,
       );
       expect(mockCrefService.validateCref).toHaveBeenCalledWith('SP-106227');
+    });
+
+    it('deve registrar personal com approval_status=approved quando CREF é validado com sucesso', async () => {
+      // Arrange
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+      mockDb.insert.mockReturnValue({
+        values: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: '2',
+              email: validPersonalDto.email,
+              firstName: validPersonalDto.firstName,
+              lastName: validPersonalDto.lastName,
+              userType: 'personal',
+              isVerified: false,
+              approvalStatus: 'approved',
+            },
+          ]),
+        }),
+      });
+      mockJwtService.signAsync.mockResolvedValue('mock-access-token');
+      mockConfigService.get.mockReturnValue('mock-secret');
+      mockCrefService.validateCref.mockResolvedValue({
+        isValid: true,
+        crefNumber: 'SP-106227',
+        nome: 'Maria Silva',
+        situacao: 'BACHAREL',
+        uf: 'SP',
+        validatedAt: new Date(),
+        details: 'Validação bem-sucedida',
+      });
+      mockCrefService.parseCrefNumber.mockReturnValue({
+        uf: 'SP',
+        numero: '106227',
+        full: 'SP-106227',
+      });
+
+      // Act
+      const result = await service.register(validPersonalDto);
+
+      // Assert
+      expect(result.user.approvalStatus).toBe('approved');
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+
+      // Verificar que a inserção foi chamada com approvalStatus = 'approved'
+      const insertValues = mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
+      expect(insertValues.approvalStatus).toBe('approved');
+    });
+
+    it('deve registrar personal com approval_status=pending_review quando CREF falha por erro técnico', async () => {
+      // Arrange
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+      mockDb.insert.mockReturnValue({
+        values: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([
+            {
+              id: '3',
+              email: validPersonalDto.email,
+              firstName: validPersonalDto.firstName,
+              lastName: validPersonalDto.lastName,
+              userType: 'personal',
+              isVerified: false,
+              approvalStatus: 'pending_review',
+            },
+          ]),
+        }),
+      });
+      mockJwtService.signAsync.mockResolvedValue('mock-access-token');
+      mockConfigService.get.mockReturnValue('mock-secret');
+
+      // Simular falha técnica do CONFEF
+      mockCrefService.validateCref.mockRejectedValue(
+        new CrefTechnicalErrorException('Timeout ao conectar com CONFEF'),
+      );
+      mockCrefService.parseCrefNumber.mockReturnValue({
+        uf: 'SP',
+        numero: '106227',
+        full: 'SP-106227',
+      });
+
+      // Act
+      const result = await service.register(validPersonalDto);
+
+      // Assert - contrato mantido: tokens retornados
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(result).toHaveProperty('user');
+      expect(result.user.approvalStatus).toBe('pending_review');
+
+      // Verificar que inserção inclui approval_status=pending_review e adminNotes
+      const insertValues = mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
+      expect(insertValues.approvalStatus).toBe('pending_review');
+      expect(insertValues.adminNotes).toContain('Aprovação manual necessária');
+    });
+
+    it('deve bloquear cadastro de personal quando CREF tem erro de negócio', async () => {
+      // Arrange
+      mockDb.query.users.findFirst.mockResolvedValue(null);
+      mockCrefService.validateCref.mockRejectedValue(
+        new BadRequestException('CREF não encontrado no CONFEF'),
+      );
+
+      // Act & Assert
+      await expect(service.register(validPersonalDto)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      // Usuário NÃO deve ser inserido no banco
+      expect(mockDb.insert).not.toHaveBeenCalled();
     });
   });
 

@@ -24,6 +24,11 @@ export const userStatusEnum = pgEnum('user_status', [
   'suspended',
 ]);
 export const documentTypeEnum = pgEnum('document_type', ['RG', 'CNH', 'CPF']);
+export const personalApprovalStatusEnum = pgEnum('personal_approval_status', [
+  'pending_review',
+  'approved',
+  'rejected',
+]);
 
 // Users table
 export const users = pgTable(
@@ -77,6 +82,16 @@ export const users = pgTable(
     profileImageId: uuid('profile_image_id').references(() => files.id),
     isVerified: boolean('is_verified').default(false),
     status: userStatusEnum('status').default('active'),
+
+    // Aprovação profissional do personal trainer (separado do status da conta)
+    approvalStatus: personalApprovalStatusEnum('approval_status')
+      .notNull()
+      .default('approved'),
+    adminNotes: text('admin_notes'),
+    approvalReviewedAt: timestamp('approval_reviewed_at'),
+    approvalReviewedBy: uuid('approval_reviewed_by').references(
+      (): any => users.id,
+    ),
 
     // Firebase Cloud Messaging
     fcmToken: text('fcm_token'),

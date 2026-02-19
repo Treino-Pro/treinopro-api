@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import {
   users,
@@ -33,6 +34,8 @@ import * as fs from 'fs/promises';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
   async getDashboardSummary() {
@@ -171,6 +174,7 @@ export class AdminService {
     userType?: string;
     status?: string;
     isVerified?: boolean;
+    approvalStatus?: string;
   }) {
     const page = filters?.page ?? 1;
     const limit = filters?.limit ?? 20;
@@ -190,15 +194,19 @@ export class AdminService {
     }
 
     if (filters?.userType) {
-      conditions.push(eq(users.userType, filters.userType));
+      conditions.push(eq(users.userType, filters.userType as any));
     }
 
     if (filters?.status) {
-      conditions.push(eq(users.status, filters.status));
+      conditions.push(eq(users.status, filters.status as any));
     }
 
     if (filters?.isVerified !== undefined) {
       conditions.push(eq(users.isVerified, filters.isVerified));
+    }
+
+    if (filters?.approvalStatus) {
+      conditions.push(eq(users.approvalStatus, filters.approvalStatus as any));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -213,6 +221,7 @@ export class AdminService {
         userType: users.userType,
         status: users.status,
         isVerified: users.isVerified,
+        approvalStatus: users.approvalStatus,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
       })
@@ -351,6 +360,9 @@ export class AdminService {
       userType: user.userType,
       status: user.status,
       isVerified: user.isVerified,
+      approvalStatus: user.approvalStatus,
+      adminNotes: user.adminNotes,
+      approvalReviewedAt: user.approvalReviewedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       birthDate: user.birthDate,
@@ -465,6 +477,106 @@ export class AdminService {
       .set(allowed)
       .where(eq(users.id, id))
       .returning();
+    return updated;
+  }
+
+  // ===== APROVAÇÃO PROFISSIONAL DE PERSONALS =====
+
+  async listPendingPersonals(filters?: { page?: number; limit?: number }) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 20;
+    const offset = (page - 1) * limit;
+
+    const [pendingList, totalResult] = await Promise.all([
+      this.db
+        .select({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          cref: users.cref,
+          crefImageId: users.crefImageId,
+          approvalStatus: users.approvalStatus,
+          adminNotes: users.adminNotes,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(
+          and(
+            eq(users.userType, 'personal'),
+            eq(users.approvalStatus, 'pending_review'),
+          ),
+        )
+        .orderBy(desc(users.createdAt))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ total: count() })
+        .from(users)
+        .where(
+          and(
+            eq(users.userType, 'personal'),
+            eq(users.approvalStatus, 'pending_review'),
+          ),
+        ),
+    ]);
+
+    const total = totalResult[0]?.total ?? 0;
+
+    return {
+      items: pendingList,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  async reviewPersonalApproval(
+    personalId: string,
+    decision: { status: 'approved' | 'rejected'; notes?: string },
+    reviewerId: string,
+  ) {
+    const personal = await this.db.query.users.findFirst({
+      where: and(
+        eq(users.id, personalId),
+        eq(users.userType, 'personal'),
+      ),
+      columns: { id: true, approvalStatus: true, email: true },
+    });
+
+    if (!personal) {
+      throw new NotFoundException('Personal Trainer não encontrado');
+    }
+
+    const [updated] = await this.db
+      .update(users)
+      .set({
+        approvalStatus: decision.status,
+        adminNotes: decision.notes ?? null,
+        approvalReviewedAt: new Date(),
+        approvalReviewedBy: reviewerId,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, personalId))
+      .returning({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        approvalStatus: users.approvalStatus,
+        adminNotes: users.adminNotes,
+        approvalReviewedAt: users.approvalReviewedAt,
+      });
+
+    const event =
+      decision.status === 'approved'
+        ? 'personal_manual_approved'
+        : 'personal_manual_rejected';
+    this.logger.log(
+      `[ADMIN] ${event}: personalId=${personalId} reviewerId=${reviewerId} notes=${decision.notes ?? ''}`,
+    );
+
     return updated;
   }
 

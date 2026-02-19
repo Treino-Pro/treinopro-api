@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Put,
+  Patch,
   Param,
   Body,
   Query,
@@ -39,6 +40,8 @@ import {
   UpdateMissionDto,
   AnalyticsResponseDto,
   ResolveClassDisputeDto,
+  ReviewPersonalApprovalDto,
+  PendingPersonalItemDto,
 } from './dto/admin.dto';
 import {
   ApproveWithdrawalDto,
@@ -136,6 +139,12 @@ export class AdminController {
     type: Boolean,
     description: 'Filtro por verificação (true/false)',
   })
+  @ApiQuery({
+    name: 'approvalStatus',
+    required: false,
+    enum: ['pending_review', 'approved', 'rejected'],
+    description: 'Filtro por status de aprovação profissional (personals)',
+  })
   @ApiOperation({
     summary: 'Listar usuários da plataforma',
     description: 'Retorna lista paginada de usuários com filtros e busca',
@@ -160,6 +169,7 @@ export class AdminController {
     @Query('userType') userType?: string,
     @Query('status') status?: string,
     @Query('isVerified') isVerified?: string,
+    @Query('approvalStatus') approvalStatus?: string,
   ): Promise<UserListResponseDto> {
     const filters = {
       page: page ? parseInt(page, 10) : undefined,
@@ -173,6 +183,7 @@ export class AdminController {
           : isVerified === 'false'
             ? false
             : undefined,
+      approvalStatus,
     };
     return this.adminService.listUsers(filters);
   }
@@ -245,6 +256,53 @@ export class AdminController {
     @Body() body: UpdateUserDto,
   ): Promise<UserItemDto> {
     return this.adminService.updateUser(id, body);
+  }
+
+  // ===== APROVAÇÃO PROFISSIONAL DE PERSONALS =====
+
+  @Get('personals/pending')
+  @ApiOperation({
+    summary: 'Listar personals com aprovação pendente',
+    description:
+      'Retorna personals com approval_status = pending_review aguardando análise manual',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de personals pendentes retornada com sucesso',
+    type: [PendingPersonalItemDto],
+  })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
+  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  async listPendingPersonals(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ items: PendingPersonalItemDto[]; total: number; totalPages: number }> {
+    const filters: { page?: number; limit?: number } = {};
+    if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
+    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    return this.adminService.listPendingPersonals(filters);
+  }
+
+  @Patch('personals/:id/approval')
+  @ApiOperation({
+    summary: 'Aprovar ou rejeitar personal trainer',
+    description:
+      'Registra decisão de aprovação manual com notas e auditoria de quem decidiu',
+  })
+  @ApiParam({ name: 'id', description: 'ID do personal trainer' })
+  @ApiResponse({ status: 200, description: 'Decisão registrada com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  @ApiResponse({ status: 404, description: 'Personal não encontrado' })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
+  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  async reviewPersonalApproval(
+    @Param('id') id: string,
+    @Body() body: ReviewPersonalApprovalDto,
+    @Request() req: { user: { sub: string } },
+  ) {
+    return this.adminService.reviewPersonalApproval(id, body, req.user.sub);
   }
 
   // ===== FINANCIAL =====

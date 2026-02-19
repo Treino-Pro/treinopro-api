@@ -12,6 +12,7 @@ import {
   HttpStatus,
   ParseUUIDPipe,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,6 +25,7 @@ import {
 import { ProposalsService } from './proposals.service';
 import { ProposalCleanupService } from './proposal-cleanup.service';
 import { ProposalBackgroundService } from './proposal-background.service';
+import { PersonalApprovalGuard } from '../../common/guards/personal-approval.guard';
 import {
   CreateProposalDto,
   CreateRecontractDto,
@@ -430,6 +432,7 @@ export class ProposalsController {
   }
 
   @Post(':id/accept')
+  @UseGuards(PersonalApprovalGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Aceitar proposta',

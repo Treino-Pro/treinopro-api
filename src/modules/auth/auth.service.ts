@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -23,12 +24,14 @@ import {
   DocumentType,
 } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
+import { CrefTechnicalErrorException } from '../cref/exceptions/cref-technical.exception';
 import { EmailVerificationService } from './services/email-verification.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly USER_CACHE_TTL = 300; // 5 minutos em segundos
   private readonly USER_CACHE_PREFIX = 'user:';
   private readonly USER_EMAIL_CACHE_PREFIX = 'user:email:';
@@ -195,6 +198,8 @@ export class AuthService {
       // Validar CREF para Personal Trainers
       let crefValidation = null;
       let crefParsed = null;
+      let crefApprovalStatus: 'approved' | 'pending_review' = 'approved';
+      let crefAdminNotes: string | null = null;
 
       if (userType === 'personal') {
         if (!cref) {
@@ -210,16 +215,44 @@ export class AuthService {
 
         console.log('🔍 [AUTH] Validando CREF:', cref);
 
-        // Validar CREF via API do CONFEF
+        // Validar CREF via API do CONFEF com fallback seletivo:
+        // - Erro de negócio (BadRequestException): CREF inválido/não encontrado/não bacharel → bloquear cadastro
+        // - Erro técnico (CrefTechnicalErrorException): instabilidade do CONFEF → fallback manual
         try {
           crefValidation = await this.crefService.validateCref(cref);
           crefParsed = this.crefService.parseCrefNumber(cref);
+          crefApprovalStatus = 'approved';
           console.log('✅ [AUTH] CREF validado com sucesso:', crefValidation);
-        } catch (error) {
-          console.error('❌ [AUTH] Erro na validação do CREF:', error.message);
-          throw new BadRequestException(
-            `Erro na validação do CREF: ${error.message}`,
+          this.logger.log(
+            `[AUTH] cref_validation_auto_success: CREF=${cref} user=${email}`,
           );
+        } catch (error) {
+          if (error instanceof BadRequestException) {
+            // Erro de negócio: formato inválido, não encontrado, não bacharel
+            console.error(
+              '❌ [AUTH] Erro de negócio na validação do CREF:',
+              error.message,
+            );
+            this.logger.warn(
+              `[AUTH] cref_validation_business_error: CREF=${cref} user=${email} reason=${error.message}`,
+            );
+            throw error;
+          }
+          // Erro técnico recuperável: CONFEF instável, timeout, rede, etc.
+          const technicalMsg =
+            error instanceof CrefTechnicalErrorException
+              ? error.message
+              : `Erro técnico inesperado: ${error.message}`;
+          console.warn(
+            '⚠️ [AUTH] Erro técnico no CONFEF, acionando aprovação manual:',
+            technicalMsg,
+          );
+          this.logger.warn(
+            `[AUTH] cref_validation_auto_fallback_manual: CREF=${cref} user=${email} reason=${technicalMsg}`,
+          );
+          crefApprovalStatus = 'pending_review';
+          crefAdminNotes = `Aprovação manual necessária. Validação automática do CONFEF falhou em ${new Date().toISOString()}: ${technicalMsg}`;
+          crefParsed = this.crefService.parseCrefNumber(cref);
         }
       }
 
@@ -240,6 +273,7 @@ export class AuthService {
         userType,
         cref,
         specialties,
+        approvalStatus: crefApprovalStatus,
       });
 
       const [newUser] = await this.db
@@ -281,6 +315,8 @@ export class AuthService {
           termsAccepted,
           privacyPolicyAccepted,
           termsAcceptedDate: new Date(),
+          approvalStatus: crefApprovalStatus,
+          adminNotes: crefAdminNotes,
         })
         .returning();
 
@@ -324,6 +360,7 @@ export class AuthService {
           lastName: newUser.lastName,
           userType: newUser.userType,
           isVerified: newUser.isVerified,
+          approvalStatus: newUser.approvalStatus,
         },
         ...tokens,
       };
@@ -392,6 +429,7 @@ export class AuthService {
         cref: true,
         isVerified: true,
         profileImageId: true,
+        approvalStatus: true,
       },
     });
 
@@ -503,6 +541,7 @@ export class AuthService {
           userType: user.userType,
           isVerified: user.isVerified,
           profileImageUrl: profileImageUrl,
+          approvalStatus: user.approvalStatus ?? 'approved',
         },
         ...tokens,
       };
@@ -696,6 +735,7 @@ export class AuthService {
               document: true,
               cref: true,
               isVerified: true,
+              approvalStatus: true,
             },
           });
 
@@ -745,6 +785,7 @@ export class AuthService {
           lastName: user.lastName || payload.lastName || '',
           userType: user.userType || payload.userType,
           isVerified: user.isVerified !== undefined ? user.isVerified : true,
+          approvalStatus: user.approvalStatus ?? 'approved',
         },
         ...tokens,
       };
