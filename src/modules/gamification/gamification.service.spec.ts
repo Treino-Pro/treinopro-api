@@ -1,10 +1,26 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getQueueToken } from '@nestjs/bull';
 import { GamificationService } from './gamification.service';
+import { ChatGateway } from '../chat/chat.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   XPSource,
   MissionType,
   AchievementCategory,
 } from '../../database/schema';
+
+// Mocks de dependências extras
+const mockChatGateway = {
+  emitGamificationEvent: jest.fn(),
+};
+
+const mockEventsQueue = {
+  add: jest.fn(),
+};
+
+const mockNotificationsService = {
+  sendNotification: jest.fn(),
+};
 
 // Mock do banco de dados
 const mockDb = {
@@ -44,6 +60,18 @@ describe('GamificationService', () => {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
         },
+        {
+          provide: ChatGateway,
+          useValue: mockChatGateway,
+        },
+        {
+          provide: getQueueToken('gamification-events'),
+          useValue: mockEventsQueue,
+        },
+        {
+          provide: NotificationsService,
+          useValue: mockNotificationsService,
+        },
       ],
     }).compile();
 
@@ -61,11 +89,12 @@ describe('GamificationService', () => {
   describe('getUserProfile', () => {
     it('should return user profile if exists', async () => {
       const userId = 'user-1';
+      // totalXP=2050 → student level formula: 100+250+500+1000=1850 → level 5, currentLevelXP=200
       const mockProfile = {
         id: 'profile-1',
         userId,
         level: 5,
-        totalXP: 1000,
+        totalXP: 2050,
         currentLevelXP: 200,
         achievements: [],
         missions: [],
@@ -73,10 +102,27 @@ describe('GamificationService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.select.mockReturnValue({
+      // 1. User existence check
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ id: userId }]),
+          }),
+        }),
+      });
+      // 2. Profile query
+      mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue([mockProfile]),
+          }),
+        }),
+      });
+      // 3. userType query (to recalculate level)
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
           }),
         }),
       });
@@ -91,30 +137,46 @@ describe('GamificationService', () => {
 
     it('should create initial profile if not exists', async () => {
       const userId = 'user-1';
+      const newProfile = {
+        id: 'profile-1',
+        userId,
+        level: 1,
+        totalXP: 0,
+        currentLevelXP: 0,
+        achievements: [],
+        missions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-      mockDb.select.mockReturnValue({
+      // 1. User existence check in getUserProfile
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ id: userId }]),
+          }),
+        }),
+      });
+      // 2. Profile query → empty (triggers createInitialProfile)
+      mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue([]),
           }),
         }),
       });
-
-      mockDb.insert.mockReturnValue({
+      // 3. User/userType check inside createInitialProfile
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student', id: userId }]),
+          }),
+        }),
+      });
+      // 4. Insert userProfile returning
+      mockDb.insert.mockReturnValueOnce({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([
-            {
-              id: 'profile-1',
-              userId,
-              level: 1,
-              totalXP: 0,
-              currentLevelXP: 0,
-              achievements: [],
-              missions: [],
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ]),
+          returning: jest.fn().mockResolvedValue([newProfile]),
         }),
       });
 
@@ -130,7 +192,6 @@ describe('GamificationService', () => {
     it('should add XP without level up', async () => {
       const userId = 'user-1';
       const addXPDto = {
-        userId,
         xpAmount: 25,
         source: XPSource.CLASS_COMPLETION,
         sourceId: 'class-1',
@@ -167,7 +228,7 @@ describe('GamificationService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       });
 
-      const result = await service.addXP(addXPDto);
+      const result = await service.addXP(userId, addXPDto);
 
       expect(result).toBeNull(); // Não subiu de nível
     });
@@ -175,7 +236,6 @@ describe('GamificationService', () => {
     it('should add XP with level up', async () => {
       const userId = 'user-1';
       const addXPDto = {
-        userId,
         xpAmount: 100,
         source: XPSource.CLASS_COMPLETION,
         sourceId: 'class-1',
@@ -212,7 +272,7 @@ describe('GamificationService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       });
 
-      const result = await service.addXP(addXPDto);
+      const result = await service.addXP(userId, addXPDto);
 
       expect(result).toEqual({
         userId,
@@ -306,8 +366,7 @@ describe('GamificationService', () => {
 
       await service.processClassCompletion(userId, classId);
 
-      expect(service.addXP).toHaveBeenCalledWith({
-        userId,
+      expect(service.addXP).toHaveBeenCalledWith(userId, {
         xpAmount: 10,
         source: XPSource.CLASS_COMPLETION,
         sourceId: classId,
