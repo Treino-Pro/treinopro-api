@@ -89,8 +89,12 @@ export const classPresenceSnapshots = pgTable(
   'class_presence_snapshots',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    classId: uuid('class_id').notNull(),
-    userId: uuid('user_id').notNull(),
+    classId: uuid('class_id')
+      .notNull()
+      .references(() => classes.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
     role: presenceRoleEnum('role').notNull(),
     latitude: decimal('latitude', { precision: 10, scale: 8 }).notNull(),
     longitude: decimal('longitude', { precision: 11, scale: 8 }).notNull(),
