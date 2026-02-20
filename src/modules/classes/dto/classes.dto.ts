@@ -370,15 +370,17 @@ export class ClassResponseDto {
 
   @ApiPropertyOptional({
     description: 'Evidências enviadas pelo aluno',
-    example: 'Foto do local de treino',
+    example: ['Foto do local de treino'],
+    type: [String],
   })
-  studentEvidence?: string;
+  studentEvidence?: string[];
 
   @ApiPropertyOptional({
     description: 'Evidências enviadas pelo personal',
-    example: 'Foto do local de treino',
+    example: ['Foto do local de treino'],
+    type: [String],
   })
-  personalEvidence?: string;
+  personalEvidence?: string[];
 
   @ApiPropertyOptional({
     description: 'Resolução da disputa',
@@ -821,14 +823,16 @@ export class ClassDisputeDto {
   reportedAt: Date;
 
   @ApiPropertyOptional({
-    description: 'Evidências do aluno (JSON array de URLs)',
+    description: 'Evidências do aluno (lista de URLs)',
+    type: [String],
   })
-  studentEvidence?: string;
+  studentEvidence?: string[];
 
   @ApiPropertyOptional({
-    description: 'Evidências do personal (JSON array de URLs)',
+    description: 'Evidências do personal (lista de URLs)',
+    type: [String],
   })
-  personalEvidence?: string;
+  personalEvidence?: string[];
 
   @ApiPropertyOptional({ description: 'Texto de defesa do aluno' })
   studentDefenseText?: string;

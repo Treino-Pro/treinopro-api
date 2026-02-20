@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClassesController } from './classes.controller';
 import { ClassesService } from './classes.service';
+import { ClassesCleanupService } from './classes-cleanup.service';
 import {
   CreateClassDto,
   UpdateClassDto,
@@ -49,6 +50,12 @@ describe('ClassesController', () => {
             completeClass: jest.fn(),
             cancelClass: jest.fn(),
             getClassStats: jest.fn(),
+          },
+        },
+        {
+          provide: ClassesCleanupService,
+          useValue: {
+            processAllTimeouts: jest.fn(),
           },
         },
       ],

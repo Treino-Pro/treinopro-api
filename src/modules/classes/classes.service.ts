@@ -1772,6 +1772,7 @@ export class ClassesService {
             or(
               eq(classes.status, ClassStatus.CUSTODY),
               eq(classes.status, ClassStatus.COMPLETED),
+              eq(classes.status, ClassStatus.CANCELLED),
             ),
             sql`${classes.noShowReportedAt} IS NOT NULL`,
           ),
@@ -1874,16 +1875,17 @@ export class ClassesService {
       reportedUserName: reportedUserName || null,
       status: dispute.disputeStatus || 'pending',
       reportedAt: dispute.noShowReportedAt || dispute.createdAt,
-      studentEvidence: dispute.studentEvidence || null,
-      personalEvidence: dispute.personalEvidence || null,
+      custodyExpiresAt: dispute.custodyExpiresAt || dispute.createdAt,
+      evidenceDeadline: dispute.evidenceDeadline || dispute.createdAt,
+      studentEvidence: this.parseEvidence(dispute.studentEvidence),
+      personalEvidence: this.parseEvidence(dispute.personalEvidence),
+      // Novos campos
       studentDefenseText: dispute.studentDefenseText || null,
       personalDefenseText: dispute.personalDefenseText || null,
       studentDefenseSubmittedAt: dispute.studentDefenseSubmittedAt || null,
       personalDefenseSubmittedAt: dispute.personalDefenseSubmittedAt || null,
       resolution: dispute.resolution || null,
       resolvedAt: dispute.resolvedAt || null,
-      custodyExpiresAt: dispute.custodyExpiresAt || dispute.createdAt,
-      evidenceDeadline: dispute.evidenceDeadline || dispute.createdAt,
       // Geolocalização
       reporterHasSnapshot: !!reporterSnapshot,
       reportedHasSnapshot: !!reportedSnapshot,
@@ -2009,8 +2011,8 @@ export class ClassesService {
       disputeStatus: classData.disputeStatus,
       custodyExpiresAt: classData.custodyExpiresAt,
       evidenceDeadline: classData.evidenceDeadline,
-      studentEvidence: classData.studentEvidence,
-      personalEvidence: classData.personalEvidence,
+      studentEvidence: classData.studentEvidence ? JSON.parse(classData.studentEvidence) : [],
+      personalEvidence: classData.personalEvidence ? JSON.parse(classData.personalEvidence) : [],
       resolution: classData.resolution,
       resolvedAt: classData.resolvedAt,
       // Campos de defesa
@@ -2315,10 +2317,14 @@ export class ClassesService {
           disputeStatus: classData.disputeStatus,
           custodyExpiresAt: classData.custodyExpiresAt,
           evidenceDeadline: classData.evidenceDeadline,
-          studentEvidence: classData.studentEvidence,
-          personalEvidence: classData.personalEvidence,
+          studentEvidence: this.parseEvidence(classData.studentEvidence),
+          personalEvidence: this.parseEvidence(classData.personalEvidence),
           resolution: classData.resolution,
           resolvedAt: classData.resolvedAt,
+          studentDefenseText: classData.studentDefenseText || null,
+          personalDefenseText: classData.personalDefenseText || null,
+          studentDefenseSubmittedAt: classData.studentDefenseSubmittedAt || null,
+          personalDefenseSubmittedAt: classData.personalDefenseSubmittedAt || null,
           createdAt: classData.createdAt,
           updatedAt: classData.updatedAt,
           student: student
@@ -2536,6 +2542,17 @@ export class ClassesService {
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao calcular stats do aluno:', error);
       return { rating: null }; // null em caso de erro
+    }
+  }
+
+  private parseEvidence(evidence: string | null): string[] {
+    if (!evidence) return [];
+    try {
+      const parsed = JSON.parse(evidence);
+      if (Array.isArray(parsed)) return parsed;
+      return [String(parsed)];
+    } catch (e) {
+      return [evidence];
     }
   }
 }
