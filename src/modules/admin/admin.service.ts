@@ -845,8 +845,8 @@ export class AdminService {
             'Disputa resolvida a favor do aluno - no-show do personal',
           );
           this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
+          settlementOk = true;
         }
-        settlementOk = true;
 
         // Incrementar strike do personal e registrar aviso formal
         await this.db
