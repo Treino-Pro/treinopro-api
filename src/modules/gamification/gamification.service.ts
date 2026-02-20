@@ -403,8 +403,10 @@ export class GamificationService {
       };
 
       // Verificar conquistas desbloqueadas
-      const unlockedAchievements =
-        await this.checkAndUnlockAchievements(userId, newLevel);
+      const unlockedAchievements = await this.checkAndUnlockAchievements(
+        userId,
+        newLevel,
+      );
       levelUpResponse.unlockedAchievements = unlockedAchievements.map(
         (a) => a.name,
       );
@@ -1136,12 +1138,28 @@ export class GamificationService {
       return [];
     }
 
+    // Buscar userType uma vez para aplicar conditions
+    const [userRow] = await this.db
+      .select({ userType: users.userType })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const userType = userRow?.userType ?? null;
+
     const unlockedAchievements = [];
 
     for (const achievement of levelAchievements) {
+      const requirements = achievement.requirements as any;
+
       // Verificar se o nível atual do usuário atinge o requisito da conquista
-      const requiredLevel = (achievement.requirements as any)?.count;
+      const requiredLevel = requirements?.count;
       if (requiredLevel !== undefined && currentLevel < requiredLevel) {
+        continue;
+      }
+
+      // Verificar condições de contexto (ex: user_type)
+      const conditions = requirements?.conditions;
+      if (conditions?.user_type && userType !== conditions.user_type) {
         continue;
       }
 
@@ -1189,10 +1207,7 @@ export class GamificationService {
       .select({ total: count() })
       .from(xpHistory)
       .where(
-        and(
-          eq(xpHistory.userId, userId),
-          eq(xpHistory.source, source as any),
-        ),
+        and(eq(xpHistory.userId, userId), eq(xpHistory.source, source as any)),
       );
 
     return result?.total ?? 0;
