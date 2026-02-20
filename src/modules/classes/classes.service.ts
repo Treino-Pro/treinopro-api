@@ -792,12 +792,24 @@ export class ClassesService {
           `[CANCEL_CLASS] Reembolso para aula ${id} processado com sucesso. Motivo: ${refundReason}`,
         );
       } catch (err: any) {
-        this.logger.error(
-          `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
-        );
-        throw new BadRequestException(
-          `Não foi possível processar o reembolso para esta aula e o cancelamento foi abortado. Por favor, tente novamente ou contate o suporte.`,
-        );
+        if (err instanceof NotFoundException) {
+          const proposalValue = classData.proposal?.value || 0;
+          if (proposalValue > 0) {
+            this.logger.error(`[CRITICAL_CANCELLATION_FAILURE] Pagamento ausente para aula paga (valor: ${proposalValue}). Risco financeiro.`);
+            throw new BadRequestException(
+              `Inconsistência financeira detectada: Pagamento não localizado para efetuar o reembolso. O cancelamento foi abortado. Entre em contato com o suporte.`,
+            );
+          } else {
+            this.logger.warn(`[CANCEL_CLASS_WARNING] Nenhum pagamento encontrado para a aula ${id}, mas a proposta não possui valor associado. Prosseguindo com o cancelamento.`);
+          }
+        } else {
+          this.logger.error(
+            `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
+          );
+          throw new BadRequestException(
+            `Não foi possível processar o reembolso para esta aula e o cancelamento foi abortado. Por favor, tente novamente ou contate o suporte.`,
+          );
+        }
       }
     }
 

@@ -20,6 +20,17 @@ import { FirebaseNotificationService } from '../notifications/services/firebase-
 import { NotificationsService } from '../notifications/notifications.service';
 import * as crypto from 'crypto';
 
+// Helper para criar um mock de query chain do Drizzle
+const createMockQueryChain = (data: any = []) => {
+  const chain: any = Promise.resolve(data);
+  chain.from = jest.fn(() => chain);
+  chain.where = jest.fn(() => chain);
+  chain.limit = jest.fn(() => chain);
+  chain.groupBy = jest.fn(() => Promise.resolve(data));
+  chain.orderBy = jest.fn(() => chain);
+  return chain;
+};
+
 // Mock do banco de dados
 const mockDb = {
   query: {
@@ -52,13 +63,7 @@ const mockDb = {
   },
   insert: jest.fn(),
   update: jest.fn(),
-  select: jest.fn(() => ({
-    from: jest.fn(() => ({
-      where: jest.fn(() => ({
-        limit: jest.fn(() => ([])), // Default to returning an empty array
-      })),
-    })),
-  })),
+  select: jest.fn(() => createMockQueryChain([])),
 };
 
 // Mocks dos providers
@@ -176,10 +181,7 @@ describe('ClassesService', () => {
 
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
       mockDb.query.classes.findFirst.mockResolvedValue(null);
-      // Sem conflito de horário no dia (select classes retorna lista vazia)
-      mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([]) }),
-      }));
+      mockDb.select.mockImplementation(() => createMockQueryChain([]));
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockReturnValue({
           returning: jest.fn().mockResolvedValue([mockClass]),
@@ -308,9 +310,7 @@ describe('ClassesService', () => {
 
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
       mockDb.query.classes.findFirst.mockResolvedValue(null);
-      mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([existingClass]) }),
-      }));
+      mockDb.select.mockImplementation(() => createMockQueryChain([existingClass]));
 
       await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
         BadRequestException,
@@ -881,9 +881,7 @@ describe('ClassesService', () => {
       } as any;
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
-      mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([otherClass]) }),
-      }));
+      mockDb.select.mockImplementation(() => createMockQueryChain([otherClass]));
 
       await expect(
         service.updateClass(classId, updateDto as any, userId),
@@ -919,9 +917,7 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
 
-      mockDb.select.mockImplementation(() => ({
-        from: () => ({ where: () => Promise.resolve([nonOverlapping]) }),
-      }));
+      mockDb.select.mockImplementation(() => createMockQueryChain([nonOverlapping]));
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
@@ -950,13 +946,7 @@ describe('ClassesService', () => {
         { status: ClassStatus.COMPLETED, duration: 90, count: 3 },
       ];
 
-      mockDb.select.mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            groupBy: jest.fn().mockResolvedValue(mockStats),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createMockQueryChain(mockStats));
 
       // Act
       const result = await service.getClassStats(userId);
