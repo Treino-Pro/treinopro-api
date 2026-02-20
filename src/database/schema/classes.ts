@@ -29,6 +29,8 @@ export const classDisputeStatusEnum = pgEnum('class_dispute_status', [
   'student_denied_absence',
   'resolved_for_student',
   'resolved_for_personal',
+  'defense_submitted_by_student',
+  'defense_submitted_by_personal',
 ]);
 
 // Classes table

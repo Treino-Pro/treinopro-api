@@ -53,7 +53,7 @@ export class ClassesService {
     private readonly ratingsService: RatingsService,
     private readonly firebaseNotificationService: FirebaseNotificationService,
     private readonly notificationsService: NotificationsService,
-  ) {}
+  ) { }
 
   async createClass(
     createClassDto: CreateClassDto,
@@ -166,10 +166,10 @@ export class ClassesService {
       ...newClass,
       proposal: proposalWithModality
         ? {
-            id: proposalWithModality.id,
-            modality: proposalWithModality.modalityName,
-            value: proposalWithModality.value,
-          }
+          id: proposalWithModality.id,
+          modality: proposalWithModality.modalityName,
+          value: proposalWithModality.value,
+        }
         : null,
       proposalModality: proposalWithModality?.modalityName || null,
     };
@@ -767,8 +767,7 @@ export class ClassesService {
     ) {
       const now = new Date();
       const classDateTime = new Date(
-        `${(classData.date as Date).toISOString().split('T')[0]}T${
-          classData.time
+        `${(classData.date as Date).toISOString().split('T')[0]}T${classData.time
         }`,
       );
       const cancellationDeadline = new Date(
@@ -1069,10 +1068,10 @@ export class ClassesService {
         pendingConfirmationAt: new Date(),
         ...(FeatureFlags.CODE_4_DIGITS
           ? {
-              startConfirmationCodeHash: codeHash,
-              startConfirmationCodeExpiresAt: codeExpiresAt,
-              startConfirmationAttempts: 0,
-            }
+            startConfirmationCodeHash: codeHash,
+            startConfirmationCodeExpiresAt: codeExpiresAt,
+            startConfirmationAttempts: 0,
+          }
           : {}),
         updatedAt: new Date(),
       })
@@ -1611,6 +1610,10 @@ export class ClassesService {
           ...defenseDto.evidenceUrls,
         ]);
       }
+      // Registrar status derivado (sem sobrescrever resolução admin)
+      if (!rawClass.disputeStatus || rawClass.disputeStatus === 'pending') {
+        updateData.disputeStatus = 'defense_submitted_by_student';
+      }
     } else {
       updateData.personalDefenseText = defenseDto.text;
       updateData.personalDefenseSubmittedAt = now;
@@ -1621,6 +1624,10 @@ export class ClassesService {
           ...defenseDto.evidenceUrls,
         ]);
       }
+      // Registrar status derivado (sem sobrescrever resolução admin)
+      if (!rawClass.disputeStatus || rawClass.disputeStatus === 'pending') {
+        updateData.disputeStatus = 'defense_submitted_by_personal';
+      }
     }
 
     const [updatedClass] = await this.db
@@ -1628,6 +1635,22 @@ export class ClassesService {
       .set(updateData)
       .where(eq(classes.id, classId))
       .returning();
+
+    // ===== EMITIR EVENTO WEBSOCKET DE DEFESA =====
+    try {
+      const classResponse = await this.formatClassResponse(updatedClass);
+      this.chatGateway.server.emit('class_update', {
+        action: 'class_dispute_defense_submitted',
+        class: classResponse,
+        personalId: rawClass.personalId,
+        studentId: rawClass.studentId,
+        defendedBy: isReportedStudent ? 'student' : 'personal',
+        timestamp: new Date(),
+      });
+      this.logger.log('[CLASSES] Evento WebSocket emitido: class_dispute_defense_submitted');
+    } catch (error) {
+      this.logger.error(`[CLASSES] Erro ao emitir evento WebSocket de defesa: ${error}`);
+    }
 
     return this.formatClassResponse(updatedClass);
   }
@@ -1693,7 +1716,7 @@ export class ClassesService {
         ),
       });
       if (existing) return existing;
-    } catch (_) {}
+    } catch (_) { }
 
     const role = rawClass.personalId === userId ? 'personal' : 'student';
 
@@ -1731,33 +1754,142 @@ export class ClassesService {
     }
   }
 
-  async getClassDisputes(userId: string): Promise<any[]> {
+  async getClassDisputes(userId: string, statusFilter?: 'open' | 'resolved' | 'all'): Promise<any[]> {
     try {
+      const filter = statusFilter || 'all';
+
+      // Construir condição de status baseada no filtro
+      const statusConditions: any[] = [
+        or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
+      ];
+
+      if (filter === 'open') {
+        statusConditions.push(eq(classes.status, ClassStatus.NO_SHOW_DISPUTE));
+      } else if (filter === 'resolved') {
+        // Disputas resolvidas: aulas que já passaram por disputa mas foram resolvidas
+        statusConditions.push(
+          and(
+            or(
+              eq(classes.status, ClassStatus.CUSTODY),
+              eq(classes.status, ClassStatus.COMPLETED),
+            ),
+            sql`${classes.noShowReportedAt} IS NOT NULL`,
+          ),
+        );
+      } else {
+        // 'all': abertas + resolvidas
+        statusConditions.push(
+          sql`${classes.noShowReportedAt} IS NOT NULL`,
+        );
+      }
+
       const disputes = await this.db.query.classes.findMany({
-        where: and(
-          or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
-          eq(classes.status, ClassStatus.NO_SHOW_DISPUTE),
-        ),
-        orderBy: [desc(classes.createdAt)],
+        where: and(...statusConditions),
+        orderBy: [desc(classes.noShowReportedAt)],
+        with: {
+          student: true,
+          personal: true,
+        },
       });
 
-      return disputes.map((dispute) => ({
-        id: dispute.id,
-        classId: dispute.id,
-        reportedBy: dispute.noShowReportedBy || 'student',
-        status: dispute.disputeStatus || 'pending',
-        reportedAt: dispute.noShowReportedAt || dispute.createdAt,
-        studentEvidence: dispute.studentEvidence || null,
-        personalEvidence: dispute.personalEvidence || null,
-        resolution: dispute.resolution || null,
-        resolvedAt: dispute.resolvedAt || null,
-        custodyExpiresAt: dispute.custodyExpiresAt || dispute.createdAt,
-        evidenceDeadline: dispute.evidenceDeadline || dispute.createdAt,
-      }));
+      const results: any[] = [];
+      for (const dispute of disputes) {
+        results.push(await this._buildDisputePayload(dispute));
+      }
+      return results;
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao buscar disputas:', error);
       return [];
     }
+  }
+
+  async getClassDisputeById(classId: string, userId: string): Promise<any> {
+    const dispute = await this.db.query.classes.findFirst({
+      where: and(
+        eq(classes.id, classId),
+        sql`${classes.noShowReportedAt} IS NOT NULL`,
+      ),
+      with: {
+        student: true,
+        personal: true,
+      },
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada');
+    }
+
+    // Validar acesso
+    if (dispute.studentId !== userId && dispute.personalId !== userId) {
+      throw new ForbiddenException('Você não tem acesso a esta disputa');
+    }
+
+    return this._buildDisputePayload(dispute);
+  }
+
+  /**
+   * Monta o payload enriquecido de uma disputa (reutilizado por list e detail).
+   */
+  private async _buildDisputePayload(dispute: any): Promise<any> {
+    // Determinar reporter e reportado
+    const reportedByRole = dispute.noShowReportedBy || 'student';
+    const reporterUserId = reportedByRole === 'personal' ? dispute.personalId : dispute.studentId;
+    const reportedUserId = reportedByRole === 'personal' ? dispute.studentId : dispute.personalId;
+
+    // Nomes
+    const reporterName = reportedByRole === 'personal'
+      ? `${dispute.personal?.firstName || ''} ${dispute.personal?.lastName || ''}`.trim()
+      : `${dispute.student?.firstName || ''} ${dispute.student?.lastName || ''}`.trim();
+    const reportedUserName = reportedByRole === 'personal'
+      ? `${dispute.student?.firstName || ''} ${dispute.student?.lastName || ''}`.trim()
+      : `${dispute.personal?.firstName || ''} ${dispute.personal?.lastName || ''}`.trim();
+
+    // Buscar snapshots de presença
+    let reporterSnapshot: any = null;
+    let reportedSnapshot: any = null;
+    try {
+      reporterSnapshot = await this.db.query.classPresenceSnapshots.findFirst({
+        where: and(
+          eq(classPresenceSnapshots.classId, dispute.id),
+          eq(classPresenceSnapshots.userId, reporterUserId),
+        ),
+      });
+      reportedSnapshot = await this.db.query.classPresenceSnapshots.findFirst({
+        where: and(
+          eq(classPresenceSnapshots.classId, dispute.id),
+          eq(classPresenceSnapshots.userId, reportedUserId),
+        ),
+      });
+    } catch (_) {
+      // Tabela pode ainda não existir em ambientes legados
+    }
+
+    return {
+      id: dispute.id,
+      classId: dispute.id,
+      reportedBy: reportedByRole,
+      reporterUserId,
+      reportedUserId,
+      reporterName: reporterName || null,
+      reportedUserName: reportedUserName || null,
+      status: dispute.disputeStatus || 'pending',
+      reportedAt: dispute.noShowReportedAt || dispute.createdAt,
+      studentEvidence: dispute.studentEvidence || null,
+      personalEvidence: dispute.personalEvidence || null,
+      studentDefenseText: dispute.studentDefenseText || null,
+      personalDefenseText: dispute.personalDefenseText || null,
+      studentDefenseSubmittedAt: dispute.studentDefenseSubmittedAt || null,
+      personalDefenseSubmittedAt: dispute.personalDefenseSubmittedAt || null,
+      resolution: dispute.resolution || null,
+      resolvedAt: dispute.resolvedAt || null,
+      custodyExpiresAt: dispute.custodyExpiresAt || dispute.createdAt,
+      evidenceDeadline: dispute.evidenceDeadline || dispute.createdAt,
+      // Geolocalização
+      reporterHasSnapshot: !!reporterSnapshot,
+      reportedHasSnapshot: !!reportedSnapshot,
+      reporterSnapshotAt: reporterSnapshot?.capturedAt || null,
+      reportedSnapshotAt: reportedSnapshot?.capturedAt || null,
+    };
   }
 
   private async formatClassResponse(classData: any): Promise<ClassResponseDto> {
@@ -1881,13 +2013,18 @@ export class ClassesService {
       personalEvidence: classData.personalEvidence,
       resolution: classData.resolution,
       resolvedAt: classData.resolvedAt,
+      // Campos de defesa
+      studentDefenseText: classData.studentDefenseText || null,
+      personalDefenseText: classData.personalDefenseText || null,
+      studentDefenseSubmittedAt: classData.studentDefenseSubmittedAt || null,
+      personalDefenseSubmittedAt: classData.personalDefenseSubmittedAt || null,
       createdAt: classData.createdAt,
       updatedAt: classData.updatedAt,
       student: classData.student
         ? {
-            ...classData.student,
-            profilePicture: studentProfileImageUrl,
-          }
+          ...classData.student,
+          profilePicture: studentProfileImageUrl,
+        }
         : null,
       personal: classData.personal,
       proposalModality:
@@ -2186,19 +2323,19 @@ export class ClassesService {
           updatedAt: classData.updatedAt,
           student: student
             ? {
-                id: student.id,
-                firstName: student.firstName,
-                lastName: student.lastName,
-                profilePicture: null, // Simplificado por performance
-              }
+              id: student.id,
+              firstName: student.firstName,
+              lastName: student.lastName,
+              profilePicture: null, // Simplificado por performance
+            }
             : null,
           personal: personal
             ? {
-                id: personal.id,
-                firstName: personal.firstName,
-                lastName: personal.lastName,
-                profilePicture: null, // Simplificado por performance
-              }
+              id: personal.id,
+              firstName: personal.firstName,
+              lastName: personal.lastName,
+              profilePicture: null, // Simplificado por performance
+            }
             : null,
           proposalModality: proposal?.modalityName || null,
           personalProfileImageUrl: null, // Simplificado por performance
@@ -2207,10 +2344,10 @@ export class ClassesService {
           studentRating: studentRatingByClassId[classData.id] ?? null,
           proposal: proposal
             ? {
-                id: proposal.id,
-                modality: proposal.modalityName,
-                value: proposal.price,
-              }
+              id: proposal.id,
+              modality: proposal.modalityName,
+              value: proposal.price,
+            }
             : null,
         };
       });

@@ -32,6 +32,8 @@ export enum ClassDisputeStatus {
   STUDENT_DENIED_ABSENCE = 'student_denied_absence',
   RESOLVED_FOR_STUDENT = 'resolved_for_student',
   RESOLVED_FOR_PERSONAL = 'resolved_for_personal',
+  DEFENSE_SUBMITTED_BY_STUDENT = 'defense_submitted_by_student',
+  DEFENSE_SUBMITTED_BY_PERSONAL = 'defense_submitted_by_personal',
 }
 
 export class CreateClassDto {
@@ -769,7 +771,7 @@ export class ClassTimelineDto {
 
 export class ClassDisputeDto {
   @ApiProperty({
-    description: 'ID da disputa',
+    description: 'ID da disputa (= ID da aula)',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
   id: string;
@@ -781,11 +783,29 @@ export class ClassDisputeDto {
   classId: string;
 
   @ApiProperty({
-    description: 'Quem reportou a disputa',
+    description: 'Quem reportou a disputa (role)',
     enum: ['student', 'personal'],
     example: 'personal',
   })
   reportedBy: 'student' | 'personal';
+
+  @ApiProperty({
+    description: 'ID do usuário que reportou',
+    example: '123e4567-e89b-12d3-a456-426614174002',
+  })
+  reporterUserId: string;
+
+  @ApiProperty({
+    description: 'ID do usuário reportado',
+    example: '123e4567-e89b-12d3-a456-426614174003',
+  })
+  reportedUserId: string;
+
+  @ApiPropertyOptional({ description: 'Nome do reporter' })
+  reporterName?: string;
+
+  @ApiPropertyOptional({ description: 'Nome do reportado' })
+  reportedUserName?: string;
 
   @ApiProperty({
     description: 'Status da disputa',
@@ -801,26 +821,34 @@ export class ClassDisputeDto {
   reportedAt: Date;
 
   @ApiPropertyOptional({
-    description: 'Evidências do aluno',
-    example: 'Foto do local de treino',
+    description: 'Evidências do aluno (JSON array de URLs)',
   })
   studentEvidence?: string;
 
   @ApiPropertyOptional({
-    description: 'Evidências do personal',
-    example: 'Foto do local de treino',
+    description: 'Evidências do personal (JSON array de URLs)',
   })
   personalEvidence?: string;
 
+  @ApiPropertyOptional({ description: 'Texto de defesa do aluno' })
+  studentDefenseText?: string;
+
+  @ApiPropertyOptional({ description: 'Texto de defesa do personal' })
+  personalDefenseText?: string;
+
+  @ApiPropertyOptional({ description: 'Data de envio da defesa do aluno' })
+  studentDefenseSubmittedAt?: Date;
+
+  @ApiPropertyOptional({ description: 'Data de envio da defesa do personal' })
+  personalDefenseSubmittedAt?: Date;
+
   @ApiPropertyOptional({
     description: 'Resolução da disputa',
-    example: 'Disputa resolvida a favor do aluno',
   })
   resolution?: string;
 
   @ApiPropertyOptional({
     description: 'Data de resolução',
-    example: '2024-01-16T10:00:00.000Z',
   })
   resolvedAt?: Date;
 
@@ -831,8 +859,32 @@ export class ClassDisputeDto {
   custodyExpiresAt: Date;
 
   @ApiProperty({
-    description: 'Prazo para envio de evidências',
+    description: 'Prazo para envio de evidências/defesa',
     example: '2024-01-16T14:00:00.000Z',
   })
   evidenceDeadline: Date;
+
+  // Campos de geolocalização/presença
+  @ApiPropertyOptional({ description: 'Reporter registrou snapshot de presença' })
+  reporterHasSnapshot?: boolean;
+
+  @ApiPropertyOptional({ description: 'Reportado registrou snapshot de presença' })
+  reportedHasSnapshot?: boolean;
+
+  @ApiPropertyOptional({ description: 'Data do snapshot do reporter' })
+  reporterSnapshotAt?: Date;
+
+  @ApiPropertyOptional({ description: 'Data do snapshot do reportado' })
+  reportedSnapshotAt?: Date;
+}
+
+export class GetDisputesQueryDto {
+  @ApiPropertyOptional({
+    description: 'Filtro de status da disputa',
+    enum: ['open', 'resolved', 'all'],
+    default: 'all',
+  })
+  @IsOptional()
+  @IsString()
+  status?: 'open' | 'resolved' | 'all' = 'all';
 }

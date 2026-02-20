@@ -37,6 +37,7 @@ import {
   ClassDisputeDto,
   DisputeDefenseDto,
   PresenceSnapshotDto,
+  GetDisputesQueryDto,
 } from './dto/classes.dto';
 
 @ApiTags('Classes')
@@ -47,7 +48,7 @@ export class ClassesController {
   constructor(
     private readonly classesService: ClassesService,
     private readonly classesCleanupService: ClassesCleanupService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Criar nova aula' })
@@ -122,13 +123,29 @@ export class ClassesController {
 
   @Get('disputes')
   @ApiOperation({ summary: 'Listar disputas do usuário' })
+  @ApiQuery({ name: 'status', required: false, enum: ['open', 'resolved', 'all'], description: 'Filtro de status' })
   @ApiResponse({
     status: 200,
     description: 'Disputas listadas com sucesso',
     type: [ClassDisputeDto],
   })
-  async getClassDisputes(@Request() req: any): Promise<any[]> {
-    return this.classesService.getClassDisputes(req.user.sub);
+  async getClassDisputes(
+    @Query() queryDto: GetDisputesQueryDto,
+    @Request() req: any,
+  ): Promise<any[]> {
+    return this.classesService.getClassDisputes(req.user.sub, queryDto.status);
+  }
+
+  @Get('disputes/:disputeId')
+  @ApiOperation({ summary: 'Obter disputa por ID (= classId)' })
+  @ApiParam({ name: 'disputeId', description: 'ID da disputa (= ID da aula)' })
+  @ApiResponse({ status: 200, description: 'Disputa encontrada', type: ClassDisputeDto })
+  @ApiResponse({ status: 404, description: 'Disputa não encontrada' })
+  async getClassDisputeById(
+    @Param('disputeId') disputeId: string,
+    @Request() req: any,
+  ): Promise<any> {
+    return this.classesService.getClassDisputeById(disputeId, req.user.sub);
   }
 
   @Get(':id')
