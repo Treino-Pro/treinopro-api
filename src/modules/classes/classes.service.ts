@@ -750,20 +750,60 @@ export class ClassesService {
       throw new ForbiddenException('Você não pode cancelar esta aula');
     }
 
-    // Aluno: enforcar janela de 2h antes da aula
-    if (classData.studentId === userId && classData.status === ClassStatus.SCHEDULED) {
+    const isStudentCancelling = classData.studentId === userId;
+    const isPersonalCancelling = classData.personalId === userId;
+
+    let shouldRefund = false;
+    let refundReason = '';
+
+    // Regra 1: Aluno cancelando dentro da janela de 2h
+    if (isStudentCancelling && classData.status === ClassStatus.SCHEDULED) {
       const now = new Date();
       const classDateTime = new Date(
-        `${(classData.date as Date).toISOString().split('T')[0]}T${classData.time}`,
+        `${(classData.date as Date).toISOString().split('T')[0]}T${
+          classData.time
+        }`,
       );
-      const cancellationDeadline = new Date(classDateTime.getTime() - 2 * 60 * 60 * 1000);
+      const cancellationDeadline = new Date(
+        classDateTime.getTime() - 2 * 60 * 60 * 1000,
+      );
       if (now > cancellationDeadline) {
         throw new BadRequestException(
           'Cancelamento pelo aluno só é permitido até 2 horas antes da aula. Para cancelamentos tardios, entre em contato com o suporte.',
         );
       }
+      shouldRefund = true;
+      refundReason = 'Cancelamento pelo aluno com antecedência mínima';
     }
 
+    // Regra 2: Personal cancelando (sempre reembolsa o aluno)
+    if (isPersonalCancelling) {
+      shouldRefund = true;
+      refundReason = 'Cancelamento pelo personal trainer';
+    }
+
+    // ===== ETAPA 1: REEMBOLSO (SE APLICÁVEL) =====
+    // Esta operação acontece ANTES de marcar a aula como cancelada.
+    // Se o reembolso falhar, a operação inteira é abortada.
+    if (shouldRefund) {
+      try {
+        await this.paymentsService.cancelPaymentBeforeClass(id, refundReason);
+        this.logger.log(
+          `[CANCEL_CLASS] Reembolso para aula ${id} processado com sucesso. Motivo: ${refundReason}`,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
+        );
+        // Lança o erro para frente, impedindo o cancelamento e informando o usuário.
+        throw new BadRequestException(
+          `Não foi possível processar o reembolso necessário para o cancelamento. A operação foi abortada para evitar inconsistência financeira. Por favor, tente novamente ou contate o suporte. Erro subjacente: ${err.message}`,
+        );
+      }
+    }
+
+    // ===== ETAPA 2: ATUALIZAR STATUS DA AULA =====
+    // Só executa se o reembolso (se necessário) foi bem-sucedido.
     const [updatedClass] = await this.db
       .update(classes)
       .set({
@@ -773,20 +813,7 @@ export class ClassesService {
       .where(eq(classes.id, id))
       .returning();
 
-    // Reembolso automático para aluno que cancela dentro da janela
-    if (classData.studentId === userId) {
-      try {
-        await this.paymentsService.cancelPaymentBeforeClass(
-          id,
-          'Cancelamento pelo aluno com antecedência mínima',
-        );
-        this.logger.log(`[CANCEL] Reembolso processado para aula ${id}`);
-      } catch (err: any) {
-        this.logger.warn(`[CANCEL] Falha ao reembolsar aula ${id}: ${err?.message}`);
-      }
-    }
-
-    // ===== ATUALIZAR STATUS DA PROPOSTA ASSOCIADA =====
+    // ===== ETAPA 3: ATUALIZAR STATUS DA PROPOSTA ASSOCIADA =====
     if (classData.proposalId) {
       try {
         await this.db
@@ -797,18 +824,18 @@ export class ClassesService {
           })
           .where(eq(proposals.id, classData.proposalId));
 
-        console.log(
-          `✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'cancelled'`,
+        this.logger.log(
+          `[CANCEL_CLASS] Status da proposta ${classData.proposalId} atualizado para 'cancelled'`,
         );
       } catch (error) {
-        console.error(
-          `❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`,
+        this.logger.error(
+          `[CANCEL_CLASS] Erro ao atualizar status da proposta ${classData.proposalId}:`,
           error,
         );
       }
     }
 
-    // ===== EMITIR EVENTOS WEBSOCKET =====
+    // ===== ETAPA 4: EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
 
@@ -822,9 +849,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      console.log('✅ [CLASSES] Evento WebSocket emitido: class_cancelled');
+      this.logger.log('[CANCEL_CLASS] Evento WebSocket emitido: class_cancelled');
     } catch (error) {
-      console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
+      this.logger.error('[CANCEL_CLASS] Erro ao emitir evento WebSocket:', error);
     }
 
     return this.formatClassResponse(updatedClass);

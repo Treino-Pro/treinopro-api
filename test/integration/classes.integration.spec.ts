@@ -5,7 +5,7 @@ jest.mock('cache-manager-redis-store', () => ({
 
 // Habilitar feature flags para os testes
 process.env.FEATURE_CODE_4_DIGITS = 'true';
-process.env.FEATURE_MIN_45_RULE = 'true';
+process.env.FEATURE_45_MIN_RULE = 'true';
 process.env.FEATURE_DISPUTE_DEFENSE = 'true';
 process.env.FEATURE_SETTLEMENT_ON_RESOLVE = 'true';
 
@@ -224,7 +224,13 @@ describe('Classes Integration (Full Plan Coverage)', () => {
     }).returning();
     classId = classEntry.id;
 
-    await db.insert(payments).values({ classId, studentId, personalId, status: 'authorized' }).returning();
+    await db.insert(payments).values({
+      classId,
+      studentId,
+      personalId,
+      status: 'authorized',
+      mpPaymentId: 'mock-mp-payment-id-for-test', // Garante que a lógica de settlement seja chamada
+    }).returning();
   });
 
   it('deve validar o fluxo completo: start -> code -> active -> 45min block', async () => {

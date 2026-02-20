@@ -565,13 +565,15 @@ export class ConfirmClassStartDto {
   @IsBoolean()
   confirmed: boolean;
 
-  @ApiProperty({
-    description: 'Código de 4 dígitos exibido ao personal no início da aula',
+  @ApiPropertyOptional({
+    description:
+      'Código de 4 dígitos exibido ao personal no início da aula. Obrigatório apenas se a feature flag estiver ativa.',
     example: '7391',
   })
+  @IsOptional()
   @IsString()
   @Length(4, 4)
-  confirmationCode: string;
+  confirmationCode?: string;
 
   @ApiPropertyOptional({
     description: 'Observações do aluno ao confirmar início',
