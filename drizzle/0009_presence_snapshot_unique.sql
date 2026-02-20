@@ -1,5 +1,5 @@
 -- Migration: presence_snapshot_unique
--- Description: Cleans orphans, deduplicates based on best evidence with robust time parsing, and ensures consistent cascading integrity.
+-- Description: Cleans orphans, deduplicates based on best evidence with strict time validation, and ensures cascading integrity.
 
 DO $$ 
 BEGIN
@@ -18,12 +18,12 @@ BEGIN
                        PARTITION BY s.class_id, s.user_id 
                        ORDER BY 
                            -- 1º: Proximidade absoluta ao horário agendado (T0)
-                           -- Hardening: Proteção contra formato de tempo inválido (Varchar HH:MM)
+                           -- Hardening: Regex rigorosa para HH:MM (00-23:00-59)
                            ABS(EXTRACT(EPOCH FROM (
                                s.captured_at - (
                                    c.date::date + 
                                    (CASE 
-                                       WHEN c.time ~ '^[0-9]{1,2}:[0-9]{2}$' THEN c.time::time 
+                                       WHEN c.time ~ '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$' THEN c.time::time 
                                        ELSE '00:00'::time 
                                     END)
                                )
@@ -64,7 +64,6 @@ BEGIN
     END IF;
 
     -- FK para users
-    -- Usamos CASCADE para manter consistência com o contrato atual de exclusão de conta
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'class_presence_snapshots_user_id_users_id_fk'

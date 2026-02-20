@@ -13,6 +13,7 @@ import {
   IsLatitude,
   IsLongitude,
   Length,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -76,6 +77,9 @@ export class CreateClassDto {
     example: '14:00',
   })
   @IsString()
+  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: 'O horário deve estar no formato HH:MM (00:00 a 23:59)',
+  })
   time: string;
 
   @ApiProperty({
@@ -113,6 +117,9 @@ export class UpdateClassDto {
   })
   @IsOptional()
   @IsString()
+  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: 'O horário deve estar no formato HH:MM (00:00 a 23:59)',
+  })
   time?: string;
 
   @ApiPropertyOptional({

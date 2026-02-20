@@ -312,18 +312,20 @@ export class UsersService {
           eq(classes.status, 'scheduled'),
           eq(classes.status, 'pending_confirmation'),
           eq(classes.status, 'active'),
+          eq(classes.status, 'no_show_dispute'),
+          eq(classes.status, 'custody'),
         ),
       ),
     });
 
     if (scheduledClasses && scheduledClasses.length > 0) {
       console.error(
-        '❌ [USERS] Usuário tem aulas agendadas:',
+        '❌ [USERS] Usuário tem aulas pendentes ou em disputa:',
         scheduledClasses.length,
       );
       throw new BadRequestException(
-        'Não é possível excluir a conta. Você possui aulas agendadas. ' +
-          'Cancele ou complete todas as aulas antes de excluir sua conta.',
+        'Não é possível excluir a conta. Você possui aulas pendentes ou em disputa de no-show. ' +
+          'Resolva todas as pendências antes de excluir sua conta.',
       );
     }
 
