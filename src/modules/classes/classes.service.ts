@@ -1497,6 +1497,9 @@ export class ClassesService {
     defenseDto: DisputeDefenseDto,
     userId: string,
   ): Promise<ClassResponseDto> {
+    this.logger.log(
+      `[DEBUG][DISPUTE_DEFENSE] Recebendo defesa para aula ${classId} do usuário ${userId}`,
+    );
     const rawClass = await this.db.query.classes.findFirst({
       where: eq(classes.id, classId),
     });
