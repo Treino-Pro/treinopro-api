@@ -52,7 +52,13 @@ const mockDb = {
   },
   insert: jest.fn(),
   update: jest.fn(),
-  select: jest.fn(),
+  select: jest.fn(() => ({
+    from: jest.fn(() => ({
+      where: jest.fn(() => ({
+        limit: jest.fn(() => ([])), // Default to returning an empty array
+      })),
+    })),
+  })),
 };
 
 // Mocks dos providers

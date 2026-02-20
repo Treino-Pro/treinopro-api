@@ -756,8 +756,8 @@ export class ClassesService {
     let shouldRefund = false;
     let refundReason = '';
 
-    // Regra 1: Aluno cancelando dentro da janela de 2h
-    if (isStudentCancelling && classData.status === ClassStatus.SCHEDULED) {
+    // Regra 1: Aluno cancelando dentro da janela de 2h (para aulas agendadas, pendentes ou ativas)
+    if (isStudentCancelling && [ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION, ClassStatus.ACTIVE].includes(classData.status)) {
       const now = new Date();
       const classDateTime = new Date(
         `${(classData.date as Date).toISOString().split('T')[0]}T${
@@ -792,13 +792,19 @@ export class ClassesService {
           `[CANCEL_CLASS] Reembolso para aula ${id} processado com sucesso. Motivo: ${refundReason}`,
         );
       } catch (err: any) {
-        this.logger.error(
-          `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
-        );
-        // Lança o erro para frente, impedindo o cancelamento e informando o usuário com uma mensagem segura.
-        throw new BadRequestException(
-          `Não foi possível processar o reembolso para esta aula e o cancelamento foi abortado. Por favor, tente novamente ou contate o suporte.`,
-        );
+        if (err instanceof NotFoundException) {
+          this.logger.warn(
+            `[CANCEL_CLASS_WARNING] Nenhum pagamento encontrado para a aula ${id} para reembolso. Prosseguindo com o cancelamento da aula sem reembolso.`,
+          );
+          // Não relançar, continuar com o cancelamento da aula.
+        } else {
+          this.logger.error(
+            `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
+          );
+          throw new BadRequestException(
+            `Não foi possível processar o reembolso para esta aula e o cancelamento foi abortado. Por favor, tente novamente ou contate o suporte.`,
+          );
+        }
       }
     }
 
