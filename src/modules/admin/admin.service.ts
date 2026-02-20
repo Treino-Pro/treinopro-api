@@ -846,6 +846,9 @@ export class AdminService {
           );
           this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
           settlementOk = true;
+        } else {
+          settlementError = `Pagamento não encontrado para a aula ${classId}, reembolso não pôde ser processado.`;
+          this.logger.error(`[ADMIN_DISPUTE] Falha de settlement: ${settlementError}`);
         }
 
         // Incrementar strike do personal e registrar aviso formal
