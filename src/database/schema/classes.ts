@@ -7,6 +7,7 @@ import {
   integer,
   pgEnum,
   decimal,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -83,20 +84,29 @@ export const presenceRoleEnum = pgEnum('presence_role', ['student', 'personal'])
 export const captureSourceEnum = pgEnum('capture_source', ['foreground', 'resume', 'background_task']);
 export const appStateEnum = pgEnum('app_state_snapshot', ['foreground', 'background', 'resumed']);
 
-// Tabela de snapshots de presença por aula
-export const classPresenceSnapshots = pgTable('class_presence_snapshots', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  classId: uuid('class_id').notNull(),
-  userId: uuid('user_id').notNull(),
-  role: presenceRoleEnum('role').notNull(),
-  latitude: decimal('latitude', { precision: 10, scale: 8 }).notNull(),
-  longitude: decimal('longitude', { precision: 11, scale: 8 }).notNull(),
-  accuracyMeters: decimal('accuracy_meters', { precision: 10, scale: 2 }),
-  capturedAt: timestamp('captured_at').notNull(),
-  captureSource: captureSourceEnum('capture_source').notNull(),
-  appState: appStateEnum('app_state').notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+// Tabela de snapshots de presença por aula (1 por participante por aula — unique enforced)
+export const classPresenceSnapshots = pgTable(
+  'class_presence_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    classId: uuid('class_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    role: presenceRoleEnum('role').notNull(),
+    latitude: decimal('latitude', { precision: 10, scale: 8 }).notNull(),
+    longitude: decimal('longitude', { precision: 11, scale: 8 }).notNull(),
+    accuracyMeters: decimal('accuracy_meters', { precision: 10, scale: 2 }),
+    capturedAt: timestamp('captured_at').notNull(),
+    captureSource: captureSourceEnum('capture_source').notNull(),
+    appState: appStateEnum('app_state').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    classUserUnique: unique('class_presence_snapshots_class_id_user_id_unique').on(
+      table.classId,
+      table.userId,
+    ),
+  }),
+);
 
 // Relations
 export const classPresenceSnapshotsRelations = relations(classPresenceSnapshots, ({ one }) => ({

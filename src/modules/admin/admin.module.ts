@@ -6,9 +6,10 @@ import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { GamificationModule } from '../gamification/gamification.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, PaymentsModule, GamificationModule],
+  imports: [DatabaseModule, AuthModule, PaymentsModule, GamificationModule, NotificationsModule],
   controllers: [AdminController, AdminMigrationController],
   providers: [AdminService],
 })

@@ -1008,10 +1008,8 @@ export class ClassesService {
 
     // ===== EMITIR EVENTOS WEBSOCKET E PUSH =====
     try {
-      const classResponse = await this.formatClassResponse(updatedClass);
-      // Incluir o código plaintext apenas no response para o personal
-      (classResponse as any).startConfirmationCode = plainCode;
-      (classResponse as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+      // Payload WebSocket sanitizado — sem código plaintext (segurança: só o personal recebe o código via HTTP)
+      const wsPayload = await this.formatClassResponse(updatedClass);
       const studentId = classData.studentId;
 
       // Buscar dados do personal para notificação
@@ -1019,10 +1017,10 @@ export class ClassesService {
         where: eq(users.id, userId),
       });
 
-      // Evento para ambos os usuários (aluno e personal)
+      // Evento para ambos os usuários (aluno e personal) — SEM startConfirmationCode
       this.chatGateway.server.emit('class_update', {
         action: 'class_started',
-        class: classResponse,
+        class: wsPayload,
         personalId: userId,
         studentId: studentId,
         timestamp: new Date(),
@@ -1087,15 +1085,34 @@ export class ClassesService {
       if (rawClass.startConfirmationCodeExpiresAt && new Date() > rawClass.startConfirmationCodeExpiresAt) {
         throw new BadRequestException('CONFIRMATION_CODE_EXPIRED: Código de confirmação expirado');
       }
+
+      const currentAttempts = rawClass.startConfirmationAttempts || 0;
+      const MAX_ATTEMPTS = 5;
+
+      // Verificar limite de tentativas (brute force protection)
+      if (currentAttempts >= MAX_ATTEMPTS) {
+        // Expirar o código automaticamente após esgotar tentativas
+        await this.db
+          .update(classes)
+          .set({ startConfirmationCodeExpiresAt: new Date(), updatedAt: new Date() })
+          .where(eq(classes.id, classId));
+        throw new BadRequestException(
+          'CONFIRMATION_CODE_LOCKED: Muitas tentativas incorretas. Solicite que o personal reinicie a aula.',
+        );
+      }
+
       // Incrementar tentativas antes de validar
       await this.db
         .update(classes)
-        .set({ startConfirmationAttempts: (rawClass.startConfirmationAttempts || 0) + 1, updatedAt: new Date() })
+        .set({ startConfirmationAttempts: currentAttempts + 1, updatedAt: new Date() })
         .where(eq(classes.id, classId));
 
       const submittedHash = crypto.createHash('sha256').update(confirmDto.confirmationCode || '').digest('hex');
       if (submittedHash !== rawClass.startConfirmationCodeHash) {
-        throw new BadRequestException('INVALID_CONFIRMATION_CODE: Código de confirmação inválido');
+        const attemptsLeft = MAX_ATTEMPTS - (currentAttempts + 1);
+        throw new BadRequestException(
+          `INVALID_CONFIRMATION_CODE: Código inválido. ${attemptsLeft > 0 ? `${attemptsLeft} tentativa(s) restante(s).` : 'Código bloqueado.'}`,
+        );
       }
     }
 
@@ -1511,20 +1528,31 @@ export class ClassesService {
       throw new ForbiddenException('Apenas a parte reportada pode enviar defesa');
     }
 
+    // Helper para fazer parse seguro de JSON (evitar 500 em dados corrompidos)
+    const safeJsonParse = (raw: string | null | undefined): string[] => {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
     const updateData: any = { updatedAt: new Date() };
     if (isReportedStudent) {
       updateData.studentDefenseText = defenseDto.text;
       updateData.studentDefenseSubmittedAt = now;
       // Mesclar evidências se fornecidas
       if (defenseDto.evidenceUrls?.length) {
-        const existing = rawClass.studentEvidence ? JSON.parse(rawClass.studentEvidence) : [];
+        const existing = safeJsonParse(rawClass.studentEvidence);
         updateData.studentEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
       }
     } else {
       updateData.personalDefenseText = defenseDto.text;
       updateData.personalDefenseSubmittedAt = now;
       if (defenseDto.evidenceUrls?.length) {
-        const existing = rawClass.personalEvidence ? JSON.parse(rawClass.personalEvidence) : [];
+        const existing = safeJsonParse(rawClass.personalEvidence);
         updateData.personalEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
       }
     }
@@ -1551,6 +1579,38 @@ export class ClassesService {
 
     if (rawClass.studentId !== userId && rawClass.personalId !== userId) {
       throw new ForbiddenException('Você não tem acesso a esta aula');
+    }
+
+    // Validar status da aula — só aceitar para aulas relevantes (não canceladas/concluídas há muito tempo)
+    const validStatuses = [
+      ClassStatus.SCHEDULED,
+      ClassStatus.PENDING_CONFIRMATION,
+      ClassStatus.ACTIVE,
+      ClassStatus.COMPLETED,
+    ];
+    if (!validStatuses.includes(rawClass.status as ClassStatus)) {
+      throw new BadRequestException('Snapshot de presença não permitido para o estado atual da aula');
+    }
+
+    // Validar janela temporal: snapshot deve ser capturado próximo ao horário da aula (±2h)
+    // Extrair T0 da aula (date + time)
+    try {
+      const classDateStr = rawClass.date instanceof Date
+        ? rawClass.date.toISOString().split('T')[0]
+        : String(rawClass.date).split('T')[0];
+      const t0 = new Date(`${classDateStr}T${rawClass.time}:00`);
+      const now = new Date();
+      const diffMs = Math.abs(now.getTime() - t0.getTime());
+      const MAX_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 horas
+      if (diffMs > MAX_WINDOW_MS) {
+        throw new BadRequestException(
+          'Snapshot de presença deve ser capturado dentro de 2 horas do horário da aula',
+        );
+      }
+    } catch (e: any) {
+      if (e instanceof BadRequestException) throw e;
+      // Se não conseguir calcular T0, permitir (não bloquear por erro de parse)
+      this.logger.warn(`[SNAPSHOT] Não foi possível validar janela temporal para aula ${classId}: ${e?.message}`);
     }
 
     // Verificar idempotência — retornar existente se já houver

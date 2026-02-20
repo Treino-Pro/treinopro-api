@@ -15,6 +15,7 @@ import {
   files,
 } from '../../database/schema';
 import { PaymentsService } from '../payments/payments.service';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 import {
   count,
   desc,
@@ -40,6 +41,7 @@ export class AdminService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly paymentsService: PaymentsService,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
   async getDashboardSummary() {
@@ -820,18 +822,9 @@ export class AdminService {
     const newClassStatus =
       resolution === 'resolved_for_personal' ? 'completed' : 'cancelled';
 
-    await this.db
-      .update(classes)
-      .set({
-        disputeStatus: newDisputeStatus,
-        status: newClassStatus,
-        resolution: body.adminNotes ?? null,
-        resolvedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(classes.id, classId));
-
-    // ===== SETTLEMENT FINANCEIRO AUTOMÁTICO =====
+    // ===== SETTLEMENT FINANCEIRO ANTES de atualizar status (Fix: ordering) =====
+    let settlementOk = false;
+    let settlementError: string | null = null;
     try {
       if (resolution === 'resolved_for_personal') {
         // No-show do aluno: capturar pagamento e repassar ao personal
@@ -840,6 +833,7 @@ export class AdminService {
           'Disputa resolvida a favor do personal - no-show do aluno',
         );
         this.logger.log(`✅ [ADMIN_DISPUTE] Repasse ao personal processado para aula ${classId}`);
+        settlementOk = true;
       } else {
         // No-show do personal: reembolsar integralmente ao aluno
         const payment = await this.db.query.payments.findFirst({
@@ -852,6 +846,7 @@ export class AdminService {
           );
           this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
         }
+        settlementOk = true;
 
         // Incrementar strike do personal e registrar aviso formal
         await this.db
@@ -865,19 +860,56 @@ export class AdminService {
         this.logger.warn(
           `⚠️ [ADMIN_DISPUTE] Strike de no-show incrementado para personal ${classRow.personalId}`,
         );
+
+        // Fix 7: Notificação formal ao personal sobre resolução da disputa
+        try {
+          await this.firebaseNotificationService.sendToUser(classRow.personalId, {
+            title: '⚠️ Disputa de no-show resolvida',
+            body: 'Uma disputa foi resolvida contra você. Seu histórico foi atualizado. Consulte o suporte para detalhes.',
+            data: {
+              type: 'dispute_resolved_against_personal',
+              classId,
+              resolution: 'resolved_for_student',
+            },
+          });
+        } catch (notifErr: any) {
+          this.logger.warn(`[ADMIN_DISPUTE] Falha ao enviar notificação ao personal ${classRow.personalId}: ${notifErr?.message}`);
+        }
       }
     } catch (err: any) {
-      // Não falhar a resolução da disputa se o settlement falhar
+      // Logar prominentemente — requer intervenção manual
+      settlementError = err?.message;
       this.logger.error(
-        `❌ [ADMIN_DISPUTE] Erro no settlement financeiro para aula ${classId}: ${err?.message}`,
+        `❌ [ADMIN_DISPUTE] ATENÇÃO: Settlement financeiro falhou para aula ${classId}. ` +
+        `Resolução: ${resolution}. Erro: ${err?.message}. INTERVENÇÃO MANUAL NECESSÁRIA.`,
       );
     }
+
+    // Atualizar status da aula — SEMPRE (decisão do admin é final)
+    // Registrar se o settlement foi processado para auditoria
+    // Construir nota de resolução (com flag de falha de settlement se houver)
+    const resolutionNote = settlementError
+      ? `[SETTLEMENT_FAILED: ${settlementError}] ${body.adminNotes ?? ''}`.trim()
+      : (body.adminNotes ?? null);
+
+    await this.db
+      .update(classes)
+      .set({
+        disputeStatus: newDisputeStatus,
+        status: newClassStatus,
+        resolution: resolutionNote,
+        resolvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(classes.id, classId));
 
     return {
       id: classId,
       disputeStatus: newDisputeStatus,
       status: newClassStatus,
       resolvedAt: new Date().toISOString(),
+      settlementProcessed: settlementOk,
+      ...(settlementError ? { settlementWarning: 'Pagamento não processado automaticamente. Intervenção manual necessária.' } : {}),
     };
   }
 
