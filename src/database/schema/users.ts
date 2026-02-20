@@ -96,6 +96,9 @@ export const users = pgTable(
     // Firebase Cloud Messaging
     fcmToken: text('fcm_token'),
 
+    // Strikes de no-show (personal)
+    personalNoShowStrikes: integer('personal_no_show_strikes').default(0),
+
     // Campos para localização e raio de atendimento do personal
     serviceLocationLat: decimal('service_location_lat', {
       precision: 10,

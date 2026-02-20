@@ -6,6 +6,7 @@ import {
   timestamp,
   integer,
   pgEnum,
+  decimal,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -58,10 +59,56 @@ export const classes = pgTable('classes', {
   resolution: text('resolution'),
   resolvedAt: timestamp('resolved_at'),
 
+  // Confirmação de início por código 4 dígitos
+  startConfirmationCodeHash: text('start_confirmation_code_hash'),
+  startConfirmationCodeExpiresAt: timestamp('start_confirmation_code_expires_at'),
+  startConfirmationAttempts: integer('start_confirmation_attempts').default(0),
+
+  // Regra de 45 minutos
+  minimumCompletionAt: timestamp('minimum_completion_at'),
+
+  // Defesa estruturada por lado (replica)
+  studentDefenseText: text('student_defense_text'),
+  personalDefenseText: text('personal_defense_text'),
+  studentDefenseSubmittedAt: timestamp('student_defense_submitted_at'),
+  personalDefenseSubmittedAt: timestamp('personal_defense_submitted_at'),
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// Enum para role no snapshot
+export const presenceRoleEnum = pgEnum('presence_role', ['student', 'personal']);
+export const captureSourceEnum = pgEnum('capture_source', ['foreground', 'resume', 'background_task']);
+export const appStateEnum = pgEnum('app_state_snapshot', ['foreground', 'background', 'resumed']);
+
+// Tabela de snapshots de presença por aula
+export const classPresenceSnapshots = pgTable('class_presence_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  classId: uuid('class_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  role: presenceRoleEnum('role').notNull(),
+  latitude: decimal('latitude', { precision: 10, scale: 8 }).notNull(),
+  longitude: decimal('longitude', { precision: 11, scale: 8 }).notNull(),
+  accuracyMeters: decimal('accuracy_meters', { precision: 10, scale: 2 }),
+  capturedAt: timestamp('captured_at').notNull(),
+  captureSource: captureSourceEnum('capture_source').notNull(),
+  appState: appStateEnum('app_state').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Relations
+export const classPresenceSnapshotsRelations = relations(classPresenceSnapshots, ({ one }) => ({
+  class: one(classes, {
+    fields: [classPresenceSnapshots.classId],
+    references: [classes.id],
+  }),
+  user: one(users, {
+    fields: [classPresenceSnapshots.userId],
+    references: [users.id],
+  }),
+}));
 
 // Relations
 export const classesRelations = relations(classes, ({ one, many }) => ({

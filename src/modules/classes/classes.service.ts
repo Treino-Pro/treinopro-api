@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Inject, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or, inArray } from 'drizzle-orm';
+import * as crypto from 'crypto';
 import {
   classes,
   users,
@@ -13,6 +14,7 @@ import {
   ratings,
   payments,
   files,
+  classPresenceSnapshots,
 } from '../../database/schema';
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
@@ -34,6 +36,8 @@ import {
   ReportNoShowDto,
   ResolveNoShowDisputeDto,
   ClassTimelineDto,
+  DisputeDefenseDto,
+  PresenceSnapshotDto,
 } from './dto/classes.dto';
 
 @Injectable()
@@ -354,16 +358,26 @@ export class ClassesService {
       }
     }
 
-    // Verificar se a aula foi iniciada há pelo menos 1 minuto (para testes)
+    // Verificar regra de 45 minutos mínimos
     if (classData.startedAt) {
       const now = new Date();
-      const duration =
-        (now.getTime() - classData.startedAt.getTime()) / (1000 * 60); // em minutos
-      console.log('🔍 [COMPLETE_CLASS] Duração da aula:', duration, 'minutos');
+      const rawClassData = await this.db.query.classes.findFirst({
+        where: eq(classes.id, id),
+        columns: { minimumCompletionAt: true },
+      });
+      const minimumCompletionAt = rawClassData?.minimumCompletionAt
+        ? new Date(rawClassData.minimumCompletionAt)
+        : new Date((classData.startedAt as Date).getTime() + 45 * 60 * 1000);
 
-      if (duration < 1) {
-        console.log('❌ [COMPLETE_CLASS] Erro: Aula durou menos de 1 minuto');
-        throw new BadRequestException('A aula deve durar pelo menos 1 minuto');
+      console.log('🔍 [COMPLETE_CLASS] Mínimo para finalizar:', minimumCompletionAt);
+
+      if (now < minimumCompletionAt) {
+        const remainingMs = minimumCompletionAt.getTime() - now.getTime();
+        const remainingMin = Math.ceil(remainingMs / 60000);
+        console.log('❌ [COMPLETE_CLASS] Erro: Mínimo de 45min não atingido. Faltam:', remainingMin, 'min');
+        throw new BadRequestException(
+          `A aula deve durar pelo menos 45 minutos. Faltam ${remainingMin} minuto(s).`,
+        );
       }
     } else {
       console.log('⚠️ [COMPLETE_CLASS] Aviso: Aula não tem startedAt definido');
@@ -740,6 +754,20 @@ export class ClassesService {
       throw new ForbiddenException('Você não pode cancelar esta aula');
     }
 
+    // Aluno: enforcar janela de 2h antes da aula
+    if (classData.studentId === userId && classData.status === ClassStatus.SCHEDULED) {
+      const now = new Date();
+      const classDateTime = new Date(
+        `${(classData.date as Date).toISOString().split('T')[0]}T${classData.time}`,
+      );
+      const cancellationDeadline = new Date(classDateTime.getTime() - 2 * 60 * 60 * 1000);
+      if (now > cancellationDeadline) {
+        throw new BadRequestException(
+          'Cancelamento pelo aluno só é permitido até 2 horas antes da aula. Para cancelamentos tardios, entre em contato com o suporte.',
+        );
+      }
+    }
+
     const [updatedClass] = await this.db
       .update(classes)
       .set({
@@ -835,9 +863,13 @@ export class ClassesService {
     userId: string,
   ): Promise<ClassTimelineDto> {
     const classData = await this.getClassById(classId, userId);
+    const rawClass = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+      columns: { minimumCompletionAt: true, startedAt: true },
+    });
     const now = new Date();
     const classDateTime = new Date(
-      `${classData.date.toISOString().split('T')[0]}T${classData.time}`,
+      `${(classData.date as Date).toISOString().split('T')[0]}T${classData.time}`,
     );
 
     // Calcular deadlines
@@ -867,6 +899,35 @@ export class ClassesService {
       (classData.status === ClassStatus.PENDING_CONFIRMATION ||
         classData.status === ClassStatus.SCHEDULED);
 
+    // Regra de 45 minutos
+    let minimumCompletionAt: Date | undefined;
+    let remainingToCompleteSeconds: number | undefined;
+    let canComplete = false;
+
+    if (classData.status === ClassStatus.ACTIVE && rawClass?.startedAt) {
+      const minAt = rawClass.minimumCompletionAt
+        ? new Date(rawClass.minimumCompletionAt)
+        : new Date(new Date(rawClass.startedAt).getTime() + 45 * 60 * 1000);
+      minimumCompletionAt = minAt;
+      const remainingMs = Math.max(0, minAt.getTime() - now.getTime());
+      remainingToCompleteSeconds = Math.ceil(remainingMs / 1000);
+      canComplete = now >= minAt;
+    }
+
+    // Verificar snapshot de presença do usuário atual
+    let hasPresenceSnapshot = false;
+    try {
+      const snapshot = await this.db.query.classPresenceSnapshots.findFirst({
+        where: and(
+          eq(classPresenceSnapshots.classId, classId),
+          eq(classPresenceSnapshots.userId, userId),
+        ),
+      });
+      hasPresenceSnapshot = !!snapshot;
+    } catch (_) {
+      // Tabela pode ainda não existir em ambientes legados
+    }
+
     return {
       matchTime: classData.createdAt,
       currentTime: now,
@@ -876,8 +937,12 @@ export class ClassesService {
       canReportNoShow,
       canConfirmStart,
       canReportPersonalNoShow,
+      canComplete,
       cancellationDeadline,
       noShowReportDeadline,
+      minimumCompletionAt,
+      remainingToCompleteSeconds,
+      hasPresenceSnapshot,
     };
   }
 
@@ -923,11 +988,19 @@ export class ClassesService {
       }
     }
 
+    // Gerar código de 4 dígitos e hash
+    const plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+    const codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
+
     const [updatedClass] = await this.db
       .update(classes)
       .set({
         status: ClassStatus.PENDING_CONFIRMATION,
         pendingConfirmationAt: new Date(),
+        startConfirmationCodeHash: codeHash,
+        startConfirmationCodeExpiresAt: codeExpiresAt,
+        startConfirmationAttempts: 0,
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -936,6 +1009,9 @@ export class ClassesService {
     // ===== EMITIR EVENTOS WEBSOCKET E PUSH =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
+      // Incluir o código plaintext apenas no response para o personal
+      (classResponse as any).startConfirmationCode = plainCode;
+      (classResponse as any).startConfirmationCodeExpiresAt = codeExpiresAt;
       const studentId = classData.studentId;
 
       // Buscar dados do personal para notificação
@@ -973,7 +1049,11 @@ export class ClassesService {
       console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
     }
 
-    return this.formatClassResponse(updatedClass);
+    const response = await this.formatClassResponse(updatedClass);
+    // Expor código somente para o personal (não persistido em plaintext)
+    (response as any).startConfirmationCode = plainCode;
+    (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+    return response;
   }
 
   async confirmClassStart(
@@ -981,6 +1061,12 @@ export class ClassesService {
     confirmDto: ConfirmClassStartDto,
     userId: string,
   ): Promise<ClassResponseDto> {
+    // Buscar dados crus para validar código (getClassById não retorna hash)
+    const rawClass = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+    });
+    if (!rawClass) throw new NotFoundException('Aula não encontrada');
+
     const classData = await this.getClassById(classId, userId);
 
     // Verificar se o usuário é o aluno
@@ -995,8 +1081,27 @@ export class ClassesService {
       throw new BadRequestException('A aula não está aguardando confirmação');
     }
 
+    // Validar código de confirmação
+    if (rawClass.startConfirmationCodeHash) {
+      // Verificar expiração
+      if (rawClass.startConfirmationCodeExpiresAt && new Date() > rawClass.startConfirmationCodeExpiresAt) {
+        throw new BadRequestException('CONFIRMATION_CODE_EXPIRED: Código de confirmação expirado');
+      }
+      // Incrementar tentativas antes de validar
+      await this.db
+        .update(classes)
+        .set({ startConfirmationAttempts: (rawClass.startConfirmationAttempts || 0) + 1, updatedAt: new Date() })
+        .where(eq(classes.id, classId));
+
+      const submittedHash = crypto.createHash('sha256').update(confirmDto.confirmationCode || '').digest('hex');
+      if (submittedHash !== rawClass.startConfirmationCodeHash) {
+        throw new BadRequestException('INVALID_CONFIRMATION_CODE: Código de confirmação inválido');
+      }
+    }
+
     const startTime = new Date();
-    const durationMs = classData.duration * 60 * 1000; // Converter minutos para milissegundos
+    const minimumCompletionAt = new Date(startTime.getTime() + 45 * 60 * 1000); // T + 45min
+    const durationMs = classData.duration * 60 * 1000;
 
     const [updatedClass] = await this.db
       .update(classes)
@@ -1004,6 +1109,8 @@ export class ClassesService {
         status: ClassStatus.ACTIVE,
         confirmedAt: startTime,
         startedAt: startTime,
+        minimumCompletionAt,
+        startConfirmationCodeHash: null, // Limpar hash após uso
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -1366,6 +1473,128 @@ export class ClassesService {
       .returning();
 
     return this.formatClassResponse(updatedClass);
+  }
+
+  async submitDisputeDefense(
+    classId: string,
+    defenseDto: DisputeDefenseDto,
+    userId: string,
+  ): Promise<ClassResponseDto> {
+    const rawClass = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+    });
+
+    if (!rawClass) throw new NotFoundException('Aula não encontrada');
+
+    // Apenas partes envolvidas
+    if (rawClass.studentId !== userId && rawClass.personalId !== userId) {
+      throw new ForbiddenException('Você não tem acesso a esta aula');
+    }
+
+    // Aula deve estar em disputa
+    if (rawClass.status !== ClassStatus.NO_SHOW_DISPUTE) {
+      throw new BadRequestException('A aula não está em disputa');
+    }
+
+    // Verificar se ainda está dentro do prazo para evidências
+    const now = new Date();
+    if (rawClass.evidenceDeadline && now > new Date(rawClass.evidenceDeadline)) {
+      throw new BadRequestException('Prazo para envio de defesa expirado');
+    }
+
+    // Apenas a parte reportada pode enviar defesa
+    const reportedRole = rawClass.noShowReportedBy; // 'personal' reportou => aluno é reportado
+    const isReportedStudent = reportedRole === 'personal' && rawClass.studentId === userId;
+    const isReportedPersonal = reportedRole === 'student' && rawClass.personalId === userId;
+
+    if (!isReportedStudent && !isReportedPersonal) {
+      throw new ForbiddenException('Apenas a parte reportada pode enviar defesa');
+    }
+
+    const updateData: any = { updatedAt: new Date() };
+    if (isReportedStudent) {
+      updateData.studentDefenseText = defenseDto.text;
+      updateData.studentDefenseSubmittedAt = now;
+      // Mesclar evidências se fornecidas
+      if (defenseDto.evidenceUrls?.length) {
+        const existing = rawClass.studentEvidence ? JSON.parse(rawClass.studentEvidence) : [];
+        updateData.studentEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
+      }
+    } else {
+      updateData.personalDefenseText = defenseDto.text;
+      updateData.personalDefenseSubmittedAt = now;
+      if (defenseDto.evidenceUrls?.length) {
+        const existing = rawClass.personalEvidence ? JSON.parse(rawClass.personalEvidence) : [];
+        updateData.personalEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
+      }
+    }
+
+    const [updatedClass] = await this.db
+      .update(classes)
+      .set(updateData)
+      .where(eq(classes.id, classId))
+      .returning();
+
+    return this.formatClassResponse(updatedClass);
+  }
+
+  async createPresenceSnapshot(
+    classId: string,
+    snapshotDto: PresenceSnapshotDto,
+    userId: string,
+  ): Promise<any> {
+    const rawClass = await this.db.query.classes.findFirst({
+      where: eq(classes.id, classId),
+    });
+
+    if (!rawClass) throw new NotFoundException('Aula não encontrada');
+
+    if (rawClass.studentId !== userId && rawClass.personalId !== userId) {
+      throw new ForbiddenException('Você não tem acesso a esta aula');
+    }
+
+    // Verificar idempotência — retornar existente se já houver
+    try {
+      const existing = await this.db.query.classPresenceSnapshots.findFirst({
+        where: and(
+          eq(classPresenceSnapshots.classId, classId),
+          eq(classPresenceSnapshots.userId, userId),
+        ),
+      });
+      if (existing) return existing;
+    } catch (_) {}
+
+    const role = rawClass.personalId === userId ? 'personal' : 'student';
+
+    try {
+      const [snapshot] = await this.db
+        .insert(classPresenceSnapshots)
+        .values({
+          classId,
+          userId,
+          role,
+          latitude: String(snapshotDto.latitude),
+          longitude: String(snapshotDto.longitude),
+          accuracyMeters: snapshotDto.accuracyMeters != null ? String(snapshotDto.accuracyMeters) : null,
+          capturedAt: new Date(snapshotDto.capturedAt),
+          captureSource: snapshotDto.captureSource,
+          appState: snapshotDto.appState,
+        })
+        .returning();
+      return snapshot;
+    } catch (err: any) {
+      // Conflito de unique constraint (race condition): retornar existente
+      if (err?.code === '23505' || err?.message?.includes('unique')) {
+        const existing = await this.db.query.classPresenceSnapshots.findFirst({
+          where: and(
+            eq(classPresenceSnapshots.classId, classId),
+            eq(classPresenceSnapshots.userId, userId),
+          ),
+        });
+        return existing;
+      }
+      throw err;
+    }
   }
 
   async getClassDisputes(userId: string): Promise<any[]> {

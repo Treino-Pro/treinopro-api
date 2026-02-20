@@ -9,6 +9,10 @@ import {
   Max,
   IsArray,
   IsBoolean,
+  IsNumber,
+  IsLatitude,
+  IsLongitude,
+  Length,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -554,13 +558,72 @@ export class ConfirmClassStartDto {
   @IsBoolean()
   confirmed: boolean;
 
+  @ApiProperty({
+    description: 'Código de 4 dígitos exibido ao personal no início da aula',
+    example: '7391',
+  })
+  @IsString()
+  @Length(4, 4)
+  confirmationCode: string;
+
   @ApiPropertyOptional({
     description: 'Observações do aluno ao confirmar início',
     example: 'Confirmado, estou no local',
   })
   @IsString()
   @IsOptional()
-  notes?: string; // Observações do aluno ao confirmar
+  notes?: string;
+}
+
+export class DisputeDefenseDto {
+  @ApiProperty({
+    description: 'Texto da defesa (replica) da parte reportada',
+    example: 'Eu estava no local às 14:00 conforme combinado...',
+  })
+  @IsString()
+  text: string;
+
+  @ApiPropertyOptional({
+    description: 'URLs de evidências (imagens/vídeos)',
+    example: ['https://example.com/foto1.jpg'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  evidenceUrls?: string[];
+}
+
+export class PresenceSnapshotDto {
+  @ApiProperty({ description: 'Latitude', example: -23.5505 })
+  @IsNumber()
+  latitude: number;
+
+  @ApiProperty({ description: 'Longitude', example: -46.6333 })
+  @IsNumber()
+  longitude: number;
+
+  @ApiPropertyOptional({ description: 'Precisão em metros', example: 12.5 })
+  @IsNumber()
+  @IsOptional()
+  accuracyMeters?: number;
+
+  @ApiProperty({ description: 'Timestamp da captura (ISO 8601)', example: '2024-01-15T14:00:00.000Z' })
+  @IsDateString()
+  capturedAt: string;
+
+  @ApiProperty({
+    description: 'Fonte da captura',
+    enum: ['foreground', 'resume', 'background_task'],
+  })
+  @IsEnum(['foreground', 'resume', 'background_task'])
+  captureSource: 'foreground' | 'resume' | 'background_task';
+
+  @ApiProperty({
+    description: 'Estado do app no momento da captura',
+    enum: ['foreground', 'background', 'resumed'],
+  })
+  @IsEnum(['foreground', 'background', 'resumed'])
+  appState: 'foreground' | 'background' | 'resumed';
 }
 
 export class ReportNoShowDto {
@@ -660,6 +723,12 @@ export class ClassTimelineDto {
   canReportPersonalNoShow: boolean;
 
   @ApiProperty({
+    description: 'Se pode finalizar a aula (regra de 45min)',
+    example: false,
+  })
+  canComplete: boolean;
+
+  @ApiProperty({
     description: 'Prazo para cancelamento',
     example: '2024-01-15T12:00:00.000Z',
   })
@@ -670,6 +739,24 @@ export class ClassTimelineDto {
     example: '2024-01-15T16:00:00.000Z',
   })
   noShowReportDeadline: Date;
+
+  @ApiPropertyOptional({
+    description: 'Horário mínimo para finalizar aula (startedAt + 45min)',
+    example: '2024-01-15T14:45:00.000Z',
+  })
+  minimumCompletionAt?: Date;
+
+  @ApiPropertyOptional({
+    description: 'Segundos restantes até poder finalizar (0 = já pode)',
+    example: 1800,
+  })
+  remainingToCompleteSeconds?: number;
+
+  @ApiPropertyOptional({
+    description: 'Se o usuário atual já registrou snapshot de presença',
+    example: false,
+  })
+  hasPresenceSnapshot?: boolean;
 }
 
 export class ClassDisputeDto {

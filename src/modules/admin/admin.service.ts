@@ -14,6 +14,7 @@ import {
   paymentDisputes,
   files,
 } from '../../database/schema';
+import { PaymentsService } from '../payments/payments.service';
 import {
   count,
   desc,
@@ -36,7 +37,10 @@ import * as fs from 'fs/promises';
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
 
-  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
+  constructor(
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   async getDashboardSummary() {
     const [userCount, proposalStats, classStats, paymentStats, disputesCount] =
@@ -814,7 +818,7 @@ export class AdminService {
     const resolution = body.resolution;
     const newDisputeStatus = resolution;
     const newClassStatus =
-      resolution === 'resolved_for_personal' ? 'completed' : 'custody';
+      resolution === 'resolved_for_personal' ? 'completed' : 'cancelled';
 
     await this.db
       .update(classes)
@@ -826,6 +830,48 @@ export class AdminService {
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId));
+
+    // ===== SETTLEMENT FINANCEIRO AUTOMÁTICO =====
+    try {
+      if (resolution === 'resolved_for_personal') {
+        // No-show do aluno: capturar pagamento e repassar ao personal
+        await this.paymentsService.capturePaymentAfterClass(
+          classId,
+          'Disputa resolvida a favor do personal - no-show do aluno',
+        );
+        this.logger.log(`✅ [ADMIN_DISPUTE] Repasse ao personal processado para aula ${classId}`);
+      } else {
+        // No-show do personal: reembolsar integralmente ao aluno
+        const payment = await this.db.query.payments.findFirst({
+          where: eq(payments.classId, classId),
+        });
+        if (payment) {
+          await this.paymentsService.refundPayment(
+            payment.id,
+            'Disputa resolvida a favor do aluno - no-show do personal',
+          );
+          this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
+        }
+
+        // Incrementar strike do personal e registrar aviso formal
+        await this.db
+          .update(users)
+          .set({
+            personalNoShowStrikes: sql`COALESCE(personal_no_show_strikes, 0) + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, classRow.personalId));
+
+        this.logger.warn(
+          `⚠️ [ADMIN_DISPUTE] Strike de no-show incrementado para personal ${classRow.personalId}`,
+        );
+      }
+    } catch (err: any) {
+      // Não falhar a resolução da disputa se o settlement falhar
+      this.logger.error(
+        `❌ [ADMIN_DISPUTE] Erro no settlement financeiro para aula ${classId}: ${err?.message}`,
+      );
+    }
 
     return {
       id: classId,
