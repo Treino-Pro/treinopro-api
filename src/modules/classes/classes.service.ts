@@ -795,9 +795,9 @@ export class ClassesService {
         this.logger.error(
           `[CRITICAL_CANCELLATION_FAILURE] Falha ao processar reembolso para aula ${id}. A aula NÃO foi cancelada. Erro: ${err.message}`,
         );
-        // Lança o erro para frente, impedindo o cancelamento e informando o usuário.
+        // Lança o erro para frente, impedindo o cancelamento e informando o usuário com uma mensagem segura.
         throw new BadRequestException(
-          `Não foi possível processar o reembolso necessário para o cancelamento. A operação foi abortada para evitar inconsistência financeira. Por favor, tente novamente ou contate o suporte. Erro subjacente: ${err.message}`,
+          `Não foi possível processar o reembolso para esta aula e o cancelamento foi abortado. Por favor, tente novamente ou contate o suporte.`,
         );
       }
     }

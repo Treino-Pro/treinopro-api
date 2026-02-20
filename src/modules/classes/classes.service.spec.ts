@@ -648,13 +648,8 @@ describe('ClassesService', () => {
       ...overrides,
     });
 
-    it('aluno dentro da janela 2h cancela com sucesso e chama cancelPaymentBeforeClass', async () => {
-      // Usar data fixa bem no futuro (sem risco de timezone mismatch)
-      const mockClass = buildScheduledClass({
-        date: new Date('2035-12-31'),
-        time: '23:59',
-      });
-
+    it('aluno dentro da janela 2h cancela com sucesso e aciona reembolso', async () => {
+      const mockClass = buildScheduledClass({ date: new Date('2035-12-31') });
       const cancelledClass = { ...mockClass, status: ClassStatus.CANCELLED };
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
@@ -665,7 +660,6 @@ describe('ClassesService', () => {
           }),
         }),
       });
-
       mockPaymentsService.cancelPaymentBeforeClass.mockResolvedValue(undefined);
 
       const result = await service.cancelClass(classId, studentId);
@@ -673,30 +667,20 @@ describe('ClassesService', () => {
       expect(result.status).toBe(ClassStatus.CANCELLED);
       expect(mockPaymentsService.cancelPaymentBeforeClass).toHaveBeenCalledWith(
         classId,
-        expect.any(String),
+        'Cancelamento pelo aluno com antecedência mínima',
       );
     });
 
     it('aluno fora da janela 2h → BadRequestException', async () => {
-      // Usar data no passado: cancellationDeadline já passou → não pode cancelar
-      const mockClass = buildScheduledClass({
-        date: new Date('2024-01-01'),
-        time: '10:00',
-      });
-
+      const mockClass = buildScheduledClass({ date: new Date('2024-01-01') });
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
-
       await expect(service.cancelClass(classId, studentId)).rejects.toThrow(
         BadRequestException,
       );
     });
 
-    it('personal pode cancelar a qualquer momento', async () => {
-      const mockClass = buildScheduledClass({
-        status: ClassStatus.SCHEDULED,
-        date: new Date('2024-01-01'),
-        time: '10:00',
-      });
+    it('personal pode cancelar a qualquer momento e aciona reembolso para o aluno', async () => {
+      const mockClass = buildScheduledClass();
       const cancelledClass = { ...mockClass, status: ClassStatus.CANCELLED };
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
@@ -707,12 +691,29 @@ describe('ClassesService', () => {
           }),
         }),
       });
+      mockPaymentsService.cancelPaymentBeforeClass.mockResolvedValue(undefined);
 
       const result = await service.cancelClass(classId, personalId);
 
       expect(result.status).toBe(ClassStatus.CANCELLED);
-      // Personal não deve acionar reembolso automático
-      expect(mockPaymentsService.cancelPaymentBeforeClass).not.toHaveBeenCalled();
+      expect(mockPaymentsService.cancelPaymentBeforeClass).toHaveBeenCalledWith(
+        classId,
+        'Cancelamento pelo personal trainer',
+      );
+    });
+
+    it('deve lançar erro e não cancelar a aula se o reembolso falhar', async () => {
+      const mockClass = buildScheduledClass({ date: new Date('2035-12-31') });
+      const refundError = new Error('Falha no gateway de pagamento');
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockPaymentsService.cancelPaymentBeforeClass.mockRejectedValue(refundError);
+
+      await expect(service.cancelClass(classId, studentId)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(mockDb.update).not.toHaveBeenCalled();
     });
   });
 

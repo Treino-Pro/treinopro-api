@@ -19,7 +19,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./test/jest.config.js --runInBand",
     "test:unit": "jest --config ./test/jest.config.js --testPathPattern=spec.ts",
     "test:auth": "jest --config ./test/jest.config.js --testPathPattern=auth",
-    "test:integration": "jest --config jest.integration.json",
+    "test:integration": "jest --config ./test/integration/jest.config.js",
     "test:integration:auth": "jest --config ./test/integration/jest.config.js --testPathPattern=auth",
     "test:integration:db": "jest --config ./test/integration/jest.config.js --testPathPattern=database",
     "test:all": "yarn test:unit && yarn test:integration",
