@@ -1,12 +1,11 @@
 -- Migration: presence_snapshot_unique
--- Description: Cleans orphans, deduplicates based on best evidence, and enforces referential integrity.
+-- Description: Cleans orphans (classes), deduplicates based on best evidence, and enforces referential integrity with evidence protection.
 
 DO $$ 
 BEGIN
-    -- 1. Limpeza de snapshots órfãos (onde a aula ou usuário não existem mais)
+    -- 1. Limpeza de snapshots órfãos de AULAS (sem aula, o snapshot perde o contexto)
     DELETE FROM class_presence_snapshots
-    WHERE class_id NOT IN (SELECT id FROM classes)
-       OR user_id NOT IN (SELECT id FROM users);
+    WHERE class_id NOT IN (SELECT id FROM classes);
 
     -- 2. Limpeza de duplicatas legadas baseada em QUALIDADE de evidência
     DELETE FROM class_presence_snapshots
@@ -41,9 +40,9 @@ BEGIN
         ADD CONSTRAINT class_presence_snapshots_class_id_user_id_unique UNIQUE(class_id, user_id);
     END IF;
 
-    -- 4. Adição de Foreign Keys para garantir integridade referencial
-    
-    -- FK para classes
+    -- 4. Adição de Foreign Keys
+
+    -- FK para classes: CASCADE é seguro aqui (aula excluída = fim do contexto)
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'class_presence_snapshots_class_id_classes_id_fk'
@@ -54,7 +53,8 @@ BEGIN
         FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE;
     END IF;
 
-    -- FK para users
+    -- FK para users: NO ACTION / RESTRICT para proteger evidência histórica
+    -- Isso impede a exclusão do usuário se houver snapshots vinculados.
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'class_presence_snapshots_user_id_users_id_fk'
@@ -62,7 +62,7 @@ BEGIN
     ) THEN
         ALTER TABLE class_presence_snapshots 
         ADD CONSTRAINT class_presence_snapshots_user_id_users_id_fk 
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE NO ACTION;
     END IF;
 
 END $$;
