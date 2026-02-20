@@ -87,6 +87,10 @@ export class MercadoPagoService {
   ): Promise<MPPreferenceResponse> {
     try {
       // Configurar preferência com split
+      const prefApiUrl = process.env.API_URL;
+      const prefIsPublicUrl =
+        !!prefApiUrl && !/localhost|127\.0\.0\.1/.test(prefApiUrl);
+
       const preferenceData = {
         items: [
           {
@@ -114,8 +118,10 @@ export class MercadoPagoService {
           pending: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/pending`,
         },
 
-        // URL de notificação (webhook)
-        notification_url: `${process.env.API_URL || 'http://localhost:3000'}/payments/webhook`,
+        // URL de notificação (webhook) — omitida em desenvolvimento local
+        ...(prefIsPublicUrl
+          ? { notification_url: `${prefApiUrl}/webhooks/mercadopago` }
+          : {}),
 
         // Referência externa
         external_reference: data.externalReference,

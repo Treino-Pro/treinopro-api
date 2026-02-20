@@ -962,6 +962,8 @@ export class AuthService {
       privacyPolicyAccepted: true,
       termsAcceptedDate: new Date(),
       isVerified: true, // Admin é verificado automaticamente
+      // Aprovação explícita: admins não passam por revisão CREF
+      approvalStatus: 'approved' as const,
     };
 
     // Inserir admin

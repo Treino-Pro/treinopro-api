@@ -4,7 +4,12 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
-ALTER TYPE "document_type" ADD VALUE 'CPF';--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TYPE "document_type" ADD VALUE 'CPF';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "used_nonces" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"nonce" varchar(255) NOT NULL,
@@ -25,17 +30,22 @@ CREATE TABLE IF NOT EXISTS "in_app_notifications" (
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "users" DROP CONSTRAINT "users_email_unique";--> statement-breakpoint
-ALTER TABLE "classes" ADD COLUMN "no_show_reason" text;--> statement-breakpoint
-ALTER TABLE "classes" ADD COLUMN "no_show_notes" text;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "approval_status" "personal_approval_status" DEFAULT 'approved' NOT NULL;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "admin_notes" text;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "approval_reviewed_at" timestamp;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "approval_reviewed_by" uuid;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "service_location_lat" numeric(10, 8);--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "service_location_lng" numeric(11, 8);--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "service_radius_km" numeric(5, 2);--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "is_personal_online" boolean DEFAULT false;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "users" DROP CONSTRAINT "users_email_unique";
+EXCEPTION
+ WHEN undefined_object THEN null;
+END $$;
+--> statement-breakpoint
+ALTER TABLE "classes" ADD COLUMN IF NOT EXISTS "no_show_reason" text;--> statement-breakpoint
+ALTER TABLE "classes" ADD COLUMN IF NOT EXISTS "no_show_notes" text;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "approval_status" "personal_approval_status" DEFAULT 'approved' NOT NULL;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "admin_notes" text;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "approval_reviewed_at" timestamp;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "approval_reviewed_by" uuid;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "service_location_lat" numeric(10, 8);--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "service_location_lng" numeric(11, 8);--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "service_radius_km" numeric(5, 2);--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "is_personal_online" boolean DEFAULT false;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_used_nonces_nonce" ON "used_nonces" ("nonce");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_used_nonces_proposal" ON "used_nonces" ("proposal_id");--> statement-breakpoint
 DO $$ BEGIN
@@ -49,3 +59,6 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_lower_unique" ON "users" (LOWER("email"));--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_users_type_approval_created" ON "users" ("user_type", "approval_status", "created_at" DESC);

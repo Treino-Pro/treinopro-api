@@ -137,10 +137,10 @@ export class CreateProposalDto {
   @ApiProperty({
     description: 'Preço da proposta em reais',
     example: 80.0,
-    minimum: 20,
+    minimum: 35,
   })
   @IsNumber()
-  @Min(20)
+  @Min(35)
   price: number;
 
   @ApiProperty({

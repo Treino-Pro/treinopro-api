@@ -476,14 +476,10 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async getPersonalFinancialStats(@Request() req) {
     const userId = req.user.sub;
-    console.log(
-      `📊 [PERSONAL_STATS] Consultando estatísticas financeiras para personal ${userId}`,
-    );
 
     try {
       const stats =
         await this.paymentsService.getPersonalFinancialStats(userId);
-      console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, stats);
 
       return {
         success: true,

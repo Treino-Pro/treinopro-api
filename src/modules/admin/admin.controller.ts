@@ -17,11 +17,13 @@ import {
 import { createReadStream } from 'fs';
 import {
   ApiBearerAuth,
+  ApiExtraModels,
   ApiOperation,
   ApiTags,
   ApiResponse,
   ApiParam,
   ApiQuery,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -53,6 +55,7 @@ import { CreateMissionDto } from '../gamification/dto/gamification.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
+@ApiExtraModels(PendingPersonalItemDto)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 @Controller('admin')
@@ -270,15 +273,24 @@ export class AdminController {
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página' })
   @ApiResponse({
     status: 200,
-    description: 'Lista de personals pendentes retornada com sucesso',
-    type: [PendingPersonalItemDto],
+    description: 'Lista paginada de personals pendentes retornada com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { $ref: getSchemaPath(PendingPersonalItemDto) } },
+        total: { type: 'number', example: 5 },
+        page: { type: 'number', example: 1 },
+        limit: { type: 'number', example: 20 },
+        totalPages: { type: 'number', example: 1 },
+      },
+    },
   })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
   @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
   async listPendingPersonals(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-  ): Promise<{ items: PendingPersonalItemDto[]; total: number; totalPages: number }> {
+  ): Promise<{ items: PendingPersonalItemDto[]; total: number; page: number; limit: number; totalPages: number }> {
     const filters: { page?: number; limit?: number } = {};
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
     if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));

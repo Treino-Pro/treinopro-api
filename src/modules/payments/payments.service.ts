@@ -1152,10 +1152,6 @@ export class PaymentsService {
     pendingWithdrawals: number;
     recentTransactions: TransactionResponseDto[];
   }> {
-    console.log(
-      `📊 [PERSONAL_STATS] Buscando estatísticas para personal ${userId}`,
-    );
-
     // Buscar carteira
     const wallet = await this.getUserWallet(userId);
 
@@ -1170,13 +1166,6 @@ export class PaymentsService {
     const totalEarnings = parseFloat(wallet.totalEarned.toString());
     const totalWithdrawals = parseFloat(wallet.totalWithdrawn.toString());
     const pendingWithdrawals = parseFloat(wallet.pendingBalance.toString());
-
-    console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, {
-      totalEarnings,
-      totalWithdrawals,
-      pendingWithdrawals,
-      availableBalance: wallet.availableBalance,
-    });
 
     return {
       wallet,

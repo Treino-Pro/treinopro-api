@@ -8,7 +8,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { randomUUID } from 'crypto';
-import { eq, and, desc, gte, lte, count, sql, or, isNull } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sql, isNull } from 'drizzle-orm';
 import { ChatGateway } from '../chat/chat.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -18,16 +18,9 @@ import {
   userAchievements,
   userMissions,
   xpHistory,
-  MissionType,
-  AchievementCategory,
   MissionStatus,
   XPSource,
-  UserProfile,
-  Mission,
   Achievement,
-  UserAchievement,
-  UserMission,
-  XPHistory,
 } from '../../database/schema';
 import { users } from '../../database/schema/users';
 import {
@@ -72,13 +65,6 @@ export class GamificationService {
     userId: string,
   ): void {
     try {
-      this.logger.log(
-        `🎯 [GAMIFICATION] ===== EMITINDO EVENTO WEBSOCKET =====`,
-      );
-      this.logger.log(`🎯 [GAMIFICATION] Action: ${action}`);
-      this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
-      this.logger.log(`🎯 [GAMIFICATION] Payload: ${JSON.stringify(payload)}`);
-
       const eventId = randomUUID();
       const now = Date.now();
       // Limpeza de TTL
@@ -96,10 +82,6 @@ export class GamificationService {
         timestamp: new Date(),
       };
 
-      this.logger.log(
-        `🎯 [GAMIFICATION] EventPayload: ${JSON.stringify(eventPayload)}`,
-      );
-
       // Persistir no Event Store (melhor esforço, ignora se tabela não existe)
       this.persistEventToStore(eventId, userId, action, eventPayload).catch(
         (err) => {
@@ -110,9 +92,7 @@ export class GamificationService {
       );
 
       // Emitir em tempo real - usar o action como tipo de evento
-      this.logger.log(`🎯 [GAMIFICATION] Emitindo evento WebSocket: ${action}`);
       this.chatGateway.server.emit(action, eventPayload);
-      this.logger.log(`🎯 [GAMIFICATION] Evento WebSocket emitido com sucesso`);
 
       // Enfileirar para processamento assíncrono
       try {
@@ -120,20 +100,19 @@ export class GamificationService {
           removeOnComplete: true,
           removeOnFail: true,
         });
-      } catch (_) {
+      } catch (e) {
+        this.logger.warn(
+          `⚠️ [GAMIFICATION] Falha ao enfileirar evento: ${e?.message || e}`,
+        );
         // Se a fila não estiver configurada, não falha o fluxo principal
       }
 
       // Persistir métrica diária básica (melhor esforço)
-      this.persistDailyMetric(userId, action, eventPayload).catch((err) => {
+      this.persistDailyMetric(userId, action).catch((err) => {
         this.logger.warn(
           `⚠️ [GAMIFICATION] Metrics indisponível: ${err?.message || err}`,
         );
       });
-
-      this.logger.log(
-        `✅ [GAMIFICATION] ===== EVENTO WEBSOCKET FINALIZADO =====`,
-      );
     } catch (error) {
       this.logger.error(
         '❌ [GAMIFICATION] Erro ao emitir evento WebSocket:',
@@ -161,7 +140,6 @@ export class GamificationService {
   private async persistDailyMetric(
     userId: string,
     type: string,
-    payload: any,
   ): Promise<void> {
     try {
       // Incremento diário simples por usuário e tipo de evento
@@ -180,10 +158,6 @@ export class GamificationService {
   // ===== SISTEMA DE XP E NÍVEIS =====
 
   async getUserProfile(userId: string): Promise<UserProfileResponseDto> {
-    this.logger.log(
-      `🔍 [GAMIFICATION_SERVICE] getUserProfile chamado com userId: ${userId}`,
-    );
-
     // ✅ CORREÇÃO: Validar que usuário existe antes de buscar/criar perfil
     const [userExists] = await this.db
       .select({ id: users.id })
@@ -206,26 +180,8 @@ export class GamificationService {
       .where(eq(userProfiles.userId, userId))
       .limit(1);
 
-    this.logger.log(
-      `🔍 [GAMIFICATION_SERVICE] Profile encontrado: ${profile ? 'SIM' : 'NÃO'}`,
-    );
-    if (profile) {
-      this.logger.log(
-        `🔍 [GAMIFICATION_SERVICE] Profile.userId: ${profile.userId}`,
-      );
-      this.logger.log(
-        `🔍 [GAMIFICATION_SERVICE] Profile.level: ${profile.level}`,
-      );
-      this.logger.log(
-        `🔍 [GAMIFICATION_SERVICE] Profile.totalXP: ${profile.totalXP}`,
-      );
-    }
-
     if (!profile) {
       // Criar perfil inicial se não existir
-      this.logger.log(
-        `🆕 [GAMIFICATION_SERVICE] Criando perfil inicial para userId: ${userId}`,
-      );
       return this.createInitialProfile(userId);
     }
 
@@ -447,10 +403,8 @@ export class GamificationService {
       };
 
       // Verificar conquistas desbloqueadas
-      const unlockedAchievements = await this.checkAndUnlockAchievements(
-        userId,
-        newLevel,
-      );
+      const unlockedAchievements =
+        await this.checkAndUnlockAchievements(userId, newLevel);
       levelUpResponse.unlockedAchievements = unlockedAchievements.map(
         (a) => a.name,
       );
@@ -471,15 +425,9 @@ export class GamificationService {
         userId,
       );
 
-      this.logger.log(
-        `🎉 [GAMIFICATION] Usuário ${userId} subiu para o nível ${newLevel}`,
-      );
       return levelUpResponse;
     }
 
-    this.logger.log(
-      `💫 [GAMIFICATION] Usuário ${userId} ganhou ${xpAmount} XP (${source})`,
-    );
     return null;
   }
 
@@ -610,15 +558,16 @@ export class GamificationService {
       if (cond.user_type === 'student' || cond.user_type === 'personal') {
         requiredUserType = cond.user_type;
       }
-    } catch (_) {
-      // ignorar
+    } catch (e) {
+      this.logger.warn(
+        `⚠️ [GAMIFICATION] Erro ao processar requirements da missão ${mission.id}:`,
+        e,
+      );
     }
 
     // Buscar usuários elegíveis
     // Import do schema de usuários
-    const { users, userStatusEnum } = await import(
-      '../../database/schema/users'
-    );
+    const { users } = await import('../../database/schema/users');
 
     const conditions: any[] = [];
     if (requiredUserType) {
@@ -840,17 +789,7 @@ export class GamificationService {
   async updateMissionProgress(
     progressDto: MissionProgressDto,
   ): Promise<UserMissionResponseDto[]> {
-    const { userId, action, count, metadata } = progressDto;
-
-    this.logger.log(
-      `🎯 [GAMIFICATION] ===== ATUALIZANDO PROGRESSO DE MISSÕES =====`,
-    );
-    this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
-    this.logger.log(`🎯 [GAMIFICATION] Action: ${action}`);
-    this.logger.log(`🎯 [GAMIFICATION] Count: ${count}`);
-
-    // Buscar missões ativas do usuário que correspondem à ação
-    this.logger.log(`🎯 [GAMIFICATION] Buscando missões ativas...`);
+    const { userId, action, count } = progressDto;
     const activeMissions = await this.db
       .select()
       .from(userMissions)
@@ -863,35 +802,14 @@ export class GamificationService {
         ),
       );
 
-    this.logger.log(
-      `🎯 [GAMIFICATION] Missões ativas encontradas: ${activeMissions.length}`,
-    );
-
     const updatedMissions = [];
 
     for (const userMission of activeMissions) {
-      this.logger.log(
-        `🎯 [GAMIFICATION] Processando missão: ${userMission.missions.title}`,
-      );
-      this.logger.log(
-        `🎯 [GAMIFICATION] Progresso atual: ${userMission.user_missions.progress}`,
-      );
-      this.logger.log(
-        `🎯 [GAMIFICATION] Total necessário: ${userMission.missions.requirements.count}`,
-      );
-
       const newProgress = userMission.user_missions.progress + count;
       const totalRequired = userMission.missions.requirements.count;
 
-      this.logger.log(
-        `🎯 [GAMIFICATION] Novo progresso: ${newProgress}/${totalRequired}`,
-      );
-
       if (newProgress >= totalRequired) {
         // Missão completada
-        this.logger.log(
-          `🎯 [GAMIFICATION] Missão completada! Atualizando status...`,
-        );
         await this.db
           .update(userMissions)
           .set({
@@ -907,19 +825,12 @@ export class GamificationService {
           userMission.missions.type === 'weekly'
             ? 20
             : userMission.missions.xpReward;
-        this.logger.log(
-          `🎯 [GAMIFICATION] Adicionando XP de recompensa: ${weeklyBonusXP}`,
-        );
         await this.addXP(userId, {
           xpAmount: weeklyBonusXP,
           source: XPSource.MISSION,
           sourceId: userMission.missions.id,
           description: `Missão completada: ${userMission.missions.title}`,
         });
-
-        this.logger.log(
-          `🎯 [GAMIFICATION] Missão completada: ${userMission.missions.title} (${userId})`,
-        );
 
         const completedMissionData = {
           ...userMission.user_missions,
@@ -931,11 +842,6 @@ export class GamificationService {
         };
 
         updatedMissions.push(completedMissionData);
-
-        // ===== EVENTO WEBSOCKET PARA MISSÃO COMPLETADA =====
-        this.logger.log(
-          `🎯 [GAMIFICATION] Emitindo evento WebSocket mission_completed...`,
-        );
         this.emitProfileUpdate(
           'mission_completed',
           {
@@ -953,9 +859,6 @@ export class GamificationService {
           },
           userId,
         );
-        this.logger.log(
-          `🎯 [GAMIFICATION] Evento WebSocket emitido com sucesso`,
-        );
 
         // Criar notificação in-app para missão completada
         try {
@@ -968,9 +871,6 @@ export class GamificationService {
               xpReward: userMission.missions.xpReward,
             },
           );
-          this.logger.log(
-            `🔔 [GAMIFICATION] Notificação in-app criada para missão completada`,
-          );
         } catch (error) {
           this.logger.error(
             `❌ [GAMIFICATION] Erro ao criar notificação in-app:`,
@@ -980,12 +880,9 @@ export class GamificationService {
         }
 
         // Atribuir próxima missão automaticamente
-        this.logger.log(`🎯 [GAMIFICATION] Atribuindo próxima missão...`);
         await this.assignNextMission(userId);
-        this.logger.log(`🎯 [GAMIFICATION] Próxima missão atribuída`);
       } else {
         // Atualizar progresso
-        this.logger.log(`🎯 [GAMIFICATION] Atualizando progresso da missão...`);
         await this.db
           .update(userMissions)
           .set({
@@ -1002,9 +899,6 @@ export class GamificationService {
         });
 
         // ===== EVENTO WEBSOCKET PARA PROGRESSO DE MISSÃO =====
-        this.logger.log(
-          `🎯 [GAMIFICATION] Emitindo evento WebSocket mission_progressed...`,
-        );
         this.emitProfileUpdate(
           'mission_progressed',
           {
@@ -1021,18 +915,9 @@ export class GamificationService {
           },
           userId,
         );
-        this.logger.log(
-          `🎯 [GAMIFICATION] Evento WebSocket mission_progressed emitido`,
-        );
-        this.logger.log(
-          `🎯 [GAMIFICATION] Progresso atualizado: ${newProgress}/${totalRequired}`,
-        );
       }
     }
 
-    this.logger.log(
-      `✅ [GAMIFICATION] ===== ATUALIZAÇÃO DE MISSÕES FINALIZADA =====`,
-    );
     return updatedMissions;
   }
 
@@ -1159,7 +1044,15 @@ export class GamificationService {
   async updateAchievementProgress(
     progressDto: AchievementProgressDto,
   ): Promise<UserAchievementResponseDto[]> {
-    const { userId, action, count, metadata } = progressDto;
+    const { userId, action } = progressDto;
+
+    // Buscar userType do usuário uma vez para validar conditions por conquista
+    const [userRow] = await this.db
+      .select({ userType: users.userType })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const userType = userRow?.userType ?? null;
 
     // Buscar conquistas ativas que correspondem à ação
     const activeAchievements = await this.db
@@ -1172,6 +1065,12 @@ export class GamificationService {
     const unlockedAchievements = [];
 
     for (const achievement of activeAchievements) {
+      // Verificar condições de contexto (ex: user_type restringe a tipo específico)
+      const conditions = (achievement.requirements as any)?.conditions;
+      if (conditions?.user_type && userType !== conditions.user_type) {
+        continue;
+      }
+
       // Verificar se já foi conquistada
       const [existingAchievement] = await this.db
         .select()
@@ -1187,13 +1086,9 @@ export class GamificationService {
       if (existingAchievement) continue;
 
       // Verificar se os requisitos foram atendidos
-      const totalProgress = await this.getUserActionCount(
-        userId,
-        action,
-        achievement.requirements.conditions,
-      );
+      const totalProgress = await this.getUserActionCount(userId, action);
 
-      if (totalProgress >= achievement.requirements.count) {
+      if (totalProgress >= (achievement.requirements as any)?.count) {
         // Conquistar achievement
         const [userAchievement] = await this.db
           .insert(userAchievements)
@@ -1212,10 +1107,6 @@ export class GamificationService {
           description: `Conquista desbloqueada: ${achievement.name}`,
         });
 
-        this.logger.log(
-          `🏆 [GAMIFICATION] Conquista desbloqueada: ${achievement.name} (${userId})`,
-        );
-
         unlockedAchievements.push({
           ...userAchievement,
           achievement,
@@ -1228,7 +1119,7 @@ export class GamificationService {
 
   private async checkAndUnlockAchievements(
     userId: string,
-    level: number,
+    currentLevel: number,
   ): Promise<Achievement[]> {
     // Buscar conquistas baseadas em nível
     const levelAchievements = await this.db
@@ -1248,6 +1139,12 @@ export class GamificationService {
     const unlockedAchievements = [];
 
     for (const achievement of levelAchievements) {
+      // Verificar se o nível atual do usuário atinge o requisito da conquista
+      const requiredLevel = (achievement.requirements as any)?.count;
+      if (requiredLevel !== undefined && currentLevel < requiredLevel) {
+        continue;
+      }
+
       // Verificar se já foi conquistada
       const [existingAchievement] = await this.db
         .select()
@@ -1278,12 +1175,27 @@ export class GamificationService {
   private async getUserActionCount(
     userId: string,
     action: string,
-    conditions?: Record<string, any>,
   ): Promise<number> {
-    // Implementar lógica para contar ações específicas do usuário
-    // Por exemplo, aulas completadas, dias consecutivos, etc.
-    // Por enquanto, retornar 0 - será implementado conforme necessário
-    return 0;
+    // Mapeia ação da conquista para source do xpHistory
+    const actionToSource: Record<string, string> = {
+      attend_class: XPSource.CLASS_COMPLETION,
+      complete_as_personal: XPSource.CLASS_COMPLETION,
+    };
+
+    const source = actionToSource[action];
+    if (!source) return 0;
+
+    const [result] = await this.db
+      .select({ total: count() })
+      .from(xpHistory)
+      .where(
+        and(
+          eq(xpHistory.userId, userId),
+          eq(xpHistory.source, source as any),
+        ),
+      );
+
+    return result?.total ?? 0;
   }
 
   // ===== HISTÓRICO DE XP =====
@@ -1336,14 +1248,7 @@ export class GamificationService {
   async getGamificationStats(
     userId: string,
   ): Promise<GamificationStatsResponseDto> {
-    this.logger.log(
-      `📊 [GAMIFICATION_SERVICE] getGamificationStats chamado com userId: ${userId}`,
-    );
-
     const profile = await this.getUserProfile(userId);
-    this.logger.log(
-      `📊 [GAMIFICATION_SERVICE] Profile retornado - userId: ${profile.userId}, level: ${profile.level}, totalXP: ${profile.totalXP}`,
-    );
 
     // Buscar conquistas do usuário
     const userAchievements = await this.getUserAchievements(userId);
@@ -1511,10 +1416,6 @@ export class GamificationService {
     missionsAssigned: number;
     errors: string[];
   }> {
-    this.logger.log(
-      '🔄 [GAMIFICATION] Iniciando migração de usuários existentes...',
-    );
-
     let usersProcessed = 0;
     let missionsAssigned = 0;
     const errors: string[] = [];
@@ -1526,19 +1427,11 @@ export class GamificationService {
         .from(users)
         .leftJoin(userProfiles, eq(users.id, userProfiles.userId))
         .where(isNull(userProfiles.userId));
-
-      this.logger.log(
-        `📊 [GAMIFICATION] Encontrados ${usersWithoutProfile.length} usuários sem perfil de gamificação`,
-      );
-
       for (const user of usersWithoutProfile) {
         try {
           // Criar perfil inicial (que já atribui primeira missão)
           await this.createInitialProfile(user.id);
           missionsAssigned++;
-          this.logger.log(
-            `✅ [GAMIFICATION] Perfil criado para usuário: ${user.email}`,
-          );
         } catch (error) {
           const errorMsg = `Erro ao criar perfil para ${user.email}: ${error.message}`;
           errors.push(errorMsg);
@@ -1549,8 +1442,6 @@ export class GamificationService {
       }
 
       const message = `Migração concluída! ${usersProcessed} usuários processados, ${missionsAssigned} missões atribuídas`;
-      this.logger.log(`🎉 [GAMIFICATION] ${message}`);
-
       return {
         message,
         usersProcessed,
@@ -1573,51 +1464,32 @@ export class GamificationService {
   // ===== MÉTODOS DE INTEGRAÇÃO =====
 
   async processClassCompletion(userId: string, classId: string): Promise<void> {
-    this.logger.log(
-      `🎯 [GAMIFICATION] ===== INICIANDO PROCESSAMENTO DE CONCLUSÃO =====`,
-    );
-    this.logger.log(`🎯 [GAMIFICATION] UserId: ${userId}`);
-    this.logger.log(`🎯 [GAMIFICATION] ClassId: ${classId}`);
-
     try {
       // Dar XP por completar aula
-      this.logger.log(
-        `🎯 [GAMIFICATION] Adicionando XP por aula completada...`,
-      );
       await this.addXP(userId, {
         xpAmount: 10, // XP fixo por aula completada (ajustado)
         source: XPSource.CLASS_COMPLETION,
         sourceId: classId,
         description: 'Aula completada',
       });
-      this.logger.log(`🎯 [GAMIFICATION] XP adicionado com sucesso`);
 
       // Atualizar progresso de missões relacionadas a aulas
-      this.logger.log(`🎯 [GAMIFICATION] Atualizando progresso de missões...`);
       const updatedMissions = await this.updateMissionProgress({
         userId,
         action: 'attend_class',
         count: 1,
         metadata: { classId },
       });
-      this.logger.log(`🎯 [GAMIFICATION] Progresso de missões atualizado`);
 
       // Atualizar progresso de conquistas relacionadas a aulas
-      this.logger.log(
-        `🎯 [GAMIFICATION] Atualizando progresso de conquistas...`,
-      );
       await this.updateAchievementProgress({
         userId,
         action: 'attend_class',
         count: 1,
         metadata: { classId },
       });
-      this.logger.log(`🎯 [GAMIFICATION] Progresso de conquistas atualizado`);
 
       // Emitir evento consolidado com as missões atualizadas para resolver race condition
-      this.logger.log(
-        `🎯 [GAMIFICATION] Emitindo evento consolidado de conclusão...`,
-      );
       this.emitProfileUpdate(
         'class_completion_processed',
         {
@@ -1635,13 +1507,6 @@ export class GamificationService {
           },
         },
         userId,
-      );
-      this.logger.log(
-        `🎯 [GAMIFICATION] Evento consolidado emitido com sucesso`,
-      );
-
-      this.logger.log(
-        `✅ [GAMIFICATION] ===== PROCESSAMENTO DE CONCLUSÃO FINALIZADO COM SUCESSO =====`,
       );
     } catch (error) {
       this.logger.error(

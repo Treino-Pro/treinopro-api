@@ -9,7 +9,7 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards, Inject } from '@nestjs/common';
+import { Logger, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { SendMessageDto, WebSocketMessageDto } from './dto/chat.dto';
@@ -58,17 +58,8 @@ export class ChatGateway
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      console.log('🔌 [CHAT_GATEWAY] Nova conexão WebSocket recebida');
-      console.log('🔌 [CHAT_GATEWAY] Headers:', client.handshake.headers);
-      console.log('🔌 [CHAT_GATEWAY] Query:', client.handshake.query);
-      console.log('🔌 [CHAT_GATEWAY] Auth:', client.handshake.auth);
-
       // Extrair token do handshake
       const token = this.extractTokenFromSocket(client);
-      console.log(
-        '🔌 [CHAT_GATEWAY] Token extraído:',
-        token ? 'Presente' : 'Ausente',
-      );
 
       if (!token) {
         this.logger.warn(`Connection rejected: No token provided`);
@@ -80,11 +71,6 @@ export class ChatGateway
       const payload = this.jwtService.verify(token);
       client.userId = payload.sub;
       client.userType = payload.userType;
-
-      console.log('🔌 [CHAT_GATEWAY] Usuário autenticado:', {
-        userId: client.userId,
-        userType: client.userType,
-      });
 
       // Armazenar conexão do usuário
       this.connectedUsers.set(client.userId, {
@@ -98,14 +84,6 @@ export class ChatGateway
         userType: client.userType,
         timestamp: new Date(),
       });
-
-      this.logger.log(
-        `User ${client.userId} connected with socket ${client.id}`,
-      );
-      console.log(
-        '🔌 [CHAT_GATEWAY] Total de usuários conectados:',
-        this.connectedUsers.size,
-      );
     } catch (error) {
       this.logger.error(`Connection error: ${error.message}`);
       console.error('❌ [CHAT_GATEWAY] Erro na conexão:', error);
@@ -206,8 +184,6 @@ export class ChatGateway
       // Adicionar o cliente à sala da classe
       await client.join(`class_${data.classId}`);
 
-      this.logger.log(`User ${client.userId} joined class ${data.classId}`);
-
       client.emit('joined_class', {
         classId: data.classId,
         timestamp: new Date(),
@@ -233,8 +209,6 @@ export class ChatGateway
 
       // Remover o cliente da sala da classe
       await client.leave(`class_${data.classId}`);
-
-      this.logger.log(`User ${client.userId} left class ${data.classId}`);
 
       client.emit('left_class', {
         classId: data.classId,
@@ -373,10 +347,6 @@ export class ChatGateway
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     try {
-      this.logger.log(
-        `⏰ [CHAT_GATEWAY] Timer de busca expirado para proposta ${data.proposalId}`,
-      );
-
       // Emitir evento de volta para sincronizar com outros clientes
       this.server.emit('proposal_expired', {
         action: 'proposal_expired',
@@ -388,10 +358,6 @@ export class ChatGateway
         reason: data.reason,
         timestamp: new Date(),
       });
-
-      this.logger.log(
-        `📡 [CHAT_GATEWAY] Evento proposal_expired emitido para proposta ${data.proposalId}`,
-      );
     } catch (error) {
       this.logger.error(
         `❌ [CHAT_GATEWAY] Erro ao processar timeout de busca: ${error.message}`,
@@ -491,10 +457,6 @@ export class ChatGateway
           })
           .where(eq(users.id, client.userId));
 
-        this.logger.log(
-          `📍 Personal ${client.userId} atualizou localização: lat=${data.center.lat}, lng=${data.center.lng}, raio=${data.radiusKm}km e está ONLINE`,
-        );
-
         client.emit('personal_online_confirmed', {
           success: true,
           message: 'Localização e raio atualizados',
@@ -529,8 +491,6 @@ export class ChatGateway
           updatedAt: new Date(),
         })
         .where(eq(users.id, client.userId));
-
-      this.logger.log(`📴 Personal ${client.userId} foi marcado como OFFLINE`);
 
       client.emit('personal_offline_confirmed', {
         success: true,

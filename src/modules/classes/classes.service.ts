@@ -4,7 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, desc, count, sql, or, inArray } from 'drizzle-orm';
 import {
   classes,
@@ -34,11 +34,12 @@ import {
   ReportNoShowDto,
   ResolveNoShowDisputeDto,
   ClassTimelineDto,
-  ClassDisputeDto,
 } from './dto/classes.dto';
 
 @Injectable()
 export class ClassesService {
+  private readonly logger = new Logger(ClassesService.name);
+
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly gamificationService: GamificationService,
@@ -394,11 +395,6 @@ export class ClassesService {
           .update(proposals)
           .set({ status: 'completed', updatedAt: new Date() })
           .where(eq(proposals.id, relatedProposal.id));
-
-        console.log(
-          '✅ [CLASSES] Proposta vinculada marcada como completed:',
-          relatedProposal.id,
-        );
       }
     } catch (err) {
       console.warn(
@@ -409,31 +405,11 @@ export class ClassesService {
 
     // ===== INTEGRAÇÃO COM GAMIFICAÇÃO =====
     try {
-      console.log(
-        '🎯 [COMPLETE_CLASS] ===== INICIANDO PROCESSAMENTO DE GAMIFICAÇÃO =====',
-      );
-      console.log('🎯 [COMPLETE_CLASS] Student ID:', classData.studentId);
-      console.log('🎯 [COMPLETE_CLASS] Personal ID:', userId);
-      console.log('🎯 [COMPLETE_CLASS] Class ID:', id);
-
-      // Dar XP para o aluno por completar a aula
-      console.log('🎯 [COMPLETE_CLASS] Processando XP para aluno...');
       await this.gamificationService.processClassCompletion(
         classData.studentId,
         id,
       );
-      console.log('✅ [COMPLETE_CLASS] XP processado para aluno com sucesso');
-
-      // Dar XP para o personal trainer por completar a aula
-      console.log('🎯 [COMPLETE_CLASS] Processando XP para personal...');
       await this.gamificationService.processClassCompletion(userId, id);
-      console.log(
-        '✅ [COMPLETE_CLASS] XP processado para personal com sucesso',
-      );
-
-      console.log(
-        '✅ [COMPLETE_CLASS] ===== GAMIFICAÇÃO PROCESSADA COM SUCESSO =====',
-      );
     } catch (error) {
       console.error('❌ [GAMIFICATION] Erro ao processar XP da aula:', error);
       console.error('❌ [GAMIFICATION] Stack trace:', error.stack);
@@ -442,15 +418,6 @@ export class ClassesService {
 
     // ===== APLICAR SPLIT E ATUALIZAR CARTEIRA APÓS CONCLUSÃO DA AULA =====
     try {
-      console.log(
-        '💰 [COMPLETE_CLASS] ===== INICIANDO REPASSE APÓS CONCLUSÃO DA AULA =====',
-      );
-      console.log('💰 [COMPLETE_CLASS] Class ID:', id);
-      console.log(
-        '💰 [COMPLETE_CLASS] User ID (quem está completando):',
-        userId,
-      );
-
       // Buscar pagamento da aula
       const payment = await this.db.query.payments.findFirst({
         where: eq(payments.classId, id),
@@ -459,28 +426,11 @@ export class ClassesService {
           personal: true,
         },
       });
-
-      console.log('💰 [COMPLETE_CLASS] Pagamento encontrado:', {
-        paymentId: payment?.id,
-        status: payment?.status,
-        totalAmount: payment?.totalAmount,
-        platformFee: payment?.platformFee,
-        personalAmount: payment?.personalAmount,
-        personalId: payment?.personalId,
-        studentId: payment?.studentId,
-      });
-
       if (payment) {
         if (payment.status === 'authorized' || payment.status === 'pending') {
-          console.log(
-            '✅ [COMPLETE_CLASS] Pagamento em custódia - iniciando captura e split',
-          );
           await this.paymentsService.capturePaymentAfterClass(
             id,
             'Aula concluída',
-          );
-          console.log(
-            '✅ [COMPLETE_CLASS] Pagamento capturado e split aplicado via PaymentsService',
           );
 
           // Enviar notificação push e in-app para personal sobre repasse
@@ -507,7 +457,6 @@ export class ClassesService {
                 description: `Repasse da aula ${classData.date}`,
               },
             );
-            console.log('✅ [COMPLETE_CLASS] Notificação de repasse enviada');
           } catch (error) {
             console.error(
               '❌ [COMPLETE_CLASS] Erro ao enviar notificação de repasse:',
@@ -533,10 +482,6 @@ export class ClassesService {
           '⚠️ [COMPLETE_CLASS] Nenhum pagamento encontrado para esta aula',
         );
       }
-
-      console.log(
-        '💰 [COMPLETE_CLASS] ===== PROCESSO DE REPASSE FINALIZADO =====',
-      );
     } catch (error) {
       console.error(
         '❌ [COMPLETE_CLASS] Erro ao aplicar split após conclusão:',
@@ -596,10 +541,6 @@ export class ClassesService {
         userId: userId,
         timestamp: new Date(),
       });
-
-      console.log(
-        '✅ [COMPLETE_CLASS] Eventos WebSocket emitidos (mesmo que timer expirado)',
-      );
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
       // Não falhar a operação por causa de problemas de WebSocket
@@ -612,11 +553,6 @@ export class ClassesService {
   async completeClassByTimerExpiration(
     classId: string,
   ): Promise<ClassResponseDto> {
-    console.log(
-      '⏰ [TIMER_EXPIRATION] Finalizando aula por expiração do timer:',
-      classId,
-    );
-
     const classData = await this.db.query.classes.findFirst({
       where: eq(classes.id, classId),
       with: {
@@ -1433,8 +1369,6 @@ export class ClassesService {
   }
 
   async getClassDisputes(userId: string): Promise<any[]> {
-    console.log('🔍 [CLASSES] Buscando disputas para usuário:', userId);
-
     try {
       const disputes = await this.db.query.classes.findMany({
         where: and(
@@ -1443,8 +1377,6 @@ export class ClassesService {
         ),
         orderBy: [desc(classes.createdAt)],
       });
-
-      console.log('🔍 [CLASSES] Disputas encontradas:', disputes.length);
 
       return disputes.map((dispute) => ({
         id: dispute.id,
@@ -1491,43 +1423,13 @@ export class ClassesService {
         )
         .limit(1);
       personalClassRating = specificPersonal[0]?.rating ?? null;
-    } catch (_) {
+    } catch (e) {
+      this.logger.error(
+        '⚠️ [FORMAT_CLASS] Falha ao buscar rating específico do personal:',
+        e,
+      );
       personalClassRating = null;
     }
-
-    console.log('🔍 [FORMAT_CLASS] Personal Stats:', personalStats);
-    console.log(
-      '🔍 [FORMAT_CLASS] Personal Time On Platform:',
-      personalStats.timeOnPlatform,
-    );
-    console.log('🔍 [FORMAT_CLASS] Class ID:', classData.id);
-    console.log('🔍 [FORMAT_CLASS] Personal ID:', classData.personalId);
-    console.log('🔍 [FORMAT_CLASS] Student ID:', classData.studentId);
-    console.log(
-      '🔍 [FORMAT_CLASS] Student profileImageId:',
-      classData.student?.profileImageId,
-    );
-
-    // Debug: verificar tipos dos campos
-    console.log('🔍 [FORMAT_CLASS] Debug tipos dos campos:');
-    console.log(
-      '  - duration:',
-      classData.duration,
-      'tipo:',
-      typeof classData.duration,
-    );
-    console.log(
-      '  - personalRating:',
-      personalStats.rating,
-      'tipo:',
-      typeof personalStats.rating,
-    );
-    console.log(
-      '  - studentRating:',
-      studentStats.rating,
-      'tipo:',
-      typeof studentStats.rating,
-    );
 
     // Converter profileImageId para profileImageUrl se existir
     let personalProfileImageUrl = null;
@@ -1546,7 +1448,11 @@ export class ClassesService {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             personalProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
-          } catch (_) {
+          } catch (e) {
+            this.logger.error(
+              '⚠️ [FORMAT_CLASS] Falha ao normalizar URL da imagem do personal:',
+              e,
+            );
             personalProfileImageUrl = file.url.replace(
               'https://api.treinopro.com',
               baseUrl,
@@ -1572,7 +1478,11 @@ export class ClassesService {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             studentProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
-          } catch (_) {
+          } catch (e) {
+            this.logger.error(
+              '⚠️ [FORMAT_CLASS] Falha ao normalizar URL da imagem do aluno:',
+              e,
+            );
             studentProfileImageUrl = file.url.replace(
               'https://api.treinopro.com',
               baseUrl,
@@ -1583,11 +1493,6 @@ export class ClassesService {
         console.error('⚠️ Falha ao buscar URL da imagem do aluno:', e);
       }
     }
-
-    console.log(
-      '🔍 [FORMAT_CLASS] Student profileImageUrl:',
-      studentProfileImageUrl,
-    );
 
     const response: any = {
       id: classData.id,
@@ -1641,15 +1546,6 @@ export class ClassesService {
       };
     }
 
-    console.log(
-      '🔍 [FORMAT_CLASS] Response personalTimeOnPlatform:',
-      response.personalTimeOnPlatform,
-    );
-    console.log(
-      '🔍 [FORMAT_CLASS] Response personalRating:',
-      response.personalRating,
-    );
-
     return response;
   }
 
@@ -1662,9 +1558,6 @@ export class ClassesService {
     page: number;
     limit: number;
   }> {
-    console.log('🔍 [CLASSES] Buscando aulas com filtros:', getClassesDto);
-    console.log('🔍 [CLASSES] User ID:', userId);
-
     // Construir condições de filtro
     const conditions = [];
 
@@ -1672,9 +1565,6 @@ export class ClassesService {
     conditions.push(
       or(eq(classes.studentId, userId), eq(classes.personalId, userId)),
     );
-
-    console.log('🔍 [CLASSES] Condições base (usuário):', conditions.length);
-
     // Filtro por status
     if (getClassesDto.status) {
       conditions.push(eq(classes.status, getClassesDto.status));
@@ -1691,21 +1581,10 @@ export class ClassesService {
 
     // Filtro por data específica (formato YYYY-MM-DD)
     if (getClassesDto.date) {
-      console.log('🔍 [CLASSES] Data recebida:', getClassesDto.date);
-
       // Parsear a data no formato YYYY-MM-DD considerando fuso horário local
       const [year, month, day] = getClassesDto.date.split('-').map(Number);
       const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
       const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
-
-      console.log(
-        '🔍 [CLASSES] Data processada - Início:',
-        startOfDay.toISOString(),
-      );
-      console.log(
-        '🔍 [CLASSES] Data processada - Fim:',
-        endOfDay.toISOString(),
-      );
 
       conditions.push(
         and(gte(classes.date, startOfDay), lte(classes.date, endOfDay)),
@@ -1714,10 +1593,6 @@ export class ClassesService {
 
     // Filtro por faixa de horário
     if (getClassesDto.timeRange) {
-      console.log(
-        '🔍 [CLASSES] Faixa de horário recebida:',
-        getClassesDto.timeRange,
-      );
       let startHour: number, endHour: number;
 
       switch (getClassesDto.timeRange) {
@@ -1738,10 +1613,6 @@ export class ClassesService {
           endHour = 23;
       }
 
-      console.log(
-        `🔍 [CLASSES] Horário processado: ${startHour}:00 - ${endHour}:59`,
-      );
-
       // Filtrar por horário usando SQL para extrair a hora do campo time
       conditions.push(
         sql`EXTRACT(HOUR FROM ${classes.time}::TIME) >= ${startHour} AND EXTRACT(HOUR FROM ${classes.time}::TIME) <= ${endHour}`,
@@ -1750,7 +1621,6 @@ export class ClassesService {
 
     // Filtro por categoria
     if (getClassesDto.category) {
-      console.log('🔍 [CLASSES] Categoria recebida:', getClassesDto.category);
       // Filtrar por categoria através da proposta
       conditions.push(
         sql`EXISTS (
@@ -1780,8 +1650,6 @@ export class ClassesService {
     const page = getClassesDto.page || 1;
     const limit = getClassesDto.limit || 10;
     const offset = (page - 1) * limit;
-
-    console.log('🔍 [CLASSES] Condições de filtro:', conditions);
 
     try {
       // Buscar aulas com filtros
@@ -1830,10 +1698,6 @@ export class ClassesService {
           personalsData.forEach((personal: any) => {
             personalMap[personal.id] = personal;
           });
-
-          console.log(
-            `✅ [CLASSES] Carregados ${personalsData.length} personals em 1 query`,
-          );
         } catch (error) {
           console.error('❌ [CLASSES] Erro ao buscar personals:', error);
         }
@@ -1842,9 +1706,6 @@ export class ClassesService {
       // OTIMIZAÇÃO: Buscar stats e imagens em batch antes do loop
       const uniquePersonalIds = [
         ...new Set(classesData.map((row: any) => row.classes.personalId)),
-      ];
-      const uniqueStudentIds = [
-        ...new Set(classesData.map((row: any) => row.classes.studentId)),
       ];
       const classIds = [
         ...new Set(classesData.map((row: any) => row.classes.id)),
@@ -1922,8 +1783,6 @@ export class ClassesService {
             studentRatingByClassId[r.classId] = Number(r.rating) || 0;
           });
         }
-
-        console.log(`✅ [CLASSES] Carregados ratings em batch`);
       } catch (error) {
         console.error('❌ [CLASSES] Erro ao buscar ratings:', error);
       }
@@ -2057,11 +1916,6 @@ export class ClassesService {
       const createdAt = new Date(personal.createdAt);
       const timeOnPlatform = this.calculateTimeOnPlatform(createdAt, now);
 
-      console.log('🔍 [PERSONAL_STATS] Personal ID:', personalId);
-      console.log('🔍 [PERSONAL_STATS] Created At:', personal.createdAt);
-      console.log('🔍 [PERSONAL_STATS] Now:', now);
-      console.log('🔍 [PERSONAL_STATS] Time On Platform:', timeOnPlatform);
-
       // Buscar rating médio do personal (sistema como Uber)
       let rating = null; // Não há rating até ser avaliado
       try {
@@ -2100,7 +1954,6 @@ export class ClassesService {
         timeOnPlatform,
       };
 
-      console.log('🔍 [PERSONAL_STATS] Resultado final:', result);
       return result;
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao calcular stats do personal:', error);

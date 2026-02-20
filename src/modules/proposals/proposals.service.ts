@@ -436,6 +436,7 @@ export class ProposalsService {
               eq(users.userType, 'personal'),
               eq(users.status, 'active'),
               eq(users.isPersonalOnline, true), // ✅ Apenas personals online
+              eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
               sql`${users.fcmToken} IS NOT NULL`,
             ),
           );
@@ -658,7 +659,7 @@ export class ProposalsService {
       createRecontractDto.personalId,
     );
 
-    // Validar se o personal trainer existe
+    // Validar se o personal trainer existe e está aprovado
     const [personal] = await this.db
       .select()
       .from(users)
@@ -667,12 +668,13 @@ export class ProposalsService {
           eq(users.id, createRecontractDto.personalId),
           eq(users.userType, 'personal'),
           eq(users.status, 'active'),
+          eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
         ),
       )
       .limit(1);
 
     if (!personal) {
-      throw new NotFoundException('Personal trainer não encontrado ou inativo');
+      throw new NotFoundException('Personal trainer não encontrado, inativo ou não aprovado');
     }
 
     console.log(
@@ -2141,8 +2143,11 @@ export class ProposalsService {
           );
         }
 
-        const notificationUrl = process.env.API_URL
-          ? `${process.env.API_URL}/webhooks/mercadopago`
+        const apiUrl = process.env.API_URL;
+        const isPublicUrl =
+          !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
+        const notificationUrl = isPublicUrl
+          ? `${apiUrl}/webhooks/mercadopago`
           : undefined;
 
         const pixResult = await this.paymentsService.createPixPayment({
@@ -2278,10 +2283,6 @@ export class ProposalsService {
     blockedTimeSlots: string[];
   }> {
     try {
-      console.log(
-        `🔍 [CONFLICTS] Buscando conflitos para data ${date} e aluno ${studentId}`,
-      );
-
       // Validar formato da data
       const targetDate = new Date(date);
       if (isNaN(targetDate.getTime())) {
@@ -2310,11 +2311,6 @@ export class ProposalsService {
         59,
         999,
       );
-
-      console.log(`🔍 [CONFLICTS] Data buscada: ${targetDate}`);
-      console.log(`🔍 [CONFLICTS] Start of day: ${startOfDay.toISOString()}`);
-      console.log(`🔍 [CONFLICTS] End of day: ${endOfDay.toISOString()}`);
-
       // 1. Buscar propostas existentes do aluno para o mesmo dia
       // Usar comparação de string para data (YYYY-MM-DD)
       const dateString = targetDate.toISOString().split('T')[0]; // 2025-09-25
@@ -2347,12 +2343,6 @@ export class ProposalsService {
       );
       const afterFilter = existingProposals.length;
 
-      if (beforeFilter !== afterFilter) {
-        console.log(
-          `🔍 [CONFLICTS] Filtro aplicado: ${beforeFilter} → ${afterFilter} propostas (removidas: ${beforeFilter - afterFilter})`,
-        );
-      }
-
       // Ignorar propostas vinculadas a aulas em disputa (no_show_dispute)
       const disputedClasses = await this.db.query.classes.findMany({
         where: and(
@@ -2371,10 +2361,6 @@ export class ProposalsService {
         );
       }
 
-      console.log(
-        `📋 [CONFLICTS] Propostas existentes encontradas: ${existingProposals.length}`,
-      );
-
       // 2. Buscar aulas em match do ALUNO ESPECÍFICO para o mesmo dia
       const matchedClasses = await this.db.query.classes.findMany({
         where: and(
@@ -2390,18 +2376,10 @@ export class ProposalsService {
         },
       });
 
-      console.log(
-        `🏃 [CONFLICTS] Aulas em match do aluno ${studentId} encontradas: ${matchedClasses.length}`,
-      );
-
       // 3. Calcular horários bloqueados baseado nos conflitos reais
       const blockedTimeSlots = this.calculateBlockedTimeSlots(
         existingProposals,
         matchedClasses,
-      );
-
-      console.log(
-        `🚫 [CONFLICTS] Horários bloqueados: ${blockedTimeSlots.join(', ')}`,
       );
 
       return {

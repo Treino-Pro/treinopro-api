@@ -205,7 +205,13 @@ export class AdminService {
       conditions.push(eq(users.isVerified, filters.isVerified));
     }
 
+    const validApprovalStatuses = ['pending_review', 'approved', 'rejected'];
     if (filters?.approvalStatus) {
+      if (!validApprovalStatuses.includes(filters.approvalStatus)) {
+        throw new BadRequestException(
+          `approvalStatus inválido: "${filters.approvalStatus}". Valores aceitos: ${validApprovalStatuses.join(', ')}`,
+        );
+      }
       conditions.push(eq(users.approvalStatus, filters.approvalStatus as any));
     }
 
