@@ -12,6 +12,7 @@ import {
 // Mocks de dependências extras
 const mockChatGateway = {
   emitGamificationEvent: jest.fn(),
+  server: { emit: jest.fn() },
 };
 
 const mockEventsQueue = {
