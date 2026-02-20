@@ -1,5 +1,5 @@
 -- Migration: presence_snapshot_unique
--- Description: Cleans orphans, deduplicates based on best evidence with strict time validation, and ensures cascading integrity.
+-- Description: Cleans orphans, deduplicates based on best evidence with strict HH:MM validation, and ensures cascading integrity.
 
 DO $$ 
 BEGIN
@@ -18,12 +18,12 @@ BEGIN
                        PARTITION BY s.class_id, s.user_id 
                        ORDER BY 
                            -- 1º: Proximidade absoluta ao horário agendado (T0)
-                           -- Hardening: Regex rigorosa para HH:MM (00-23:00-59)
+                           -- Hardening: Regex rigorosa para HH:MM (00-23:00-59 com 2 dígitos obrigatórios)
                            ABS(EXTRACT(EPOCH FROM (
                                s.captured_at - (
                                    c.date::date + 
                                    (CASE 
-                                       WHEN c.time ~ '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$' THEN c.time::time 
+                                       WHEN c.time ~ '^([0-1][0-9]|2[0-3]):[0-5][0-9]$' THEN c.time::time 
                                        ELSE '00:00'::time 
                                     END)
                                )
