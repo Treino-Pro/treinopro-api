@@ -39,6 +39,7 @@ import {
   DisputeDefenseDto,
   PresenceSnapshotDto,
 } from './dto/classes.dto';
+import { FeatureFlags } from '../../config/feature-flags';
 
 @Injectable()
 export class ClassesService {
@@ -359,7 +360,7 @@ export class ClassesService {
     }
 
     // Verificar regra de 45 minutos mínimos
-    if (classData.startedAt) {
+    if (FeatureFlags.MIN_45_RULE && classData.startedAt) {
       const now = new Date();
       const rawClassData = await this.db.query.classes.findFirst({
         where: eq(classes.id, id),
@@ -369,18 +370,13 @@ export class ClassesService {
         ? new Date(rawClassData.minimumCompletionAt)
         : new Date((classData.startedAt as Date).getTime() + 45 * 60 * 1000);
 
-      console.log('🔍 [COMPLETE_CLASS] Mínimo para finalizar:', minimumCompletionAt);
-
       if (now < minimumCompletionAt) {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
-        console.log('❌ [COMPLETE_CLASS] Erro: Mínimo de 45min não atingido. Faltam:', remainingMin, 'min');
         throw new BadRequestException(
           `A aula deve durar pelo menos 45 minutos. Faltam ${remainingMin} minuto(s).`,
         );
       }
-    } else {
-      console.log('⚠️ [COMPLETE_CLASS] Aviso: Aula não tem startedAt definido');
     }
 
     const [updatedClass] = await this.db
@@ -777,6 +773,19 @@ export class ClassesService {
       .where(eq(classes.id, id))
       .returning();
 
+    // Reembolso automático para aluno que cancela dentro da janela
+    if (classData.studentId === userId) {
+      try {
+        await this.paymentsService.cancelPaymentBeforeClass(
+          id,
+          'Cancelamento pelo aluno com antecedência mínima',
+        );
+        this.logger.log(`[CANCEL] Reembolso processado para aula ${id}`);
+      } catch (err: any) {
+        this.logger.warn(`[CANCEL] Falha ao reembolsar aula ${id}: ${err?.message}`);
+      }
+    }
+
     // ===== ATUALIZAR STATUS DA PROPOSTA ASSOCIADA =====
     if (classData.proposalId) {
       try {
@@ -988,19 +997,29 @@ export class ClassesService {
       }
     }
 
-    // Gerar código de 4 dígitos e hash
-    const plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-    const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
-    const codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
+    // Gerar código de 4 dígitos e hash (apenas se feature ativa)
+    let plainCode: string | null = null;
+    let codeHash: string | null = null;
+    let codeExpiresAt: Date | null = null;
+
+    if (FeatureFlags.CODE_4_DIGITS) {
+      plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
+    }
 
     const [updatedClass] = await this.db
       .update(classes)
       .set({
         status: ClassStatus.PENDING_CONFIRMATION,
         pendingConfirmationAt: new Date(),
-        startConfirmationCodeHash: codeHash,
-        startConfirmationCodeExpiresAt: codeExpiresAt,
-        startConfirmationAttempts: 0,
+        ...(FeatureFlags.CODE_4_DIGITS
+          ? {
+              startConfirmationCodeHash: codeHash,
+              startConfirmationCodeExpiresAt: codeExpiresAt,
+              startConfirmationAttempts: 0,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -1049,8 +1068,10 @@ export class ClassesService {
 
     const response = await this.formatClassResponse(updatedClass);
     // Expor código somente para o personal (não persistido em plaintext)
-    (response as any).startConfirmationCode = plainCode;
-    (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+    if (FeatureFlags.CODE_4_DIGITS && plainCode) {
+      (response as any).startConfirmationCode = plainCode;
+      (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+    }
     return response;
   }
 
@@ -1080,7 +1101,7 @@ export class ClassesService {
     }
 
     // Validar código de confirmação
-    if (rawClass.startConfirmationCodeHash) {
+    if (FeatureFlags.CODE_4_DIGITS && rawClass.startConfirmationCodeHash) {
       // Verificar expiração
       if (rawClass.startConfirmationCodeExpiresAt && new Date() > rawClass.startConfirmationCodeExpiresAt) {
         throw new BadRequestException('CONFIRMATION_CODE_EXPIRED: Código de confirmação expirado');
@@ -1233,13 +1254,12 @@ export class ClassesService {
           })
           .where(eq(proposals.id, classData.proposalId));
 
-        console.log(
-          `✅ [CLASSES] Status da proposta ${classData.proposalId} atualizado para 'disputed'`,
+        this.logger.log(
+          `[CLASSES] Status da proposta ${classData.proposalId} atualizado para 'disputed'`,
         );
       } catch (error) {
-        console.error(
-          `❌ [CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}:`,
-          error,
+        this.logger.error(
+          `[CLASSES] Erro ao atualizar status da proposta ${classData.proposalId}: ${error}`,
         );
       }
     }
@@ -1258,11 +1278,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      console.log(
-        '✅ [CLASSES] Evento WebSocket emitido: class_no_show_reported',
-      );
+      this.logger.log('[CLASSES] Evento WebSocket emitido: class_no_show_reported');
     } catch (error) {
-      console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
+      this.logger.error(`[CLASSES] Erro ao emitir evento WebSocket: ${error}`);
     }
 
     return this.formatClassResponse(updatedClass);
@@ -1273,28 +1291,13 @@ export class ClassesService {
     reportDto: ReportNoShowDto,
     userId: string,
   ): Promise<ClassResponseDto> {
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Iniciando reporte:', {
-      classId,
-      userId,
-      reportDto,
-    });
+    this.logger.log(`[REPORT_PERSONAL_NO_SHOW] Iniciando reporte: classId=${classId} userId=${userId}`);
 
     const classData = await this.getClassById(classId, userId);
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Dados da aula:', {
-      id: classData.id,
-      studentId: classData.studentId,
-      personalId: classData.personalId,
-      status: classData.status,
-      date: classData.date,
-      time: classData.time,
-    });
 
     // Verificar se o usuário é o aluno
     if (classData.studentId !== userId) {
-      console.log('❌ [REPORT_PERSONAL_NO_SHOW] Usuário não é o aluno:', {
-        userId,
-        studentId: classData.studentId,
-      });
+      this.logger.warn(`[REPORT_PERSONAL_NO_SHOW] Usuário ${userId} não é o aluno ${classData.studentId}`);
       throw new ForbiddenException(
         'Apenas o aluno pode reportar ausência do personal trainer',
       );
@@ -1307,44 +1310,23 @@ export class ClassesService {
     );
     const noShowDeadline = new Date(classDateTime.getTime() + 10 * 60 * 1000);
 
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Validação de tempo:', {
-      now: now.toISOString(),
-      classDateTime: classDateTime.toISOString(),
-      noShowDeadline: noShowDeadline.toISOString(),
-      canReport: now >= noShowDeadline,
-    });
-
     if (now < noShowDeadline) {
-      console.log(
-        '❌ [REPORT_PERSONAL_NO_SHOW] Ainda não pode reportar - muito cedo',
-      );
       throw new BadRequestException(
         'A ausência só pode ser reportada após 10 minutos do horário agendado',
       );
     }
 
     // Verificar se a aula está em estado válido para reportar ausência
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Validação de status:', {
-      currentStatus: classData.status,
-      validStatuses: [ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION],
-      isValid: [
-        ClassStatus.SCHEDULED,
-        ClassStatus.PENDING_CONFIRMATION,
-      ].includes(classData.status),
-    });
-
     if (
       ![ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION].includes(
         classData.status,
       )
     ) {
-      console.log('❌ [REPORT_PERSONAL_NO_SHOW] Status inválido para reportar');
+      this.logger.warn(`[REPORT_PERSONAL_NO_SHOW] Status inválido: ${classData.status}`);
       throw new BadRequestException(
         'A aula não está em estado válido para reportar ausência',
       );
     }
-
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Atualizando aula no banco...');
 
     const [updatedClass] = await this.db
       .update(classes)
@@ -1365,19 +1347,8 @@ export class ClassesService {
       .where(eq(classes.id, classId))
       .returning();
 
-    console.log('🔍 [REPORT_PERSONAL_NO_SHOW] Aula atualizada no banco:');
-    console.log('  - ID: ${updatedClass.id}');
-    console.log('  - Status: ${updatedClass.status}');
-    console.log('  - DisputeStatus: ${updatedClass.disputeStatus}');
-    console.log('  - NoShowReportedAt: ${updatedClass.noShowReportedAt}');
-    console.log('  - NoShowReportedBy: ${updatedClass.noShowReportedBy}');
-
     // ===== ATUALIZAR STATUS DA PROPOSTA =====
     try {
-      console.log(
-        '🔍 [REPORT_PERSONAL_NO_SHOW] Atualizando status da proposta...',
-      );
-
       await this.db
         .update(proposals)
         .set({
@@ -1386,14 +1357,9 @@ export class ClassesService {
         })
         .where(eq(proposals.id, classData.proposalId));
 
-      console.log(
-        '✅ [REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed',
-      );
+      this.logger.log('[REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed');
     } catch (error) {
-      console.error(
-        '❌ [REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta:',
-        error,
-      );
+      this.logger.error(`[REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta: ${error}`);
       // Não falhar o processo se não conseguir atualizar a proposta
     }
 
@@ -1411,11 +1377,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      console.log(
-        '✅ [CLASSES] Evento WebSocket emitido: class_personal_no_show_reported',
-      );
+      this.logger.log('[CLASSES] Evento WebSocket emitido: class_personal_no_show_reported');
     } catch (error) {
-      console.error('❌ [CLASSES] Erro ao emitir evento WebSocket:', error);
+      this.logger.error(`[CLASSES] Erro ao emitir evento WebSocket: ${error}`);
     }
 
     return this.formatClassResponse(updatedClass);
@@ -1497,6 +1461,10 @@ export class ClassesService {
     defenseDto: DisputeDefenseDto,
     userId: string,
   ): Promise<ClassResponseDto> {
+    if (!FeatureFlags.DISPUTE_DEFENSE) {
+      throw new BadRequestException('Feature não disponível');
+    }
+
     this.logger.debug(
       `[DEBUG][DISPUTE_DEFENSE] Recebendo defesa para aula ${classId} do usuário ${userId}`,
     );

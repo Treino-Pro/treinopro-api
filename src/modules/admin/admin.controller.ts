@@ -926,4 +926,10 @@ export class AdminController {
       monthlyAmount: 0,
     };
   }
+
+  @Get('monitoring/classes')
+  @ApiOperation({ summary: 'Monitoramento de aulas (métricas operacionais)' })
+  async getClassesMonitoring() {
+    return this.adminService.getClassesMonitoring();
+  }
 }

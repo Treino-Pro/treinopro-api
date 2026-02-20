@@ -1,0 +1,10 @@
+{
+  "rootDir": ".",
+  "testMatch": ["<rootDir>/test/integration/**/*.spec.ts"],
+  "testEnvironment": "node",
+  "transform": {
+    "^.+\\.ts$": "ts-jest"
+  },
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "testTimeout": 60000
+}

@@ -1162,4 +1162,55 @@ export class AdminService {
       registrations: registrationsChart,
     };
   }
+
+  async getClassesMonitoring(): Promise<{
+    confirmationErrorRate: number;
+    disputeRateLast30d: number;
+    avgDisputeResolutionMinutes: number | null;
+  }> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // 1. Taxa de erro de confirmação
+    const [codeStats] = await this.db
+      .select({
+        avgAttempts: sql<number>`AVG(COALESCE(${classes.startConfirmationAttempts}, 0))`,
+        confirmed: sql<number>`COUNT(CASE WHEN ${classes.status} IN ('active','completed') THEN 1 END)`,
+      })
+      .from(classes)
+      .where(gte(classes.createdAt, thirtyDaysAgo));
+
+    // 2. Taxa de disputa
+    const [disputeStats] = await this.db
+      .select({
+        total: count(),
+        disputes: sql<number>`COUNT(CASE WHEN ${classes.status} IN ('no_show_dispute','cancelled','completed') AND ${classes.noShowReportedAt} IS NOT NULL THEN 1 END)`,
+      })
+      .from(classes)
+      .where(gte(classes.createdAt, thirtyDaysAgo));
+
+    // 3. Tempo médio de resolução
+    const [resolutionStats] = await this.db
+      .select({
+        avgMinutes: sql<number>`AVG(EXTRACT(EPOCH FROM (${classes.resolvedAt} - ${classes.noShowReportedAt})) / 60)`,
+      })
+      .from(classes)
+      .where(
+        and(
+          sql`${classes.resolvedAt} IS NOT NULL`,
+          sql`${classes.noShowReportedAt} IS NOT NULL`,
+        ),
+      );
+
+    return {
+      confirmationErrorRate: Number(codeStats?.avgAttempts ?? 0),
+      disputeRateLast30d:
+        disputeStats?.total > 0
+          ? (Number(disputeStats.disputes) / Number(disputeStats.total)) * 100
+          : 0,
+      avgDisputeResolutionMinutes:
+        resolutionStats?.avgMinutes != null
+          ? Number(resolutionStats.avgMinutes)
+          : null,
+    };
+  }
 }

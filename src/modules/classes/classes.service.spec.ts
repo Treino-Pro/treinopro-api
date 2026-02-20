@@ -10,8 +10,15 @@ import {
   ClassStatus,
   StartClassDto,
   CompleteClassDto,
+  ConfirmClassStartDto,
 } from './dto/classes.dto';
 import { GamificationService } from '../gamification/gamification.service';
+import { ChatGateway } from '../chat/chat.gateway';
+import { PaymentsService } from '../payments/payments.service';
+import { RatingsService } from '../ratings/ratings.service';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import * as crypto from 'crypto';
 
 // Mock do banco de dados
 const mockDb = {
@@ -23,13 +30,32 @@ const mockDb = {
     proposals: {
       findFirst: jest.fn(),
     },
+    users: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'u',
+        name: 'Test',
+        firstName: 'Test',
+        lastName: 'User',
+        email: 'test@test.com',
+        profileImageUrl: null,
+      }),
+    },
+    ratings: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    classPresenceSnapshots: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    payments: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   },
   insert: jest.fn(),
   update: jest.fn(),
   select: jest.fn(),
 };
 
-// Mock do GamificationService
+// Mocks dos providers
 const mockGamificationService = {
   processClassCompletion: jest.fn(),
   addXP: jest.fn(),
@@ -37,8 +63,28 @@ const mockGamificationService = {
   updateAchievementProgress: jest.fn(),
 };
 
+const mockChatGateway = { server: { emit: jest.fn() } };
+
+const mockPaymentsService = {
+  cancelPaymentBeforeClass: jest.fn(),
+  capturePaymentAfterClass: jest.fn(),
+  refundPayment: jest.fn(),
+};
+
+const mockRatingsService = { getRatingForClass: jest.fn() };
+
+const mockFirebaseService = { sendToUser: jest.fn().mockResolvedValue(undefined) };
+
+const mockNotificationsService = { create: jest.fn() };
+
 describe('ClassesService', () => {
   let service: ClassesService;
+
+  beforeAll(() => {
+    process.env.FEATURE_CODE_4_DIGITS = 'true';
+    process.env.FEATURE_45_MIN_RULE = 'true';
+    process.env.FEATURE_DISPUTE_DEFENSE = 'true';
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -52,6 +98,26 @@ describe('ClassesService', () => {
           provide: GamificationService,
           useValue: mockGamificationService,
         },
+        {
+          provide: ChatGateway,
+          useValue: mockChatGateway,
+        },
+        {
+          provide: PaymentsService,
+          useValue: mockPaymentsService,
+        },
+        {
+          provide: RatingsService,
+          useValue: mockRatingsService,
+        },
+        {
+          provide: FirebaseNotificationService,
+          useValue: mockFirebaseService,
+        },
+        {
+          provide: NotificationsService,
+          useValue: mockNotificationsService,
+        },
       ],
     }).compile();
 
@@ -60,6 +126,18 @@ describe('ClassesService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    // Restaurar defaults dos query mocks após cada teste
+    mockDb.query.users.findFirst.mockResolvedValue({
+      id: 'u',
+      name: 'Test',
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'test@test.com',
+      profileImageUrl: null,
+    });
+    mockDb.query.ratings.findFirst.mockResolvedValue(null);
+    mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(null);
+    mockDb.query.payments.findFirst.mockResolvedValue(null);
   });
 
   describe('createClass', () => {
@@ -381,7 +459,394 @@ describe('ClassesService', () => {
         service.completeClass(classId, completeClassDto, userId),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('deve bloquear finalização se minimumCompletionAt ainda está no futuro (regra 45min)', async () => {
+      const classId = 'class-1';
+      const userId = 'personal-1';
+
+      const startedAt = new Date(Date.now() - 5 * 60 * 1000); // 5 min atrás
+      const minimumCompletionAt = new Date(Date.now() + 40 * 60 * 1000); // 40 min no futuro
+
+      const mockClass = {
+        id: classId,
+        personalId: userId,
+        status: ClassStatus.ACTIVE,
+        startedAt,
+        minimumCompletionAt,
+      };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(mockClass) // primeira chamada (findFirst na classe)
+        .mockResolvedValueOnce({ minimumCompletionAt }); // segunda chamada (minimumCompletionAt)
+
+      await expect(
+        service.completeClass(classId, {}, userId),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('deve aceitar finalização se minimumCompletionAt já passou (>= 45min)', async () => {
+      const classId = 'class-1';
+      const userId = 'personal-1';
+
+      const startedAt = new Date(Date.now() - 50 * 60 * 1000); // 50 min atrás
+      const minimumCompletionAt = new Date(Date.now() - 5 * 60 * 1000); // 5 min atrás
+
+      const mockClass = {
+        id: classId,
+        personalId: userId,
+        status: ClassStatus.ACTIVE,
+        startedAt,
+        minimumCompletionAt,
+      };
+
+      const updatedClass = {
+        ...mockClass,
+        status: ClassStatus.COMPLETED,
+        completedAt: new Date(),
+      };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(mockClass) // classe
+        .mockResolvedValueOnce({ minimumCompletionAt }); // minimumCompletionAt
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      const result = await service.completeClass(classId, {}, userId);
+      expect(result.status).toBe(ClassStatus.COMPLETED);
+    });
   });
+
+  describe('confirmClassStart', () => {
+    const classId = 'class-1';
+    const studentId = 'student-1';
+
+    const buildMockClass = (overrides: Partial<any> = {}) => ({
+      id: classId,
+      personalId: 'personal-1',
+      studentId,
+      status: ClassStatus.PENDING_CONFIRMATION,
+      startConfirmationCodeHash: null,
+      startConfirmationCodeExpiresAt: null,
+      startConfirmationAttempts: 0,
+      ...overrides,
+    });
+
+    it('aceita código válido e transita para ACTIVE', async () => {
+      const plainCode = '1234';
+      const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      const rawClass = buildMockClass({
+        startConfirmationCodeHash: codeHash,
+        startConfirmationCodeExpiresAt: codeExpiresAt,
+        startConfirmationAttempts: 0,
+      });
+
+      const updatedClass = {
+        ...rawClass,
+        status: ClassStatus.ACTIVE,
+        startedAt: new Date(),
+      };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(rawClass) // rawClass
+        .mockResolvedValueOnce(rawClass); // getClassById internamente
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      const result = await service.confirmClassStart(
+        classId,
+        { confirmationCode: plainCode } as ConfirmClassStartDto,
+        studentId,
+      );
+
+      expect(result.status).toBe(ClassStatus.ACTIVE);
+    });
+
+    it('rejeita código inválido → BadRequestException INVALID_CONFIRMATION_CODE', async () => {
+      const validCode = '5678';
+      const codeHash = crypto.createHash('sha256').update(validCode).digest('hex');
+      const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      const rawClass = buildMockClass({
+        startConfirmationCodeHash: codeHash,
+        startConfirmationCodeExpiresAt: codeExpiresAt,
+        startConfirmationAttempts: 0,
+      });
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(rawClass)
+        .mockResolvedValueOnce(rawClass);
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([rawClass]),
+          }),
+        }),
+      });
+
+      await expect(
+        service.confirmClassStart(
+          classId,
+          { confirmationCode: '0000' } as ConfirmClassStartDto,
+          studentId,
+        ),
+      ).rejects.toThrow(/INVALID_CONFIRMATION_CODE/);
+    });
+
+    it('rejeita código expirado → BadRequestException CONFIRMATION_CODE_EXPIRED', async () => {
+      const plainCode = '9999';
+      const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      const expiredAt = new Date(Date.now() - 60 * 1000); // já expirou
+
+      const rawClass = buildMockClass({
+        startConfirmationCodeHash: codeHash,
+        startConfirmationCodeExpiresAt: expiredAt,
+        startConfirmationAttempts: 0,
+      });
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(rawClass)
+        .mockResolvedValueOnce(rawClass);
+
+      await expect(
+        service.confirmClassStart(
+          classId,
+          { confirmationCode: plainCode } as ConfirmClassStartDto,
+          studentId,
+        ),
+      ).rejects.toThrow(/CONFIRMATION_CODE_EXPIRED/);
+    });
+  });
+
+  describe('cancelClass', () => {
+    const classId = 'class-1';
+    const studentId = 'student-1';
+    const personalId = 'personal-1';
+
+    const buildScheduledClass = (overrides: Partial<any> = {}) => ({
+      id: classId,
+      personalId,
+      studentId,
+      status: ClassStatus.SCHEDULED,
+      proposalId: 'proposal-1',
+      date: new Date(),
+      time: '23:59',
+      ...overrides,
+    });
+
+    it('aluno dentro da janela 2h cancela com sucesso e chama cancelPaymentBeforeClass', async () => {
+      // Usar data fixa bem no futuro (sem risco de timezone mismatch)
+      const mockClass = buildScheduledClass({
+        date: new Date('2035-12-31'),
+        time: '23:59',
+      });
+
+      const cancelledClass = { ...mockClass, status: ClassStatus.CANCELLED };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([cancelledClass]),
+          }),
+        }),
+      });
+
+      mockPaymentsService.cancelPaymentBeforeClass.mockResolvedValue(undefined);
+
+      const result = await service.cancelClass(classId, studentId);
+
+      expect(result.status).toBe(ClassStatus.CANCELLED);
+      expect(mockPaymentsService.cancelPaymentBeforeClass).toHaveBeenCalledWith(
+        classId,
+        expect.any(String),
+      );
+    });
+
+    it('aluno fora da janela 2h → BadRequestException', async () => {
+      // Usar data no passado: cancellationDeadline já passou → não pode cancelar
+      const mockClass = buildScheduledClass({
+        date: new Date('2024-01-01'),
+        time: '10:00',
+      });
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+
+      await expect(service.cancelClass(classId, studentId)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('personal pode cancelar a qualquer momento', async () => {
+      const mockClass = buildScheduledClass({
+        status: ClassStatus.SCHEDULED,
+        date: new Date('2024-01-01'),
+        time: '10:00',
+      });
+      const cancelledClass = { ...mockClass, status: ClassStatus.CANCELLED };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([cancelledClass]),
+          }),
+        }),
+      });
+
+      const result = await service.cancelClass(classId, personalId);
+
+      expect(result.status).toBe(ClassStatus.CANCELLED);
+      // Personal não deve acionar reembolso automático
+      expect(mockPaymentsService.cancelPaymentBeforeClass).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('submitDisputeDefense', () => {
+    const classId = 'class-1';
+    const studentId = 'student-1';
+    const personalId = 'personal-1';
+
+    const buildDisputeClass = (overrides: Partial<any> = {}) => ({
+      id: classId,
+      personalId,
+      studentId,
+      status: ClassStatus.NO_SHOW_DISPUTE,
+      noShowReportedBy: 'personal', // personal reportou → aluno é parte reportada
+      evidenceDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      studentDefenseText: null,
+      personalDefenseText: null,
+      studentEvidence: null,
+      personalEvidence: null,
+      ...overrides,
+    });
+
+    it('parte reportada (aluno) envia defesa → sucesso', async () => {
+      const rawClass = buildDisputeClass();
+      const updatedClass = { ...rawClass, studentDefenseText: 'Estive presente' };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      const result = await service.submitDisputeDefense(
+        classId,
+        { text: 'Estive presente' },
+        studentId,
+      );
+
+      expect(result).toBeDefined();
+    });
+
+    it('parte que reportou (personal) tenta enviar defesa → ForbiddenException', async () => {
+      const rawClass = buildDisputeClass({ noShowReportedBy: 'personal' });
+
+      mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
+
+      // Personal reportou, então personal NÃO pode enviar defesa (só quem foi reportado)
+      await expect(
+        service.submitDisputeDefense(
+          classId,
+          { text: 'Defesa indevida' },
+          personalId,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('após evidenceDeadline → BadRequestException', async () => {
+      const rawClass = buildDisputeClass({
+        evidenceDeadline: new Date(Date.now() - 60 * 1000), // já expirou
+      });
+
+      mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
+
+      await expect(
+        service.submitDisputeDefense(classId, { text: 'Tarde demais' }, studentId),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('createPresenceSnapshot', () => {
+    const classId = 'class-1';
+    const userId = 'student-1';
+
+    const baseSnapshot = {
+      latitude: -23.5505,
+      longitude: -46.6333,
+      accuracyMeters: 10,
+      capturedAt: new Date().toISOString(),
+      captureSource: 'gps',
+      appState: 'foreground',
+    };
+
+    it('primeira chamada cria snapshot com sucesso', async () => {
+      const now = new Date();
+      const rawClass = {
+        id: classId,
+        personalId: 'personal-1',
+        studentId: userId,
+        status: ClassStatus.ACTIVE,
+        date: now,
+        time: now.toTimeString().slice(0, 5),
+      };
+
+      const createdSnapshot = { id: 'snap-1', classId, userId, ...baseSnapshot };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
+      mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(null);
+      mockDb.insert.mockReturnValue({
+        values: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([createdSnapshot]),
+        }),
+      });
+
+      const result = await service.createPresenceSnapshot(classId, baseSnapshot as any, userId);
+
+      expect(result).toEqual(expect.objectContaining({ id: 'snap-1' }));
+    });
+
+    it('segunda chamada retorna existente (idempotência)', async () => {
+      const now = new Date();
+      const rawClass = {
+        id: classId,
+        personalId: 'personal-1',
+        studentId: userId,
+        status: ClassStatus.ACTIVE,
+        date: now,
+        time: now.toTimeString().slice(0, 5),
+      };
+
+      const existingSnapshot = { id: 'snap-existing', classId, userId };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
+      mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(existingSnapshot);
+
+      const result = await service.createPresenceSnapshot(classId, baseSnapshot as any, userId);
+
+      expect(result).toEqual(expect.objectContaining({ id: 'snap-existing' }));
+      expect(mockDb.insert).not.toHaveBeenCalled();
+    });
+  });
+
   describe('updateClass', () => {
     it('deve lançar erro de conflito ao atualizar para horário que sobrepõe outra aula', async () => {
       const classId = 'class-1';
@@ -446,6 +911,7 @@ describe('ClassesService', () => {
       const updated = { ...currentClass, ...updateDto } as any;
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
+
       mockDb.select.mockImplementation(() => ({
         from: () => ({ where: () => Promise.resolve([nonOverlapping]) }),
       }));

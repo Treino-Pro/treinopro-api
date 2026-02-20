@@ -35,3 +35,6 @@ process.env.JWT_EXPIRATION_TIME = '1h';
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/testdb';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
 process.env.PORT = '3000';
+process.env.FEATURE_CODE_4_DIGITS = 'true';
+process.env.FEATURE_45_MIN_RULE = 'true';
+process.env.FEATURE_DISPUTE_DEFENSE = 'true';

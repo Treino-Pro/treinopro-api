@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { AdminService } from './admin.service';
+import { PaymentsService } from '../payments/payments.service';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -8,9 +10,22 @@ const mockDb = {
     users: {
       findFirst: jest.fn(),
     },
+    payments: {
+      findFirst: jest.fn(),
+    },
   },
   select: jest.fn(),
   update: jest.fn(),
+};
+
+const mockPaymentsService = {
+  cancelPaymentBeforeClass: jest.fn(),
+  capturePaymentAfterClass: jest.fn(),
+  refundPayment: jest.fn(),
+};
+
+const mockFirebaseNotificationService = {
+  sendToUser: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('AdminService', () => {
@@ -24,6 +39,14 @@ describe('AdminService', () => {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
         },
+        {
+          provide: PaymentsService,
+          useValue: mockPaymentsService,
+        },
+        {
+          provide: FirebaseNotificationService,
+          useValue: mockFirebaseNotificationService,
+        },
       ],
     }).compile();
 
@@ -32,6 +55,7 @@ describe('AdminService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    mockDb.query.payments.findFirst.mockResolvedValue(null);
   });
 
   // ===== listPendingPersonals =====
@@ -295,6 +319,97 @@ describe('AdminService', () => {
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({ approvalReviewedBy: reviewerId }),
       );
+    });
+  });
+
+  // ===== resolveClassDispute =====
+
+  describe('resolveClassDispute', () => {
+    const classId = 'class-dispute-1';
+
+    const buildDisputeClass = (overrides: Partial<any> = {}) => ({
+      id: classId,
+      personalId: 'personal-1',
+      studentId: 'student-1',
+      status: 'no_show_dispute',
+      ...overrides,
+    });
+
+    const mockSelectChainFor = (row: any) => ({
+      from: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue(row ? [row] : []),
+    });
+
+    it('resolved_for_personal → chama capturePaymentAfterClass e status completed', async () => {
+      const classRow = buildDisputeClass();
+      mockDb.select.mockReturnValue(mockSelectChainFor(classRow));
+
+      mockPaymentsService.capturePaymentAfterClass.mockResolvedValue(undefined);
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockResolvedValue(undefined),
+      });
+
+      const result = await service.resolveClassDispute(classId, {
+        resolution: 'resolved_for_personal',
+        adminNotes: 'Aluno faltou',
+      });
+
+      expect(mockPaymentsService.capturePaymentAfterClass).toHaveBeenCalledWith(
+        classId,
+        expect.any(String),
+      );
+      expect(result.status).toBe('completed');
+      expect(result.disputeStatus).toBe('resolved_for_personal');
+    });
+
+    it('resolved_for_student → chama refundPayment + strike + notificação', async () => {
+      const classRow = buildDisputeClass();
+      mockDb.select.mockReturnValue(mockSelectChainFor(classRow));
+
+      const payment = { id: 'payment-1', classId };
+      mockDb.query.payments.findFirst.mockResolvedValue(payment);
+      mockPaymentsService.refundPayment.mockResolvedValue(undefined);
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockResolvedValue(undefined),
+      });
+
+      const result = await service.resolveClassDispute(classId, {
+        resolution: 'resolved_for_student',
+        adminNotes: 'Personal faltou',
+      });
+
+      expect(mockPaymentsService.refundPayment).toHaveBeenCalledWith(
+        payment.id,
+        expect.any(String),
+      );
+      expect(mockFirebaseNotificationService.sendToUser).toHaveBeenCalledWith(
+        classRow.personalId,
+        expect.objectContaining({ title: expect.any(String) }),
+      );
+      expect(result.status).toBe('cancelled');
+      expect(result.disputeStatus).toBe('resolved_for_student');
+    });
+
+    it('aula não em disputa → BadRequestException', async () => {
+      const classRow = buildDisputeClass({ status: 'completed' });
+      mockDb.select.mockReturnValue(mockSelectChainFor(classRow));
+
+      await expect(
+        service.resolveClassDispute(classId, { resolution: 'resolved_for_personal' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('aula não encontrada → NotFoundException', async () => {
+      mockDb.select.mockReturnValue(mockSelectChainFor(null));
+
+      await expect(
+        service.resolveClassDispute(classId, { resolution: 'resolved_for_personal' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
