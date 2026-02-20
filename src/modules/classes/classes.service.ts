@@ -757,7 +757,14 @@ export class ClassesService {
     let refundReason = '';
 
     // Regra 1: Aluno cancelando dentro da janela de 2h (para aulas agendadas, pendentes ou ativas)
-    if (isStudentCancelling && [ClassStatus.SCHEDULED, ClassStatus.PENDING_CONFIRMATION, ClassStatus.ACTIVE].includes(classData.status)) {
+    if (
+      isStudentCancelling &&
+      [
+        ClassStatus.SCHEDULED,
+        ClassStatus.PENDING_CONFIRMATION,
+        ClassStatus.ACTIVE,
+      ].includes(classData.status)
+    ) {
       const now = new Date();
       const classDateTime = new Date(
         `${(classData.date as Date).toISOString().split('T')[0]}T${
@@ -795,12 +802,16 @@ export class ClassesService {
         if (err instanceof NotFoundException) {
           const proposalValue = classData.proposal?.value || 0;
           if (proposalValue > 0) {
-            this.logger.error(`[CRITICAL_CANCELLATION_FAILURE] Pagamento ausente para aula paga (valor: ${proposalValue}). Risco financeiro.`);
+            this.logger.error(
+              `[CRITICAL_CANCELLATION_FAILURE] Pagamento ausente para aula paga (valor: ${proposalValue}). Risco financeiro.`,
+            );
             throw new BadRequestException(
               `Inconsistência financeira detectada: Pagamento não localizado para efetuar o reembolso. O cancelamento foi abortado. Entre em contato com o suporte.`,
             );
           } else {
-            this.logger.warn(`[CANCEL_CLASS_WARNING] Nenhum pagamento encontrado para a aula ${id}, mas a proposta não possui valor associado. Prosseguindo com o cancelamento.`);
+            this.logger.warn(
+              `[CANCEL_CLASS_WARNING] Nenhum pagamento encontrado para a aula ${id}, mas a proposta não possui valor associado. Prosseguindo com o cancelamento.`,
+            );
           }
         } else {
           this.logger.error(
@@ -860,9 +871,14 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      this.logger.log('[CANCEL_CLASS] Evento WebSocket emitido: class_cancelled');
+      this.logger.log(
+        '[CANCEL_CLASS] Evento WebSocket emitido: class_cancelled',
+      );
     } catch (error) {
-      this.logger.error('[CANCEL_CLASS] Erro ao emitir evento WebSocket:', error);
+      this.logger.error(
+        '[CANCEL_CLASS] Erro ao emitir evento WebSocket:',
+        error,
+      );
     }
 
     return this.formatClassResponse(updatedClass);
@@ -1141,8 +1157,13 @@ export class ClassesService {
     // Validar código de confirmação
     if (FeatureFlags.CODE_4_DIGITS && rawClass.startConfirmationCodeHash) {
       // Verificar expiração
-      if (rawClass.startConfirmationCodeExpiresAt && new Date() > rawClass.startConfirmationCodeExpiresAt) {
-        throw new BadRequestException('CONFIRMATION_CODE_EXPIRED: Código de confirmação expirado');
+      if (
+        rawClass.startConfirmationCodeExpiresAt &&
+        new Date() > rawClass.startConfirmationCodeExpiresAt
+      ) {
+        throw new BadRequestException(
+          'CONFIRMATION_CODE_EXPIRED: Código de confirmação expirado',
+        );
       }
 
       const currentAttempts = rawClass.startConfirmationAttempts || 0;
@@ -1153,7 +1174,10 @@ export class ClassesService {
         // Expirar o código automaticamente após esgotar tentativas
         await this.db
           .update(classes)
-          .set({ startConfirmationCodeExpiresAt: new Date(), updatedAt: new Date() })
+          .set({
+            startConfirmationCodeExpiresAt: new Date(),
+            updatedAt: new Date(),
+          })
           .where(eq(classes.id, classId));
         throw new BadRequestException(
           'CONFIRMATION_CODE_LOCKED: Muitas tentativas incorretas. Solicite que o personal reinicie a aula.',
@@ -1163,10 +1187,16 @@ export class ClassesService {
       // Incrementar tentativas antes de validar
       await this.db
         .update(classes)
-        .set({ startConfirmationAttempts: currentAttempts + 1, updatedAt: new Date() })
+        .set({
+          startConfirmationAttempts: currentAttempts + 1,
+          updatedAt: new Date(),
+        })
         .where(eq(classes.id, classId));
 
-      const submittedHash = crypto.createHash('sha256').update(confirmDto.confirmationCode || '').digest('hex');
+      const submittedHash = crypto
+        .createHash('sha256')
+        .update(confirmDto.confirmationCode || '')
+        .digest('hex');
       if (submittedHash !== rawClass.startConfirmationCodeHash) {
         const attemptsLeft = MAX_ATTEMPTS - (currentAttempts + 1);
         throw new BadRequestException(
@@ -1316,7 +1346,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      this.logger.log('[CLASSES] Evento WebSocket emitido: class_no_show_reported');
+      this.logger.log(
+        '[CLASSES] Evento WebSocket emitido: class_no_show_reported',
+      );
     } catch (error) {
       this.logger.error(`[CLASSES] Erro ao emitir evento WebSocket: ${error}`);
     }
@@ -1329,13 +1361,17 @@ export class ClassesService {
     reportDto: ReportNoShowDto,
     userId: string,
   ): Promise<ClassResponseDto> {
-    this.logger.log(`[REPORT_PERSONAL_NO_SHOW] Iniciando reporte: classId=${classId} userId=${userId}`);
+    this.logger.log(
+      `[REPORT_PERSONAL_NO_SHOW] Iniciando reporte: classId=${classId} userId=${userId}`,
+    );
 
     const classData = await this.getClassById(classId, userId);
 
     // Verificar se o usuário é o aluno
     if (classData.studentId !== userId) {
-      this.logger.warn(`[REPORT_PERSONAL_NO_SHOW] Usuário ${userId} não é o aluno ${classData.studentId}`);
+      this.logger.warn(
+        `[REPORT_PERSONAL_NO_SHOW] Usuário ${userId} não é o aluno ${classData.studentId}`,
+      );
       throw new ForbiddenException(
         'Apenas o aluno pode reportar ausência do personal trainer',
       );
@@ -1360,7 +1396,9 @@ export class ClassesService {
         classData.status,
       )
     ) {
-      this.logger.warn(`[REPORT_PERSONAL_NO_SHOW] Status inválido: ${classData.status}`);
+      this.logger.warn(
+        `[REPORT_PERSONAL_NO_SHOW] Status inválido: ${classData.status}`,
+      );
       throw new BadRequestException(
         'A aula não está em estado válido para reportar ausência',
       );
@@ -1395,9 +1433,13 @@ export class ClassesService {
         })
         .where(eq(proposals.id, classData.proposalId));
 
-      this.logger.log('[REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed');
+      this.logger.log(
+        '[REPORT_PERSONAL_NO_SHOW] Proposta atualizada para status: disputed',
+      );
     } catch (error) {
-      this.logger.error(`[REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta: ${error}`);
+      this.logger.error(
+        `[REPORT_PERSONAL_NO_SHOW] Erro ao atualizar proposta: ${error}`,
+      );
       // Não falhar o processo se não conseguir atualizar a proposta
     }
 
@@ -1415,7 +1457,9 @@ export class ClassesService {
         timestamp: new Date(),
       });
 
-      this.logger.log('[CLASSES] Evento WebSocket emitido: class_personal_no_show_reported');
+      this.logger.log(
+        '[CLASSES] Evento WebSocket emitido: class_personal_no_show_reported',
+      );
     } catch (error) {
       this.logger.error(`[CLASSES] Erro ao emitir evento WebSocket: ${error}`);
     }
@@ -1524,17 +1568,24 @@ export class ClassesService {
 
     // Verificar se ainda está dentro do prazo para evidências
     const now = new Date();
-    if (rawClass.evidenceDeadline && now > new Date(rawClass.evidenceDeadline)) {
+    if (
+      rawClass.evidenceDeadline &&
+      now > new Date(rawClass.evidenceDeadline)
+    ) {
       throw new BadRequestException('Prazo para envio de defesa expirado');
     }
 
     // Apenas a parte reportada pode enviar defesa
     const reportedRole = rawClass.noShowReportedBy; // 'personal' reportou => aluno é reportado
-    const isReportedStudent = reportedRole === 'personal' && rawClass.studentId === userId;
-    const isReportedPersonal = reportedRole === 'student' && rawClass.personalId === userId;
+    const isReportedStudent =
+      reportedRole === 'personal' && rawClass.studentId === userId;
+    const isReportedPersonal =
+      reportedRole === 'student' && rawClass.personalId === userId;
 
     if (!isReportedStudent && !isReportedPersonal) {
-      throw new ForbiddenException('Apenas a parte reportada pode enviar defesa');
+      throw new ForbiddenException(
+        'Apenas a parte reportada pode enviar defesa',
+      );
     }
 
     // Helper para fazer parse seguro de JSON (evitar 500 em dados corrompidos)
@@ -1555,14 +1606,20 @@ export class ClassesService {
       // Mesclar evidências se fornecidas
       if (defenseDto.evidenceUrls?.length) {
         const existing = safeJsonParse(rawClass.studentEvidence);
-        updateData.studentEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
+        updateData.studentEvidence = JSON.stringify([
+          ...existing,
+          ...defenseDto.evidenceUrls,
+        ]);
       }
     } else {
       updateData.personalDefenseText = defenseDto.text;
       updateData.personalDefenseSubmittedAt = now;
       if (defenseDto.evidenceUrls?.length) {
         const existing = safeJsonParse(rawClass.personalEvidence);
-        updateData.personalEvidence = JSON.stringify([...existing, ...defenseDto.evidenceUrls]);
+        updateData.personalEvidence = JSON.stringify([
+          ...existing,
+          ...defenseDto.evidenceUrls,
+        ]);
       }
     }
 
@@ -1598,15 +1655,18 @@ export class ClassesService {
       ClassStatus.COMPLETED,
     ];
     if (!validStatuses.includes(rawClass.status as ClassStatus)) {
-      throw new BadRequestException('Snapshot de presença não permitido para o estado atual da aula');
+      throw new BadRequestException(
+        'Snapshot de presença não permitido para o estado atual da aula',
+      );
     }
 
     // Validar janela temporal: snapshot deve ser capturado próximo ao horário da aula (±2h)
     // Extrair T0 da aula (date + time)
     try {
-      const classDateStr = rawClass.date instanceof Date
-        ? rawClass.date.toISOString().split('T')[0]
-        : String(rawClass.date).split('T')[0];
+      const classDateStr =
+        rawClass.date instanceof Date
+          ? rawClass.date.toISOString().split('T')[0]
+          : String(rawClass.date).split('T')[0];
       const t0 = new Date(`${classDateStr}T${rawClass.time}:00`);
       const now = new Date();
       const diffMs = Math.abs(now.getTime() - t0.getTime());
@@ -1619,7 +1679,9 @@ export class ClassesService {
     } catch (e: any) {
       if (e instanceof BadRequestException) throw e;
       // Se não conseguir calcular T0, permitir (não bloquear por erro de parse)
-      this.logger.warn(`[SNAPSHOT] Não foi possível validar janela temporal para aula ${classId}: ${e?.message}`);
+      this.logger.warn(
+        `[SNAPSHOT] Não foi possível validar janela temporal para aula ${classId}: ${e?.message}`,
+      );
     }
 
     // Verificar idempotência — retornar existente se já houver
@@ -1644,7 +1706,10 @@ export class ClassesService {
           role,
           latitude: String(snapshotDto.latitude),
           longitude: String(snapshotDto.longitude),
-          accuracyMeters: snapshotDto.accuracyMeters != null ? String(snapshotDto.accuracyMeters) : null,
+          accuracyMeters:
+            snapshotDto.accuracyMeters != null
+              ? String(snapshotDto.accuracyMeters)
+              : null,
           capturedAt: new Date(snapshotDto.capturedAt),
           captureSource: snapshotDto.captureSource,
           appState: snapshotDto.appState,

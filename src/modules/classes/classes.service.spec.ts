@@ -84,7 +84,9 @@ const mockPaymentsService = {
 
 const mockRatingsService = { getRatingForClass: jest.fn() };
 
-const mockFirebaseService = { sendToUser: jest.fn().mockResolvedValue(undefined) };
+const mockFirebaseService = {
+  sendToUser: jest.fn().mockResolvedValue(undefined),
+};
 
 const mockNotificationsService = { create: jest.fn() };
 
@@ -310,7 +312,9 @@ describe('ClassesService', () => {
 
       mockDb.query.proposals.findFirst.mockResolvedValue(mockProposal);
       mockDb.query.classes.findFirst.mockResolvedValue(null);
-      mockDb.select.mockImplementation(() => createMockQueryChain([existingClass]));
+      mockDb.select.mockImplementation(() =>
+        createMockQueryChain([existingClass]),
+      );
 
       await expect(service.createClass(createClassDto, userId)).rejects.toThrow(
         BadRequestException,
@@ -485,9 +489,9 @@ describe('ClassesService', () => {
         .mockResolvedValueOnce(mockClass) // primeira chamada (findFirst na classe)
         .mockResolvedValueOnce({ minimumCompletionAt }); // segunda chamada (minimumCompletionAt)
 
-      await expect(
-        service.completeClass(classId, {}, userId),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.completeClass(classId, {}, userId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('deve aceitar finalização se minimumCompletionAt já passou (>= 45min)', async () => {
@@ -545,7 +549,10 @@ describe('ClassesService', () => {
 
     it('aceita código válido e transita para ACTIVE', async () => {
       const plainCode = '1234';
-      const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      const codeHash = crypto
+        .createHash('sha256')
+        .update(plainCode)
+        .digest('hex');
       const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       const rawClass = buildMockClass({
@@ -583,7 +590,10 @@ describe('ClassesService', () => {
 
     it('rejeita código inválido → BadRequestException INVALID_CONFIRMATION_CODE', async () => {
       const validCode = '5678';
-      const codeHash = crypto.createHash('sha256').update(validCode).digest('hex');
+      const codeHash = crypto
+        .createHash('sha256')
+        .update(validCode)
+        .digest('hex');
       const codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       const rawClass = buildMockClass({
@@ -615,7 +625,10 @@ describe('ClassesService', () => {
 
     it('rejeita código expirado → BadRequestException CONFIRMATION_CODE_EXPIRED', async () => {
       const plainCode = '9999';
-      const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      const codeHash = crypto
+        .createHash('sha256')
+        .update(plainCode)
+        .digest('hex');
       const expiredAt = new Date(Date.now() - 60 * 1000); // já expirou
 
       const rawClass = buildMockClass({
@@ -713,13 +726,58 @@ describe('ClassesService', () => {
       const refundError = new Error('Falha no gateway de pagamento');
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
-      mockPaymentsService.cancelPaymentBeforeClass.mockRejectedValue(refundError);
+      mockPaymentsService.cancelPaymentBeforeClass.mockRejectedValue(
+        refundError,
+      );
 
       await expect(service.cancelClass(classId, studentId)).rejects.toThrow(
         BadRequestException,
       );
 
       expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('deve abortar cancelamento se pagamento não for encontrado e proposta for paga (valor > 0)', async () => {
+      const mockClass = buildScheduledClass({
+        date: new Date('2035-12-31'),
+        proposal: { value: 100 },
+      });
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockPaymentsService.cancelPaymentBeforeClass.mockRejectedValue(
+        new NotFoundException('Payment not found'),
+      );
+
+      await expect(service.cancelClass(classId, studentId)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('deve prosseguir com cancelamento se pagamento não for encontrado e proposta for gratuita (valor == 0)', async () => {
+      const mockClass = buildScheduledClass({
+        date: new Date('2035-12-31'),
+        proposal: { value: 0 },
+      });
+      const cancelledClass = { ...mockClass, status: ClassStatus.CANCELLED };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([cancelledClass]),
+          }),
+        }),
+      });
+      mockPaymentsService.cancelPaymentBeforeClass.mockRejectedValue(
+        new NotFoundException('Payment not found'),
+      );
+
+      const result = await service.cancelClass(classId, studentId);
+
+      expect(result.status).toBe(ClassStatus.CANCELLED);
+      expect(mockDb.update).toHaveBeenCalled();
     });
   });
 
@@ -744,7 +802,10 @@ describe('ClassesService', () => {
 
     it('parte reportada (aluno) envia defesa → sucesso', async () => {
       const rawClass = buildDisputeClass();
-      const updatedClass = { ...rawClass, studentDefenseText: 'Estive presente' };
+      const updatedClass = {
+        ...rawClass,
+        studentDefenseText: 'Estive presente',
+      };
 
       mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
       mockDb.update.mockReturnValue({
@@ -787,7 +848,11 @@ describe('ClassesService', () => {
       mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
 
       await expect(
-        service.submitDisputeDefense(classId, { text: 'Tarde demais' }, studentId),
+        service.submitDisputeDefense(
+          classId,
+          { text: 'Tarde demais' },
+          studentId,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -816,7 +881,12 @@ describe('ClassesService', () => {
         time: now.toTimeString().slice(0, 5),
       };
 
-      const createdSnapshot = { id: 'snap-1', classId, userId, ...baseSnapshot };
+      const createdSnapshot = {
+        id: 'snap-1',
+        classId,
+        userId,
+        ...baseSnapshot,
+      };
 
       mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
       mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(null);
@@ -826,7 +896,11 @@ describe('ClassesService', () => {
         }),
       });
 
-      const result = await service.createPresenceSnapshot(classId, baseSnapshot as any, userId);
+      const result = await service.createPresenceSnapshot(
+        classId,
+        baseSnapshot as any,
+        userId,
+      );
 
       expect(result).toEqual(expect.objectContaining({ id: 'snap-1' }));
     });
@@ -845,9 +919,15 @@ describe('ClassesService', () => {
       const existingSnapshot = { id: 'snap-existing', classId, userId };
 
       mockDb.query.classes.findFirst.mockResolvedValue(rawClass);
-      mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(existingSnapshot);
+      mockDb.query.classPresenceSnapshots.findFirst.mockResolvedValue(
+        existingSnapshot,
+      );
 
-      const result = await service.createPresenceSnapshot(classId, baseSnapshot as any, userId);
+      const result = await service.createPresenceSnapshot(
+        classId,
+        baseSnapshot as any,
+        userId,
+      );
 
       expect(result).toEqual(expect.objectContaining({ id: 'snap-existing' }));
       expect(mockDb.insert).not.toHaveBeenCalled();
@@ -881,7 +961,9 @@ describe('ClassesService', () => {
       } as any;
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
-      mockDb.select.mockImplementation(() => createMockQueryChain([otherClass]));
+      mockDb.select.mockImplementation(() =>
+        createMockQueryChain([otherClass]),
+      );
 
       await expect(
         service.updateClass(classId, updateDto as any, userId),
@@ -917,7 +999,9 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(currentClass);
 
-      mockDb.select.mockImplementation(() => createMockQueryChain([nonOverlapping]));
+      mockDb.select.mockImplementation(() =>
+        createMockQueryChain([nonOverlapping]),
+      );
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({

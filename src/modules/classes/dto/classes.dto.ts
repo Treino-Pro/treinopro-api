@@ -10,8 +10,6 @@ import {
   IsArray,
   IsBoolean,
   IsNumber,
-  IsLatitude,
-  IsLongitude,
   Length,
   Matches,
 } from 'class-validator';
@@ -614,7 +612,10 @@ export class PresenceSnapshotDto {
   @IsOptional()
   accuracyMeters?: number;
 
-  @ApiProperty({ description: 'Timestamp da captura (ISO 8601)', example: '2024-01-15T14:00:00.000Z' })
+  @ApiProperty({
+    description: 'Timestamp da captura (ISO 8601)',
+    example: '2024-01-15T14:00:00.000Z',
+  })
   @IsDateString()
   capturedAt: string;
 
