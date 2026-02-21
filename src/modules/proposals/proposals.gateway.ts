@@ -192,30 +192,23 @@ export class ProposalsGateway
 
     // Enviar notificação push sempre
     if (this.firebaseNotificationService.isConfigured()) {
-      try {
-        await this.firebaseNotificationService.sendProposalAcceptedNotification(
-          proposalData.studentId,
-          {
-            id: proposalData.proposal.id,
-            personalName:
-              proposalData.personal.name ||
-              `${proposalData.personal.firstName} ${proposalData.personal.lastName}`,
-            personalPhoto:
-              proposalData.personal.photo ||
-              proposalData.personal.profileImageUrl,
+      await this.firebaseNotificationService.sendProposalAcceptedNotification(
+        proposalData.studentId,
+        {
+          id: proposalData.proposal.id,
+          personalName:
+            proposalData.personal.name ||
+            `${proposalData.personal.firstName} ${proposalData.personal.lastName}`,
+          personalPhoto:
+            proposalData.personal.photo ||
+            proposalData.personal.profileImageUrl,
             location: proposalData.proposal.locationName,
-            classId: proposalData.proposal.classId,
-          },
-        );
-        this.logger.log(
-          `Notificação push enviada para aluno ${proposalData.studentId}`,
-        );
-      } catch (error) {
-        this.logger.error(
-          `Erro ao enviar notificação push de proposta aceita para aluno ${proposalData.studentId}:`,
-          error,
-        );
-      }
+          classId: proposalData.proposal.classId,
+        },
+      );
+      this.logger.log(
+        `Notificação push enviada para aluno ${proposalData.studentId}`,
+      );
     }
   }
 
