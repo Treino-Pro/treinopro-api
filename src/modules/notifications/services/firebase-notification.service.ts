@@ -71,13 +71,73 @@ export class FirebaseNotificationService {
   }
 
   /**
-   * Retorna o apns-topic (bundle ID) a partir do env, com fallback para produção
+   * Retorna o apns-topic (bundle ID) a partir do env
    */
   private getApnsTopic(): string {
-    return (
-      this.configService.get<string>('IOS_BUNDLE_ID') ||
-      'com.treinopro.oficial'
-    );
+    const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
+
+    if (!apnsTopic) {
+      throw new Error('IOS_BUNDLE_ID não configurado para envio iOS');
+    }
+
+    return apnsTopic;
+  }
+
+  /**
+   * Divide array em blocos menores
+   */
+  private chunkArray<T>(items: T[], chunkSize: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+      chunks.push(items.slice(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+  /**
+   * Envia mensagens em blocos de até 500 (limite do FCM para sendEach)
+   */
+  private async sendEachWithChunking(
+    messages: admin.messaging.Message[],
+  ): Promise<{
+    responses: admin.messaging.SendResponse[];
+    successCount: number;
+    failureCount: number;
+  }> {
+    const maxBatchSize = 500;
+
+    if (messages.length <= maxBatchSize) {
+      const response = await admin.messaging().sendEach(messages);
+      return {
+        responses: response.responses,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      };
+    }
+
+    const chunks = this.chunkArray(messages, maxBatchSize);
+    const allResponses: admin.messaging.SendResponse[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const response = await admin.messaging().sendEach(chunk);
+
+      allResponses.push(...response.responses);
+      successCount += response.successCount;
+      failureCount += response.failureCount;
+
+      this.logger.log(
+        `📦 Chunk ${i + 1}/${chunks.length} enviado: ${response.successCount}/${chunk.length} sucesso`,
+      );
+    }
+
+    return {
+      responses: allResponses,
+      successCount,
+      failureCount,
+    };
   }
 
   /**
@@ -237,7 +297,9 @@ export class FirebaseNotificationService {
 
       // Se há mais de 1 token, enviar para todos (multi-device)
       if (allTokens.length > 1) {
-        this.logger.log(`📱 Enviando para ${allTokens.length} dispositivos do usuário ${userId}`);
+        this.logger.log(
+          `📱 Enviando para ${allTokens.length} dispositivos do usuário ${userId}`,
+        );
         return await this.sendToMultipleTokens(userId, allTokens, notification);
       }
 
@@ -422,10 +484,11 @@ export class FirebaseNotificationService {
     }));
 
     try {
-      const response = await admin.messaging().sendEach(messages);
+      const response = await this.sendEachWithChunking(messages);
       let firstSuccess: string | null = null;
 
-      response.responses.forEach((resp, idx) => {
+      for (let idx = 0; idx < response.responses.length; idx++) {
+        const resp = response.responses[idx];
         if (resp.success) {
           if (!firstSuccess) firstSuccess = resp.messageId ?? null;
         } else {
@@ -434,10 +497,10 @@ export class FirebaseNotificationService {
             errorCode === 'messaging/invalid-registration-token' ||
             errorCode === 'messaging/registration-token-not-registered'
           ) {
-            this.clearInvalidTokenFromTable(tokens[idx]);
+            await this.clearInvalidTokenFromTable(tokens[idx]);
           }
         }
-      });
+      }
 
       this.logger.log(
         `📱 Multi-device: ${response.successCount}/${tokens.length} enviados para ${userId}`,
@@ -614,9 +677,11 @@ export class FirebaseNotificationService {
           ...basePayload,
           token: t,
         }));
-        const batchResp = await admin.messaging().sendEach(messages);
+        const batchResp = await this.sendEachWithChunking(messages);
         let firstSuccess: string | null = null;
-        batchResp.responses.forEach((resp, idx) => {
+
+        for (let idx = 0; idx < batchResp.responses.length; idx++) {
+          const resp = batchResp.responses[idx];
           if (resp.success) {
             if (!firstSuccess) firstSuccess = resp.messageId ?? null;
           } else {
@@ -625,10 +690,11 @@ export class FirebaseNotificationService {
               errorCode === 'messaging/invalid-registration-token' ||
               errorCode === 'messaging/registration-token-not-registered'
             ) {
-              this.clearInvalidTokenFromTable(allTokens[idx]);
+              await this.clearInvalidTokenFromTable(allTokens[idx]);
             }
           }
-        });
+        }
+
         this.logger.log(
           `📱 Proposta multi-device: ${batchResp.successCount}/${allTokens.length} para ${personalId}`,
         );
@@ -765,7 +831,9 @@ export class FirebaseNotificationService {
       return tokens.map((t: { token: string }) => t.token).filter(Boolean);
     } catch (error) {
       // Tabela pode não existir ainda (migration pendente)
-      this.logger.warn(`⚠️ Erro ao buscar tokens multi-device para ${userId}: ${error.message}`);
+      this.logger.warn(
+        `⚠️ Erro ao buscar tokens multi-device para ${userId}: ${error.message}`,
+      );
       return [];
     }
   }
@@ -876,22 +944,22 @@ export class FirebaseNotificationService {
     }
 
     try {
-      // Enviar em lote (até 500 por vez)
-      const response = await admin.messaging().sendEach(messages);
+      const response = await this.sendEachWithChunking(messages);
 
       let successCount = 0;
       let failedCount = 0;
 
-      response.responses.forEach((resp, idx) => {
+      for (let idx = 0; idx < response.responses.length; idx++) {
+        const resp = response.responses[idx];
         if (resp.success) {
           successCount++;
         } else {
           failedCount++;
           const userId = userIds[idx];
           const failedToken = (messages[idx] as any)?.token;
-          this.handleSendError(resp.error, userId, failedToken);
+          await this.handleSendError(resp.error, userId, failedToken);
         }
-      });
+      }
 
       this.logger.log(
         `📊 Lote de notificações: ${successCount} enviadas, ${failedCount} falharam`,

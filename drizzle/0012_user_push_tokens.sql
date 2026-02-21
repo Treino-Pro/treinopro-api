@@ -17,10 +17,10 @@ CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_user_id" ON "user_push_tokens" 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_unique_token" ON "user_push_tokens" ("token");
 
 -- Migrate existing fcm_token data from users table to user_push_tokens
--- Uses ON CONFLICT to skip duplicates (same token registered by different users gets first-wins)
+-- Em caso de token duplicado entre usuários, escolher de forma determinística por id (ordem estável)
 INSERT INTO "user_push_tokens" ("user_id", "token", "platform", "last_used_at")
 SELECT DISTINCT ON ("fcm_token") "id", "fcm_token", 'unknown', COALESCE("updated_at", now())
 FROM "users"
 WHERE "fcm_token" IS NOT NULL AND "fcm_token" != ''
-ORDER BY "fcm_token", "updated_at" DESC
+ORDER BY "fcm_token", "id" DESC
 ON CONFLICT ("token") DO NOTHING;
