@@ -107,13 +107,14 @@ export class ChatService {
     const messageResponse = messageWithUsers[0] as MessageResponseDto;
 
     // Enviar notificação push e in-app para destinatário
-    try {
-      const senderName = (messageResponse.sender as any)?.name || 'Alguém';
-      const messagePreview =
-        messageText.length > 50
-          ? messageText.substring(0, 50) + '...'
-          : messageText;
+    const senderName = (messageResponse.sender as any)?.name || 'Alguém';
+    const messagePreview =
+      messageText.length > 50
+        ? messageText.substring(0, 50) + '...'
+        : messageText;
 
+    // 1. Tentar enviar Push Notification (falhas não devem bloquear in-app)
+    try {
       // Enviar push notification com dados da classe para navegação correta
       await this.firebaseNotificationService.sendToUser(receiverId, {
         title: `💬 ${senderName}`,
@@ -131,8 +132,12 @@ export class ChatService {
           duration: classData.duration ? String(classData.duration) : '',
         },
       });
+    } catch (error) {
+      console.error('❌ Erro ao enviar notificação push de mensagem:', error);
+    }
 
-      // Criar notificação in-app
+    // 2. Criar notificação in-app (independente do sucesso do push)
+    try {
       await this.notificationsService.sendInAppNotification(
         receiverId,
         'new-message',
@@ -144,8 +149,7 @@ export class ChatService {
         },
       );
     } catch (error) {
-      console.error('❌ Erro ao enviar notificação de mensagem:', error);
-      // Não bloquear o envio da mensagem se notificação falhar
+      console.error('❌ Erro ao criar notificação in-app de mensagem:', error);
     }
 
     return messageResponse;

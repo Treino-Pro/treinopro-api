@@ -444,9 +444,10 @@ export class ClassesService {
           );
 
           // Enviar notificação push e in-app para personal sobre repasse
+          const personalAmount = payment.personalAmount || 0;
+          
+          // 1. Push Notification
           try {
-            const personalAmount = payment.personalAmount || 0;
-            // Enviar push notification
             await this.firebaseNotificationService.sendToUser(userId, {
               title: '💰 Repasse Realizado',
               body: `R$ ${personalAmount.toFixed(2)} foi transferido para sua carteira`,
@@ -457,7 +458,15 @@ export class ClassesService {
                 description: `Repasse da aula ${classData.date}`,
               },
             });
-            // Criar notificação in-app
+          } catch (error) {
+             console.error(
+              '❌ [COMPLETE_CLASS] Erro ao enviar push de repasse:',
+              error,
+            );
+          }
+
+          // 2. In-App Notification
+          try {
             await this.notificationsService.sendInAppNotification(
               userId,
               'payment-received',
@@ -469,7 +478,7 @@ export class ClassesService {
             );
           } catch (error) {
             console.error(
-              '❌ [COMPLETE_CLASS] Erro ao enviar notificação de repasse:',
+              '❌ [COMPLETE_CLASS] Erro ao enviar notificação in-app de repasse:',
               error,
             );
           }
