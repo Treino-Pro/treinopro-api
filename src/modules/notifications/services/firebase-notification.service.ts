@@ -77,8 +77,18 @@ export class FirebaseNotificationService {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
+      const strictMode =
+        this.configService.get<string>('PUSH_FAIL_ON_MISSING_IOS_BUNDLE') !==
+        'false';
+
+      if (strictMode) {
+        throw new Error(
+          'IOS_BUNDLE_ID ausente e PUSH_FAIL_ON_MISSING_IOS_BUNDLE está ativo',
+        );
+      }
+
       this.logger.warn(
-        '⚠️ IOS_BUNDLE_ID ausente: payload APNS será omitido neste envio',
+        '⚠️ IOS_BUNDLE_ID ausente: payload APNS omitido por configuração não estrita',
       );
       return null;
     }
@@ -106,44 +116,71 @@ export class FirebaseNotificationService {
     responses: admin.messaging.SendResponse[];
     successCount: number;
     failureCount: number;
+    transportFailureCount: number;
   }> {
     const maxBatchSize = 500;
+    const maxChunkRetries = 2;
     const chunks = this.chunkArray(messages, maxBatchSize);
     const allResponses: admin.messaging.SendResponse[] = [];
     let successCount = 0;
     let failureCount = 0;
+    let transportFailureCount = 0;
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      try {
-        const response = await admin.messaging().sendEach(chunk);
+      let sent = false;
 
-        allResponses.push(...response.responses);
-        successCount += response.successCount;
-        failureCount += response.failureCount;
+      for (let attempt = 1; attempt <= maxChunkRetries; attempt++) {
+        try {
+          const response = await admin.messaging().sendEach(chunk);
 
-        this.logger.log(
-          `📦 Chunk ${i + 1}/${chunks.length} enviado: ${response.successCount}/${chunk.length} sucesso`,
-        );
-      } catch (error) {
-        const chunkError = {
-          code: error?.code || 'messaging/internal-error',
-          message: error?.message || 'Falha ao enviar chunk de notificações',
-        };
+          allResponses.push(...response.responses);
+          successCount += response.successCount;
+          failureCount += response.failureCount;
 
-        allResponses.push(
-          ...chunk.map(
-            () =>
-              ({
-                success: false,
-                error: chunkError,
-              }) as admin.messaging.SendResponse,
-          ),
-        );
-        failureCount += chunk.length;
+          this.logger.log(
+            `📦 Chunk ${i + 1}/${chunks.length} enviado: ${response.successCount}/${chunk.length} sucesso`,
+          );
 
+          sent = true;
+          break;
+        } catch (error) {
+          const isLastAttempt = attempt === maxChunkRetries;
+
+          if (!isLastAttempt) {
+            this.logger.warn(
+              `⚠️ Chunk ${i + 1}/${chunks.length} falhou na tentativa ${attempt}/${maxChunkRetries}. Retentando...`,
+            );
+            await this.delay(attempt * 1000);
+            continue;
+          }
+
+          const chunkError = {
+            code: error?.code || 'messaging/internal-error',
+            message: error?.message || 'Falha ao enviar chunk de notificações',
+          };
+
+          transportFailureCount += chunk.length;
+          allResponses.push(
+            ...chunk.map(
+              () =>
+                ({
+                  success: false,
+                  error: chunkError,
+                }) as admin.messaging.SendResponse,
+            ),
+          );
+          failureCount += chunk.length;
+
+          this.logger.error(
+            `❌ Chunk ${i + 1}/${chunks.length} falhou após ${maxChunkRetries} tentativas (${chunk.length} mensagens): ${chunkError.code}`,
+          );
+        }
+      }
+
+      if (!sent) {
         this.logger.error(
-          `❌ Chunk ${i + 1}/${chunks.length} falhou completamente (${chunk.length} mensagens): ${chunkError.code}`,
+          `❌ Chunk ${i + 1}/${chunks.length} marcado para retry direcionado externo (${chunk.length} mensagens)`,
         );
       }
     }
@@ -152,6 +189,7 @@ export class FirebaseNotificationService {
       responses: allResponses,
       successCount,
       failureCount,
+      transportFailureCount,
     };
   }
 
@@ -532,6 +570,13 @@ export class FirebaseNotificationService {
       this.logger.log(
         `📱 Multi-device: ${response.successCount}/${tokens.length} enviados para ${userId}`,
       );
+
+      if (response.transportFailureCount > 0) {
+        this.logger.error(
+          `❌ Multi-device com falha de transporte em ${response.transportFailureCount} mensagens para ${userId}`,
+        );
+      }
+
       return firstSuccess;
     } catch (error) {
       this.logger.error(
@@ -731,6 +776,13 @@ export class FirebaseNotificationService {
         this.logger.log(
           `📱 Proposta multi-device: ${batchResp.successCount}/${allTokens.length} para ${personalId}`,
         );
+
+        if (batchResp.transportFailureCount > 0) {
+          this.logger.error(
+            `❌ Proposta com falha de transporte em ${batchResp.transportFailureCount} mensagens para ${personalId}`,
+          );
+        }
+
         return firstSuccess;
       }
 
@@ -1001,6 +1053,12 @@ export class FirebaseNotificationService {
       this.logger.log(
         `📊 Lote de notificações: ${successCount} enviadas, ${failedCount} falharam`,
       );
+
+      if (response.transportFailureCount > 0) {
+        this.logger.error(
+          `❌ Lote com falha de transporte em ${response.transportFailureCount} mensagens (necessário retry direcionado)`,
+        );
+      }
 
       return { success: successCount, failed: failedCount };
     } catch (error) {

@@ -16,6 +16,29 @@ CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_user_id" ON "user_push_tokens" 
 -- Unique constraint: same token can only be registered once
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_unique_token" ON "user_push_tokens" ("token");
 
+-- Tabela de trilha para remediação de tokens legados duplicados
+CREATE TABLE IF NOT EXISTS "user_push_tokens_migration_issues" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "token" text NOT NULL,
+  "user_ids" text NOT NULL,
+  "issue_type" varchar(40) NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_token"
+ON "user_push_tokens_migration_issues" ("token");
+
+-- Registrar tokens duplicados para remediação manual/auditoria
+INSERT INTO "user_push_tokens_migration_issues" ("token", "user_ids", "issue_type")
+SELECT
+  "fcm_token",
+  string_agg("id"::text, ',' ORDER BY "updated_at" DESC NULLS LAST),
+  'duplicate_legacy_token'
+FROM "users"
+WHERE "fcm_token" IS NOT NULL AND "fcm_token" != ''
+GROUP BY "fcm_token"
+HAVING COUNT(*) > 1;
+
 -- Migrate existing fcm_token data from users table to user_push_tokens
 -- Para evitar associação arbitrária em duplicados legados, migra apenas tokens com dono único
 WITH "tokens_unicos" AS (

@@ -17,8 +17,18 @@ export class PushNotificationService {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
+      const strictMode =
+        this.configService.get<string>('PUSH_FAIL_ON_MISSING_IOS_BUNDLE') !==
+        'false';
+
+      if (strictMode) {
+        throw new Error(
+          'IOS_BUNDLE_ID ausente e PUSH_FAIL_ON_MISSING_IOS_BUNDLE está ativo',
+        );
+      }
+
       this.logger.warn(
-        '⚠️ IOS_BUNDLE_ID ausente: payload APNS será omitido neste envio',
+        '⚠️ IOS_BUNDLE_ID ausente: payload APNS omitido por configuração não estrita',
       );
       return null;
     }
@@ -187,6 +197,7 @@ export class PushNotificationService {
       const apnsTopic = this.getApnsTopic();
 
       const maxBatchSize = 500;
+      const maxChunkRetries = 2;
       const tokenChunks = this.chunkArray(tokens, maxBatchSize);
       let totalSuccessCount = 0;
       let totalFailureCount = 0;
@@ -251,14 +262,34 @@ export class PushNotificationService {
             : {}),
         };
 
-        let response: admin.messaging.BatchResponse;
-        try {
-          response = await admin.messaging().sendEachForMulticast(message);
-        } catch (error) {
-          hadChunkTransportError = true;
-          totalFailureCount += chunk.length;
+        let response: admin.messaging.BatchResponse | null = null;
+        for (let attempt = 1; attempt <= maxChunkRetries; attempt++) {
+          try {
+            response = await admin.messaging().sendEachForMulticast(message);
+            break;
+          } catch (error) {
+            const isLastAttempt = attempt === maxChunkRetries;
+            if (!isLastAttempt) {
+              this.logger.warn(
+                `⚠️ Chunk ${chunkIndex + 1}/${tokenChunks.length} falhou na tentativa ${attempt}/${maxChunkRetries}. Retentando...`,
+              );
+              await new Promise((resolve) =>
+                setTimeout(resolve, attempt * 1000),
+              );
+              continue;
+            }
+
+            hadChunkTransportError = true;
+            totalFailureCount += chunk.length;
+            this.logger.error(
+              `❌ Falha de transporte no chunk ${chunkIndex + 1}/${tokenChunks.length} após ${maxChunkRetries} tentativas: ${error?.code || error?.message || error}`,
+            );
+          }
+        }
+
+        if (!response) {
           this.logger.error(
-            `❌ Falha de transporte no chunk ${chunkIndex + 1}/${tokenChunks.length}: ${error?.code || error?.message || error}`,
+            `❌ Chunk ${chunkIndex + 1}/${tokenChunks.length} marcado para retry direcionado externo (${chunk.length} tokens)`,
           );
           continue;
         }
@@ -303,8 +334,8 @@ export class PushNotificationService {
       }
 
       if (hadChunkTransportError && totalSuccessCount > 0) {
-        this.logger.warn(
-          '⚠️ Envio com sucesso parcial: alguns chunks falharam no transporte, sem erro global para evitar reenvio duplicado externo',
+        this.logger.error(
+          '❌ Envio com sucesso parcial: alguns chunks falharam no transporte e exigem retry direcionado',
         );
       }
 
