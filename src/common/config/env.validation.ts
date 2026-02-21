@@ -73,6 +73,19 @@ export class EnvironmentVariables {
   @IsString()
   MP_WEBHOOK_SECRET: string;
 
+  // Firebase Admin (push notifications)
+  @IsString()
+  @IsOptional()
+  FIREBASE_PROJECT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  FIREBASE_CLIENT_EMAIL?: string;
+
+  @IsString()
+  @IsOptional()
+  FIREBASE_PRIVATE_KEY?: string;
+
   // URLs externas
   @IsString()
   @IsOptional()

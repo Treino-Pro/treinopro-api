@@ -141,6 +141,28 @@ export const usersRelations = relations(users, ({ many, one }) => ({
     fields: [users.crefImageId],
     references: [files.id],
   }),
+  pushTokens: many(userPushTokens),
+}));
+
+// ===== User Push Tokens (multi-device support) =====
+
+export const userPushTokens = pgTable('user_push_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  token: text('token').notNull(),
+  platform: varchar('platform', { length: 20 }).notNull(), // 'ios' | 'android'
+  deviceInfo: text('device_info'), // identificador do dispositivo (opcional)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at').defaultNow().notNull(),
+});
+
+export const userPushTokensRelations = relations(userPushTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [userPushTokens.userId],
+    references: [users.id],
+  }),
 }));
 
 // Import other tables for relations

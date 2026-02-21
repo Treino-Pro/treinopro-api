@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
-import { users } from '../../../database/schema';
+import { users, userPushTokens } from '../../../database/schema';
 import { eq } from 'drizzle-orm';
 import { NonceService } from './nonce.service';
 
@@ -92,16 +92,26 @@ export class FirebaseNotificationService {
   }
 
   /**
-   * Remove token FCM inválido do banco de dados
+   * Remove token FCM inválido do banco de dados (legacy + nova tabela)
    */
   private async clearInvalidToken(userId: string): Promise<void> {
     try {
+      // Limpar da coluna legacy
       await this.db
         .update(users)
         .set({ fcmToken: null })
         .where(eq(users.id, userId));
 
-      this.logger.warn(`🗑️ Token FCM inválido removido para usuário ${userId}`);
+      // Limpar da tabela multi-token
+      try {
+        await this.db
+          .delete(userPushTokens)
+          .where(eq(userPushTokens.userId, userId));
+      } catch (_) {
+        // Tabela pode não existir ainda
+      }
+
+      this.logger.warn(`🗑️ Token(s) FCM inválido(s) removido(s) para usuário ${userId}`);
     } catch (error) {
       this.logger.error(
         `Erro ao remover token inválido para ${userId}:`,
@@ -175,7 +185,7 @@ export class FirebaseNotificationService {
   }
 
   /**
-   * Enviar notificação push para um usuário específico
+   * Enviar notificação push para um usuário específico (multi-device)
    */
   async sendToUser(
     userId: string,
@@ -191,12 +201,27 @@ export class FirebaseNotificationService {
         return null;
       }
 
-      // Buscar token FCM do usuário no banco de dados
-      const user = await this.getUserFcmToken(userId);
-      if (!user?.fcmToken) {
-        this.logger.log(`Usuário ${userId} não tem token FCM`);
-        return null;
+      // Buscar todos os tokens FCM do usuário (multi-device)
+      const allTokens = await this.getUserAllFcmTokens(userId);
+
+      // Fallback para token legacy
+      if (allTokens.length === 0) {
+        const user = await this.getUserFcmToken(userId);
+        if (!user?.fcmToken) {
+          this.logger.log(`Usuário ${userId} não tem token FCM`);
+          return null;
+        }
+        allTokens.push(user.fcmToken);
       }
+
+      // Se há mais de 1 token, enviar para todos (multi-device)
+      if (allTokens.length > 1) {
+        this.logger.log(`📱 Enviando para ${allTokens.length} dispositivos do usuário ${userId}`);
+        return await this.sendToMultipleTokens(userId, allTokens, notification);
+      }
+
+      // Caminho padrão: 1 token
+      const fcmToken = allTokens[0];
 
       // Sanitizar dados: garantir que todos os valores sejam strings
       // Firebase Admin SDK requer que todos os valores em 'data' sejam strings
@@ -227,7 +252,7 @@ export class FirebaseNotificationService {
           body: notification.body, // Para Flutter criar notificação local customizada
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
-        token: user.fcmToken,
+        token: fcmToken,
         android: {
           priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
           // ✅ TTL: 24 horas (86400 segundos) - garantir entrega mesmo com Doze Mode
@@ -265,6 +290,7 @@ export class FirebaseNotificationService {
               },
               sound: 'default',
               badge: 1,
+              'mutable-content': 1,
               contentAvailable: true, // Permite que handler de background execute
             },
             // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
@@ -273,6 +299,10 @@ export class FirebaseNotificationService {
               : undefined,
           },
           headers: {
+            // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
+            'apns-push-type': 'alert',
+            // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
+            'apns-topic': 'com.treinopro.oficial',
             // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
@@ -295,6 +325,124 @@ export class FirebaseNotificationService {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Enviar notificação para múltiplos tokens de um mesmo usuário (multi-device)
+   */
+  private async sendToMultipleTokens(
+    userId: string,
+    tokens: string[],
+    notification: {
+      title: string;
+      body: string;
+      data?: Record<string, string>;
+    },
+  ): Promise<string | null> {
+    const sanitizedData: Record<string, string> = {};
+    if (notification.data) {
+      for (const [key, value] of Object.entries(notification.data)) {
+        sanitizedData[key] = value != null ? String(value) : '';
+      }
+    }
+
+    const messages: admin.messaging.Message[] = tokens.map((token) => ({
+      notification: {
+        title: notification.title,
+        body: notification.body,
+      },
+      data: {
+        ...sanitizedData,
+        title: notification.title,
+        body: notification.body,
+        click_action: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+      token,
+      android: {
+        priority: 'high' as const,
+        ttl: 24 * 60 * 60 * 1000,
+        directBootOk: true,
+        notification: {
+          title: notification.title,
+          body: notification.body,
+          icon: 'ic_notification',
+          color: '#4CAF50',
+          sound: 'default',
+          channelId: 'high_importance_channel',
+          priority: 'high' as const,
+          visibility: 'public' as const,
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: {
+              title: notification.title,
+              body: notification.body,
+            },
+            sound: 'default',
+            badge: 1,
+            'mutable-content': 1,
+            contentAvailable: true,
+          },
+        },
+        headers: {
+          'apns-push-type': 'alert',
+          'apns-topic': 'com.treinopro.oficial',
+          'apns-expiration': String(
+            Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+          ),
+          'apns-priority': '10',
+        },
+      },
+    }));
+
+    try {
+      const response = await admin.messaging().sendEach(messages);
+      let firstSuccess: string | null = null;
+
+      response.responses.forEach((resp, idx) => {
+        if (resp.success) {
+          if (!firstSuccess) firstSuccess = resp.messageId ?? null;
+        } else {
+          const errorCode = (resp.error as any)?.code;
+          if (
+            errorCode === 'messaging/invalid-registration-token' ||
+            errorCode === 'messaging/registration-token-not-registered'
+          ) {
+            this.clearInvalidTokenFromTable(tokens[idx]);
+          }
+        }
+      });
+
+      this.logger.log(
+        `📱 Multi-device: ${response.successCount}/${tokens.length} enviados para ${userId}`,
+      );
+      return firstSuccess;
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao enviar multi-device para ${userId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Remove token inválido da tabela user_push_tokens
+   */
+  private async clearInvalidTokenFromTable(token: string): Promise<void> {
+    try {
+      await this.db
+        .delete(userPushTokens)
+        .where(eq(userPushTokens.token, token));
+      this.logger.warn(`🗑️ Token inválido removido da tabela user_push_tokens`);
+    } catch (error) {
+      // Tabela pode não existir ainda
+      this.logger.warn(`⚠️ Erro ao remover token da tabela: ${error.message}`);
     }
   }
 
@@ -435,6 +583,10 @@ export class FirebaseNotificationService {
             threadId: `proposta_${proposal.id}`,
           },
           headers: {
+            // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
+            'apns-push-type': 'alert',
+            // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
+            'apns-topic': 'com.treinopro.oficial',
             // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
@@ -518,11 +670,20 @@ export class FirebaseNotificationService {
 
   /**
    * Buscar token FCM do usuário no banco de dados
+   * Tenta primeiro a tabela user_push_tokens (multi-device), fallback para users.fcmToken (legacy)
    */
   private async getUserFcmToken(
     userId: string,
   ): Promise<{ fcmToken: string } | null> {
     try {
+      // Tentar buscar da tabela multi-token primeiro
+      const tokens = await this.getUserAllFcmTokens(userId);
+      if (tokens.length > 0) {
+        // Retornar o token mais recente (para retrocompatibilidade com chamadas que esperam 1 token)
+        return { fcmToken: tokens[0] };
+      }
+
+      // Fallback: buscar da coluna legacy
       const user = await this.db.query.users.findFirst({
         where: eq(users.id, userId),
         columns: {
@@ -542,6 +703,25 @@ export class FirebaseNotificationService {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Buscar todos os tokens FCM de um usuário (multi-device)
+   */
+  private async getUserAllFcmTokens(userId: string): Promise<string[]> {
+    try {
+      const tokens = await this.db
+        .select({ token: userPushTokens.token })
+        .from(userPushTokens)
+        .where(eq(userPushTokens.userId, userId))
+        .orderBy(userPushTokens.lastUsedAt);
+
+      return tokens.map((t: { token: string }) => t.token).filter(Boolean);
+    } catch (error) {
+      // Tabela pode não existir ainda (migration pendente)
+      this.logger.warn(`⚠️ Erro ao buscar tokens multi-device para ${userId}: ${error.message}`);
+      return [];
     }
   }
 
@@ -627,14 +807,17 @@ export class FirebaseNotificationService {
               },
               sound: 'default',
               badge: 1,
+              'mutable-content': 1,
               contentAvailable: true, // Permite que handler de background execute
             },
           },
           headers: {
+            'apns-push-type': 'alert',
+            'apns-topic': 'com.treinopro.oficial',
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
             ),
-            'apns-priority': '10', // ✅ Alta prioridade
+            'apns-priority': '10',
           },
         },
       };

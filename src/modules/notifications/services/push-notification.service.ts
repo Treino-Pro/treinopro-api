@@ -82,22 +82,46 @@ export class PushNotificationService {
         },
         data: {
           template: template,
+          title: notification.title,
+          body: notification.body,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
           ...this.stringifyDataValues(data),
         },
         android: {
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
+          directBootOk: true,
           notification: {
             icon: 'ic_notification',
             color: '#4CAF50',
             sound: 'default',
+            channelId: 'high_importance_channel',
             priority: 'high' as const,
+            visibility: 'public' as const,
+            defaultSound: true,
+            defaultVibrateTimings: true,
           },
         },
         apns: {
           payload: {
             aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
+              },
               sound: 'default',
               badge: 1,
+              'mutable-content': 1,
+              contentAvailable: true,
             },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            'apns-topic': 'com.treinopro.oficial',
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
           },
         },
       };
@@ -143,22 +167,46 @@ export class PushNotificationService {
         },
         data: {
           template: template,
+          title: notification.title,
+          body: notification.body,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
           ...this.stringifyDataValues(data),
         },
         android: {
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
+          directBootOk: true,
           notification: {
             icon: 'ic_notification',
             color: '#4CAF50',
             sound: 'default',
+            channelId: 'high_importance_channel',
             priority: 'high' as const,
+            visibility: 'public' as const,
+            defaultSound: true,
+            defaultVibrateTimings: true,
           },
         },
         apns: {
           payload: {
             aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
+              },
               sound: 'default',
               badge: 1,
+              'mutable-content': 1,
+              contentAvailable: true,
             },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            'apns-topic': 'com.treinopro.oficial',
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
           },
         },
       };
@@ -172,9 +220,20 @@ export class PushNotificationService {
       if (response.failureCount > 0) {
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
-            this.logger.error(
-              `❌ Falha no token ${tokens[idx]}: ${resp.error?.message}`,
-            );
+            const errorCode = (resp.error as any)?.code;
+            const isInvalidToken =
+              errorCode === 'messaging/invalid-registration-token' ||
+              errorCode === 'messaging/registration-token-not-registered';
+
+            if (isInvalidToken) {
+              this.logger.warn(
+                `🗑️ Token inválido detectado (${errorCode}): ${tokens[idx].substring(0, 20)}...`,
+              );
+            } else {
+              this.logger.error(
+                `❌ Falha no token ${tokens[idx].substring(0, 20)}...: [${errorCode}] ${resp.error?.message}`,
+              );
+            }
           }
         });
       }

@@ -455,7 +455,7 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async saveFcmToken(
     @Param('id') userId: string,
-    @Body() body: { token: string },
+    @Body() body: { token: string; platform?: string; deviceInfo?: string },
     @Request() req: any,
   ) {
     // ✅ Validar que usuário só pode atualizar seu próprio token
@@ -465,6 +465,6 @@ export class UsersController {
       );
     }
 
-    return this.usersService.saveFcmToken(userId, body.token);
+    return this.usersService.saveFcmToken(userId, body.token, body.platform, body.deviceInfo);
   }
 }

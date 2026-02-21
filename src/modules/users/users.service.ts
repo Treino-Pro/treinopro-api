@@ -9,7 +9,7 @@ import {
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { eq, and, or, like, desc, count, sql } from 'drizzle-orm';
-import { users, files } from '../../database/schema';
+import { users, files, userPushTokens } from '../../database/schema';
 import {
   CreateUserDto,
   UpdateUserDto,
@@ -646,11 +646,14 @@ export class UsersService {
   }
 
   /**
-   * Salvar token FCM do usuário
+   * Salvar token FCM do usuário (multi-device)
+   * Registra token na tabela user_push_tokens e mantém retrocompatibilidade com users.fcmToken
    */
   async saveFcmToken(
     userId: string,
     fcmToken: string,
+    platform?: string,
+    deviceInfo?: string,
   ): Promise<{ success: boolean; message: string }> {
     // Verificar se usuário existe
     const user = await this.db.query.users.findFirst({
@@ -662,7 +665,7 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Atualizar token FCM
+    // ✅ Retrocompatibilidade: ainda salvar na coluna legacy
     await this.db
       .update(users)
       .set({
@@ -670,6 +673,35 @@ export class UsersService {
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
+
+    // ✅ NOVO: Upsert na tabela user_push_tokens
+    // Se o token já existe, atualizar userId e lastUsedAt (token pode migrar de usuário em logout/login)
+    try {
+      const detectedPlatform = platform || 'unknown';
+
+      await this.db
+        .insert(userPushTokens)
+        .values({
+          userId,
+          token: fcmToken,
+          platform: detectedPlatform,
+          deviceInfo: deviceInfo || null,
+          lastUsedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: userPushTokens.token,
+          set: {
+            userId,
+            platform: detectedPlatform,
+            deviceInfo: deviceInfo || null,
+            lastUsedAt: new Date(),
+          },
+        });
+    } catch (error) {
+      // Não bloquear se a tabela nova ainda não existir (migration pendente)
+      console.warn('⚠️ [USERS] Erro ao salvar token na tabela user_push_tokens:', error.message);
+    }
+
     return {
       success: true,
       message: 'Token FCM salvo com sucesso',

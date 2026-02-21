@@ -114,7 +114,7 @@ export class ChatService {
           ? messageText.substring(0, 50) + '...'
           : messageText;
 
-      // Enviar push notification
+      // Enviar push notification com dados da classe para navegação correta
       await this.firebaseNotificationService.sendToUser(receiverId, {
         title: `💬 ${senderName}`,
         body: messagePreview,
@@ -125,6 +125,10 @@ export class ChatService {
           senderName: senderName,
           messageId: newMessage.id,
           messagePreview,
+          location: classData.location || '',
+          date: classData.date ? String(classData.date) : '',
+          time: classData.time || '',
+          duration: classData.duration ? String(classData.duration) : '',
         },
       });
 
