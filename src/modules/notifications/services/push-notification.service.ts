@@ -13,6 +13,10 @@ export class PushNotificationService {
     this.initializeFirebase();
   }
 
+  private getApnsTopic(): string {
+    return this.configService.get<string>('IOS_BUNDLE_ID') || 'com.treinopro.oficial';
+  }
+
   private initializeFirebase(): void {
     try {
       if (admin.apps.length === 0) {
@@ -117,7 +121,7 @@ export class PushNotificationService {
           },
           headers: {
             'apns-push-type': 'alert',
-            'apns-topic': 'com.treinopro.oficial',
+            'apns-topic': this.getApnsTopic(),
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
             ),
@@ -202,7 +206,7 @@ export class PushNotificationService {
           },
           headers: {
             'apns-push-type': 'alert',
-            'apns-topic': 'com.treinopro.oficial',
+            'apns-topic': this.getApnsTopic(),
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
             ),

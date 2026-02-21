@@ -3,7 +3,7 @@ import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
 import { users, userPushTokens } from '../../../database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { NonceService } from './nonce.service';
 
 @Injectable()
@@ -71,6 +71,16 @@ export class FirebaseNotificationService {
   }
 
   /**
+   * Retorna o apns-topic (bundle ID) a partir do env, com fallback para produção
+   */
+  private getApnsTopic(): string {
+    return (
+      this.configService.get<string>('IOS_BUNDLE_ID') ||
+      'com.treinopro.oficial'
+    );
+  }
+
+  /**
    * Delay helper para retry logic
    */
   private delay(ms: number): Promise<void> {
@@ -92,26 +102,33 @@ export class FirebaseNotificationService {
   }
 
   /**
-   * Remove token FCM inválido do banco de dados (legacy + nova tabela)
+   * Remove token FCM inválido do banco de dados
+   * Chamado pelo fluxo single-token (sendWithRetry → handleSendError).
+   * Recebe o token concreto para remover apenas ele, preservando outros dispositivos.
    */
-  private async clearInvalidToken(userId: string): Promise<void> {
+  private async clearInvalidToken(
+    userId: string,
+    invalidToken?: string,
+  ): Promise<void> {
     try {
-      // Limpar da coluna legacy
-      await this.db
-        .update(users)
-        .set({ fcmToken: null })
-        .where(eq(users.id, userId));
-
-      // Limpar da tabela multi-token
-      try {
-        await this.db
-          .delete(userPushTokens)
-          .where(eq(userPushTokens.userId, userId));
-      } catch (_) {
-        // Tabela pode não existir ainda
+      // Se sabemos qual token é inválido, remover apenas ele da tabela multi-token
+      if (invalidToken) {
+        await this.clearInvalidTokenFromTable(invalidToken);
       }
 
-      this.logger.warn(`🗑️ Token(s) FCM inválido(s) removido(s) para usuário ${userId}`);
+      // Limpar da coluna legacy apenas se o token legacy é o mesmo
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { fcmToken: true },
+      });
+
+      if (user?.fcmToken && (!invalidToken || user.fcmToken === invalidToken)) {
+        await this.db
+          .update(users)
+          .set({ fcmToken: null })
+          .where(eq(users.id, userId));
+        this.logger.warn(`🗑️ Token FCM legacy removido para usuário ${userId}`);
+      }
     } catch (error) {
       this.logger.error(
         `Erro ao remover token inválido para ${userId}:`,
@@ -123,7 +140,11 @@ export class FirebaseNotificationService {
   /**
    * Trata erros de envio de notificação
    */
-  private async handleSendError(error: any, userId: string): Promise<void> {
+  private async handleSendError(
+    error: any,
+    userId: string,
+    token?: string,
+  ): Promise<void> {
     const errorCode = error?.code;
 
     // Tokens inválidos ou não registrados devem ser removidos
@@ -134,7 +155,7 @@ export class FirebaseNotificationService {
       this.logger.warn(
         `❌ Token inválido detectado para usuário ${userId}: ${errorCode}`,
       );
-      await this.clearInvalidToken(userId);
+      await this.clearInvalidToken(userId, token);
     } else if (errorCode === 'messaging/invalid-argument') {
       this.logger.error(
         `❌ Argumento inválido ao enviar notificação para ${userId}:`,
@@ -167,7 +188,7 @@ export class FirebaseNotificationService {
       } catch (error) {
         // Se é a última tentativa ou erro não é recuperável, trata o erro
         if (attempt === maxRetries || !this.isRecoverableError(error)) {
-          await this.handleSendError(error, userId);
+          await this.handleSendError(error, userId, (message as any).token);
           return null;
         }
 
@@ -302,7 +323,7 @@ export class FirebaseNotificationService {
             // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
             'apns-push-type': 'alert',
             // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
-            'apns-topic': 'com.treinopro.oficial',
+            'apns-topic': this.getApnsTopic(),
             // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
@@ -391,7 +412,7 @@ export class FirebaseNotificationService {
         },
         headers: {
           'apns-push-type': 'alert',
-          'apns-topic': 'com.treinopro.oficial',
+          'apns-topic': this.getApnsTopic(),
           'apns-expiration': String(
             Math.floor(Date.now() / 1000) + 24 * 60 * 60,
           ),
@@ -465,11 +486,16 @@ export class FirebaseNotificationService {
     // ✅ Gerar nonce assinado para prevenir replay attacks
     const nonce = this.nonceService.generateNonce(proposal.id, personalId);
 
-    // Buscar token FCM do usuário para adicionar collapse_key
-    const user = await this.getUserFcmToken(personalId);
-    if (!user?.fcmToken) {
-      this.logger.log(`Usuário ${personalId} não tem token FCM`);
-      return null;
+    // Buscar todos os tokens do usuário (multi-device)
+    const allTokens = await this.getUserAllFcmTokens(personalId);
+    if (allTokens.length === 0) {
+      // Fallback legacy
+      const user = await this.getUserFcmToken(personalId);
+      if (!user?.fcmToken) {
+        this.logger.log(`Usuário ${personalId} não tem token FCM`);
+        return null;
+      }
+      allTokens.push(user.fcmToken);
     }
 
     // Sanitizar dados
@@ -531,38 +557,29 @@ export class FirebaseNotificationService {
       // - priority: 'high' garante que passe pelo Doze Mode
       // - TTL: 24 horas garante entrega mesmo com atrasos
       // - Esta abordagem garante entrega imediata E customização quando possível
-      const message: admin.messaging.Message = {
-        // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
-        notification: {
-          title: title,
-          body: body,
-        },
-        // ✅ data: Flutter processa e customiza quando handler executar
+      // Construir payload base (sem token — será adicionado por device)
+      const basePayload = {
+        notification: { title, body },
         data: {
           ...sanitizedData,
-          title, // Para Flutter criar notificação local customizada
-          body, // Para Flutter criar notificação local customizada
+          title,
+          body,
           click_action: 'FLUTTER_NOTIFICATION_CLICK',
         },
-        token: user.fcmToken,
         android: {
-          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
-          // ✅ TTL: 24 horas (86400 segundos) - garantir entrega mesmo com Doze Mode
-          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
-          // ✅ Collapse Key: agrupa notificações da mesma proposta
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          // ✅ notification: Garante exibição imediata no Android
           notification: {
-            title: title,
-            body: body,
+            title,
+            body,
             icon: 'ic_notification',
-            color: '#FF6A00', // Laranja do TreinoPro
+            color: '#FF6A00',
             sound: 'default',
-            channelId: 'proposal_channel', // Canal específico para propostas
+            channelId: 'proposal_channel',
             priority: 'high' as const,
             visibility: 'public' as const,
-            // ✅ Full-screen intent para aparecer mesmo com tela bloqueada
             defaultSound: true,
             defaultVibrateTimings: true,
           },
@@ -570,30 +587,58 @@ export class FirebaseNotificationService {
         apns: {
           payload: {
             aps: {
-              // ✅ alert: iOS mostra notificação imediatamente
-              alert: {
-                title: title,
-                body: body,
-              },
+              alert: { title, body },
               sound: 'default',
               badge: 1,
-              contentAvailable: true, // Permite que handler de background execute
+              contentAvailable: true,
             },
-            // ✅ Thread-ID para iOS (equivalente ao collapse_key)
             threadId: `proposta_${proposal.id}`,
           },
           headers: {
-            // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
             'apns-push-type': 'alert',
-            // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
-            'apns-topic': 'com.treinopro.oficial',
-            // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
+            'apns-topic': this.getApnsTopic(),
             'apns-expiration': String(
               Math.floor(Date.now() / 1000) + 24 * 60 * 60,
             ),
-            'apns-priority': '10', // ✅ Alta prioridade
+            'apns-priority': '10',
           },
         },
+      };
+
+      // Enviar para todos os tokens (multi-device)
+      if (allTokens.length > 1) {
+        this.logger.log(
+          `📱 Proposta: enviando para ${allTokens.length} dispositivos de ${personalId}`,
+        );
+        const messages: admin.messaging.Message[] = allTokens.map((t) => ({
+          ...basePayload,
+          token: t,
+        }));
+        const batchResp = await admin.messaging().sendEach(messages);
+        let firstSuccess: string | null = null;
+        batchResp.responses.forEach((resp, idx) => {
+          if (resp.success) {
+            if (!firstSuccess) firstSuccess = resp.messageId ?? null;
+          } else {
+            const errorCode = (resp.error as any)?.code;
+            if (
+              errorCode === 'messaging/invalid-registration-token' ||
+              errorCode === 'messaging/registration-token-not-registered'
+            ) {
+              this.clearInvalidTokenFromTable(allTokens[idx]);
+            }
+          }
+        });
+        this.logger.log(
+          `📱 Proposta multi-device: ${batchResp.successCount}/${allTokens.length} para ${personalId}`,
+        );
+        return firstSuccess;
+      }
+
+      // Single token path
+      const message: admin.messaging.Message = {
+        ...basePayload,
+        token: allTokens[0],
       };
 
       const response = await this.sendWithRetry(message, personalId);
@@ -715,7 +760,7 @@ export class FirebaseNotificationService {
         .select({ token: userPushTokens.token })
         .from(userPushTokens)
         .where(eq(userPushTokens.userId, userId))
-        .orderBy(userPushTokens.lastUsedAt);
+        .orderBy(desc(userPushTokens.lastUsedAt));
 
       return tokens.map((t: { token: string }) => t.token).filter(Boolean);
     } catch (error) {
@@ -747,14 +792,15 @@ export class FirebaseNotificationService {
     const messages: admin.messaging.Message[] = [];
     const userIds: string[] = [];
 
-    // Preparar mensagens
+    // Preparar mensagens — buscar todos os tokens de cada usuário (multi-device)
     for (const item of notifications) {
-      const user = await this.getUserFcmToken(item.userId);
-      if (!user?.fcmToken) {
-        continue;
+      let tokens = await this.getUserAllFcmTokens(item.userId);
+      if (tokens.length === 0) {
+        const user = await this.getUserFcmToken(item.userId);
+        if (!user?.fcmToken) continue;
+        tokens = [user.fcmToken];
       }
 
-      // Sanitizar dados
       const sanitizedData: Record<string, string> = {};
       if (item.notification.data) {
         for (const [key, value] of Object.entries(item.notification.data)) {
@@ -762,68 +808,66 @@ export class FirebaseNotificationService {
         }
       }
 
-      // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data (igual ao sendToUser)
-      // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
-      // - data: Permite que Flutter processe e customize quando handler executar
-      const message: admin.messaging.Message = {
-        // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
-        notification: {
-          title: item.notification.title,
-          body: item.notification.body,
-        },
-        // ✅ data: Flutter processa e customiza quando handler executar
-        data: {
-          ...sanitizedData,
-          title: item.notification.title, // Para Flutter criar notificação local customizada
-          body: item.notification.body, // Para Flutter criar notificação local customizada
-          click_action: 'FLUTTER_NOTIFICATION_CLICK',
-        },
-        token: user.fcmToken,
-        android: {
-          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
-          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
-          directBootOk: true,
-          // ✅ notification: Garante exibição imediata no Android
+      const apnsTopic = this.getApnsTopic();
+
+      // Criar uma mensagem por token (multi-device)
+      for (const token of tokens) {
+        const message: admin.messaging.Message = {
           notification: {
             title: item.notification.title,
             body: item.notification.body,
-            icon: 'ic_notification',
-            color: '#4CAF50',
-            sound: 'default',
-            channelId: 'high_importance_channel',
-            priority: 'high' as const,
-            visibility: 'public' as const,
-            defaultSound: true,
-            defaultVibrateTimings: true,
           },
-        },
-        apns: {
-          payload: {
-            aps: {
-              // ✅ alert: iOS mostra notificação imediatamente
-              alert: {
-                title: item.notification.title,
-                body: item.notification.body,
-              },
+          data: {
+            ...sanitizedData,
+            title: item.notification.title,
+            body: item.notification.body,
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          },
+          token,
+          android: {
+            priority: 'high' as const,
+            ttl: 24 * 60 * 60 * 1000,
+            directBootOk: true,
+            notification: {
+              title: item.notification.title,
+              body: item.notification.body,
+              icon: 'ic_notification',
+              color: '#4CAF50',
               sound: 'default',
-              badge: 1,
-              'mutable-content': 1,
-              contentAvailable: true, // Permite que handler de background execute
+              channelId: 'high_importance_channel',
+              priority: 'high' as const,
+              visibility: 'public' as const,
+              defaultSound: true,
+              defaultVibrateTimings: true,
             },
           },
-          headers: {
-            'apns-push-type': 'alert',
-            'apns-topic': 'com.treinopro.oficial',
-            'apns-expiration': String(
-              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-            ),
-            'apns-priority': '10',
+          apns: {
+            payload: {
+              aps: {
+                alert: {
+                  title: item.notification.title,
+                  body: item.notification.body,
+                },
+                sound: 'default',
+                badge: 1,
+                'mutable-content': 1,
+                contentAvailable: true,
+              },
+            },
+            headers: {
+              'apns-push-type': 'alert',
+              'apns-topic': apnsTopic,
+              'apns-expiration': String(
+                Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+              ),
+              'apns-priority': '10',
+            },
           },
-        },
-      };
+        };
 
-      messages.push(message);
-      userIds.push(item.userId);
+        messages.push(message);
+        userIds.push(item.userId);
+      }
     }
 
     if (messages.length === 0) {
@@ -844,7 +888,8 @@ export class FirebaseNotificationService {
         } else {
           failedCount++;
           const userId = userIds[idx];
-          this.handleSendError(resp.error, userId);
+          const failedToken = (messages[idx] as any)?.token;
+          this.handleSendError(resp.error, userId, failedToken);
         }
       });
 

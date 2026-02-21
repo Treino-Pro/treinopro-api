@@ -13,11 +13,14 @@ CREATE TABLE IF NOT EXISTS "user_push_tokens" (
 -- Index for fast lookup by user_id
 CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_user_id" ON "user_push_tokens" ("user_id");
 
--- Unique constraint: same token can only be registered once per user
+-- Unique constraint: same token can only be registered once
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_unique_token" ON "user_push_tokens" ("token");
 
 -- Migrate existing fcm_token data from users table to user_push_tokens
+-- Uses ON CONFLICT to skip duplicates (same token registered by different users gets first-wins)
 INSERT INTO "user_push_tokens" ("user_id", "token", "platform", "last_used_at")
-SELECT "id", "fcm_token", 'unknown', COALESCE("updated_at", now())
+SELECT DISTINCT ON ("fcm_token") "id", "fcm_token", 'unknown', COALESCE("updated_at", now())
 FROM "users"
-WHERE "fcm_token" IS NOT NULL AND "fcm_token" != '';
+WHERE "fcm_token" IS NOT NULL AND "fcm_token" != ''
+ORDER BY "fcm_token", "updated_at" DESC
+ON CONFLICT ("token") DO NOTHING;
