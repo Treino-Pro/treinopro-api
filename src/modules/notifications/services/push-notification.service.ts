@@ -13,11 +13,14 @@ export class PushNotificationService {
     this.initializeFirebase();
   }
 
-  private getApnsTopic(): string {
+  private getApnsTopic(): string | null {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
-      throw new Error('IOS_BUNDLE_ID não configurado para envio iOS');
+      this.logger.warn(
+        '⚠️ IOS_BUNDLE_ID ausente: payload APNS será omitido neste envio',
+      );
+      return null;
     }
 
     return apnsTopic;
@@ -91,6 +94,7 @@ export class PushNotificationService {
 
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
       const message = {
         token: token,
@@ -120,28 +124,32 @@ export class PushNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        apns: {
-          payload: {
-            aps: {
-              alert: {
-                title: notification.title,
-                body: notification.body,
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': 1,
+                    contentAvailable: true,
+                  },
+                },
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-topic': apnsTopic,
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  'apns-priority': '10',
+                },
               },
-              sound: 'default',
-              badge: 1,
-              'mutable-content': 1,
-              contentAvailable: true,
-            },
-          },
-          headers: {
-            'apns-push-type': 'alert',
-            'apns-topic': this.getApnsTopic(),
-            'apns-expiration': String(
-              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-            ),
-            'apns-priority': '10',
-          },
-        },
+            }
+          : {}),
       };
 
       const response = await admin.messaging().send(message);
@@ -176,11 +184,13 @@ export class PushNotificationService {
 
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
       const maxBatchSize = 500;
       const tokenChunks = this.chunkArray(tokens, maxBatchSize);
       let totalSuccessCount = 0;
       let totalFailureCount = 0;
+      let hadChunkTransportError = false;
 
       for (let chunkIndex = 0; chunkIndex < tokenChunks.length; chunkIndex++) {
         const chunk = tokenChunks[chunkIndex];
@@ -213,31 +223,45 @@ export class PushNotificationService {
               defaultVibrateTimings: true,
             },
           },
-          apns: {
-            payload: {
-              aps: {
-                alert: {
-                  title: notification.title,
-                  body: notification.body,
+          ...(apnsTopic
+            ? {
+                apns: {
+                  payload: {
+                    aps: {
+                      alert: {
+                        title: notification.title,
+                        body: notification.body,
+                      },
+                      sound: 'default',
+                      badge: 1,
+                      'mutable-content': 1,
+                      contentAvailable: true,
+                    },
+                  },
+                  headers: {
+                    'apns-push-type': 'alert',
+                    'apns-topic': apnsTopic,
+                    'apns-expiration': String(
+                      Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                    ),
+                    'apns-priority': '10',
+                  },
                 },
-                sound: 'default',
-                badge: 1,
-                'mutable-content': 1,
-                contentAvailable: true,
-              },
-            },
-            headers: {
-              'apns-push-type': 'alert',
-              'apns-topic': this.getApnsTopic(),
-              'apns-expiration': String(
-                Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-              ),
-              'apns-priority': '10',
-            },
-          },
+              }
+            : {}),
         };
 
-        const response = await admin.messaging().sendEachForMulticast(message);
+        let response: admin.messaging.BatchResponse;
+        try {
+          response = await admin.messaging().sendEachForMulticast(message);
+        } catch (error) {
+          hadChunkTransportError = true;
+          totalFailureCount += chunk.length;
+          this.logger.error(
+            `❌ Falha de transporte no chunk ${chunkIndex + 1}/${tokenChunks.length}: ${error?.code || error?.message || error}`,
+          );
+          continue;
+        }
 
         totalSuccessCount += response.successCount;
         totalFailureCount += response.failureCount;
@@ -275,6 +299,18 @@ export class PushNotificationService {
       if (totalFailureCount > 0) {
         this.logger.warn(
           `⚠️ Total de falhas no envio em lote: ${totalFailureCount}/${tokens.length}`,
+        );
+      }
+
+      if (hadChunkTransportError && totalSuccessCount > 0) {
+        this.logger.warn(
+          '⚠️ Envio com sucesso parcial: alguns chunks falharam no transporte, sem erro global para evitar reenvio duplicado externo',
+        );
+      }
+
+      if (totalSuccessCount === 0 && totalFailureCount > 0) {
+        throw new Error(
+          'Falha ao enviar push notifications para todos os tokens',
         );
       }
     } catch (error) {

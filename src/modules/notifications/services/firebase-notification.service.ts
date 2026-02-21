@@ -73,11 +73,14 @@ export class FirebaseNotificationService {
   /**
    * Retorna o apns-topic (bundle ID) a partir do env
    */
-  private getApnsTopic(): string {
+  private getApnsTopic(): string | null {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
-      throw new Error('IOS_BUNDLE_ID não configurado para envio iOS');
+      this.logger.warn(
+        '⚠️ IOS_BUNDLE_ID ausente: payload APNS será omitido neste envio',
+      );
+      return null;
     }
 
     return apnsTopic;
@@ -105,16 +108,6 @@ export class FirebaseNotificationService {
     failureCount: number;
   }> {
     const maxBatchSize = 500;
-
-    if (messages.length <= maxBatchSize) {
-      const response = await admin.messaging().sendEach(messages);
-      return {
-        responses: response.responses,
-        successCount: response.successCount,
-        failureCount: response.failureCount,
-      };
-    }
-
     const chunks = this.chunkArray(messages, maxBatchSize);
     const allResponses: admin.messaging.SendResponse[] = [];
     let successCount = 0;
@@ -122,15 +115,37 @@ export class FirebaseNotificationService {
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const response = await admin.messaging().sendEach(chunk);
+      try {
+        const response = await admin.messaging().sendEach(chunk);
 
-      allResponses.push(...response.responses);
-      successCount += response.successCount;
-      failureCount += response.failureCount;
+        allResponses.push(...response.responses);
+        successCount += response.successCount;
+        failureCount += response.failureCount;
 
-      this.logger.log(
-        `📦 Chunk ${i + 1}/${chunks.length} enviado: ${response.successCount}/${chunk.length} sucesso`,
-      );
+        this.logger.log(
+          `📦 Chunk ${i + 1}/${chunks.length} enviado: ${response.successCount}/${chunk.length} sucesso`,
+        );
+      } catch (error) {
+        const chunkError = {
+          code: error?.code || 'messaging/internal-error',
+          message: error?.message || 'Falha ao enviar chunk de notificações',
+        };
+
+        allResponses.push(
+          ...chunk.map(
+            () =>
+              ({
+                success: false,
+                error: chunkError,
+              }) as admin.messaging.SendResponse,
+          ),
+        );
+        failureCount += chunk.length;
+
+        this.logger.error(
+          `❌ Chunk ${i + 1}/${chunks.length} falhou completamente (${chunk.length} mensagens): ${chunkError.code}`,
+        );
+      }
     }
 
     return {
@@ -322,6 +337,8 @@ export class FirebaseNotificationService {
       // - priority: 'high' garante que passe pelo Doze Mode
       // - TTL: 24 horas garante entrega mesmo com atrasos
       // - Esta abordagem garante entrega imediata E customização quando possível
+      const apnsTopic = this.getApnsTopic();
+
       const message: admin.messaging.Message = {
         // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
         notification: {
@@ -363,37 +380,41 @@ export class FirebaseNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        apns: {
-          payload: {
-            aps: {
-              // ✅ alert: iOS mostra notificação imediatamente
-              alert: {
-                title: notification.title,
-                body: notification.body,
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    // ✅ alert: iOS mostra notificação imediatamente
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': 1,
+                    contentAvailable: true, // Permite que handler de background execute
+                  },
+                  // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
+                  threadId: sanitizedData.proposalId
+                    ? `proposta_${sanitizedData.proposalId}`
+                    : undefined,
+                },
+                headers: {
+                  // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
+                  'apns-push-type': 'alert',
+                  // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
+                  'apns-topic': apnsTopic,
+                  // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  // ✅ APNS Priority: 10 (alta prioridade)
+                  'apns-priority': '10',
+                },
               },
-              sound: 'default',
-              badge: 1,
-              'mutable-content': 1,
-              contentAvailable: true, // Permite que handler de background execute
-            },
-            // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
-            threadId: sanitizedData.proposalId
-              ? `proposta_${sanitizedData.proposalId}`
-              : undefined,
-          },
-          headers: {
-            // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
-            'apns-push-type': 'alert',
-            // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
-            'apns-topic': this.getApnsTopic(),
-            // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
-            'apns-expiration': String(
-              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-            ),
-            // ✅ APNS Priority: 10 (alta prioridade)
-            'apns-priority': '10',
-          },
-        },
+            }
+          : {}),
       };
 
       // Enviar notificação com retry automático
@@ -430,6 +451,8 @@ export class FirebaseNotificationService {
       }
     }
 
+    const apnsTopic = this.getApnsTopic();
+
     const messages: admin.messaging.Message[] = tokens.map((token) => ({
       notification: {
         title: notification.title,
@@ -459,28 +482,32 @@ export class FirebaseNotificationService {
           defaultVibrateTimings: true,
         },
       },
-      apns: {
-        payload: {
-          aps: {
-            alert: {
-              title: notification.title,
-              body: notification.body,
+      ...(apnsTopic
+        ? {
+            apns: {
+              payload: {
+                aps: {
+                  alert: {
+                    title: notification.title,
+                    body: notification.body,
+                  },
+                  sound: 'default',
+                  badge: 1,
+                  'mutable-content': 1,
+                  contentAvailable: true,
+                },
+              },
+              headers: {
+                'apns-push-type': 'alert',
+                'apns-topic': apnsTopic,
+                'apns-expiration': String(
+                  Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                ),
+                'apns-priority': '10',
+              },
             },
-            sound: 'default',
-            badge: 1,
-            'mutable-content': 1,
-            contentAvailable: true,
-          },
-        },
-        headers: {
-          'apns-push-type': 'alert',
-          'apns-topic': this.getApnsTopic(),
-          'apns-expiration': String(
-            Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-          ),
-          'apns-priority': '10',
-        },
-      },
+          }
+        : {}),
     }));
 
     try {
@@ -614,6 +641,8 @@ export class FirebaseNotificationService {
         return null;
       }
 
+      const apnsTopic = this.getApnsTopic();
+
       // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data
       // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
       // - data: Permite que Flutter processe e customize quando handler executar
@@ -647,25 +676,29 @@ export class FirebaseNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        apns: {
-          payload: {
-            aps: {
-              alert: { title, body },
-              sound: 'default',
-              badge: 1,
-              contentAvailable: true,
-            },
-            threadId: `proposta_${proposal.id}`,
-          },
-          headers: {
-            'apns-push-type': 'alert',
-            'apns-topic': this.getApnsTopic(),
-            'apns-expiration': String(
-              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-            ),
-            'apns-priority': '10',
-          },
-        },
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    alert: { title, body },
+                    sound: 'default',
+                    badge: 1,
+                    contentAvailable: true,
+                  },
+                  threadId: `proposta_${proposal.id}`,
+                },
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-topic': apnsTopic,
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  'apns-priority': '10',
+                },
+              },
+            }
+          : {}),
       };
 
       // Enviar para todos os tokens (multi-device)
@@ -909,28 +942,32 @@ export class FirebaseNotificationService {
               defaultVibrateTimings: true,
             },
           },
-          apns: {
-            payload: {
-              aps: {
-                alert: {
-                  title: item.notification.title,
-                  body: item.notification.body,
+          ...(apnsTopic
+            ? {
+                apns: {
+                  payload: {
+                    aps: {
+                      alert: {
+                        title: item.notification.title,
+                        body: item.notification.body,
+                      },
+                      sound: 'default',
+                      badge: 1,
+                      'mutable-content': 1,
+                      contentAvailable: true,
+                    },
+                  },
+                  headers: {
+                    'apns-push-type': 'alert',
+                    'apns-topic': apnsTopic,
+                    'apns-expiration': String(
+                      Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                    ),
+                    'apns-priority': '10',
+                  },
                 },
-                sound: 'default',
-                badge: 1,
-                'mutable-content': 1,
-                contentAvailable: true,
-              },
-            },
-            headers: {
-              'apns-push-type': 'alert',
-              'apns-topic': apnsTopic,
-              'apns-expiration': String(
-                Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-              ),
-              'apns-priority': '10',
-            },
-          },
+              }
+            : {}),
         };
 
         messages.push(message);
