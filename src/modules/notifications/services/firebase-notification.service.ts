@@ -11,6 +11,16 @@ export class FirebaseNotificationService {
   private readonly logger = new Logger(FirebaseNotificationService.name);
   private app: admin.app.App;
 
+  private createPartialTransportError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'PartialTransportFailureError';
+    return error;
+  }
+
+  private isPartialTransportError(error: any): boolean {
+    return error?.name === 'PartialTransportFailureError';
+  }
+
   constructor(
     private configService: ConfigService,
     @Inject('DATABASE_CONNECTION') private readonly db: any,
@@ -475,6 +485,10 @@ export class FirebaseNotificationService {
       }
       return response;
     } catch (error) {
+      if (this.isPartialTransportError(error)) {
+        throw error;
+      }
+
       this.logger.error(
         `❌ Erro inesperado ao enviar notificação para ${userId}:`,
         error,
@@ -588,13 +602,17 @@ export class FirebaseNotificationService {
         this.logger.error(
           `❌ Multi-device com falha de transporte em ${response.transportFailureCount} mensagens para ${userId}`,
         );
-        throw new Error(
+        throw this.createPartialTransportError(
           `Falha parcial no envio multi-device: ${response.transportFailureCount} mensagens sem confirmação de transporte`,
         );
       }
 
       return firstSuccess;
     } catch (error) {
+      if (this.isPartialTransportError(error)) {
+        throw error;
+      }
+
       this.logger.error(
         `❌ Erro ao enviar multi-device para ${userId}:`,
         error,
@@ -797,7 +815,7 @@ export class FirebaseNotificationService {
           this.logger.error(
             `❌ Proposta com falha de transporte em ${batchResp.transportFailureCount} mensagens para ${personalId}`,
           );
-          throw new Error(
+          throw this.createPartialTransportError(
             `Falha parcial no envio de proposta: ${batchResp.transportFailureCount} mensagens sem confirmação de transporte`,
           );
         }
@@ -819,6 +837,10 @@ export class FirebaseNotificationService {
       }
       return response;
     } catch (error) {
+      if (this.isPartialTransportError(error)) {
+        throw error;
+      }
+
       this.logger.error(
         `❌ Erro inesperado ao enviar notificação de proposta para ${personalId}:`,
         error,
@@ -1076,9 +1098,6 @@ export class FirebaseNotificationService {
       if (response.transportFailureCount > 0) {
         this.logger.error(
           `❌ Lote com falha de transporte em ${response.transportFailureCount} mensagens (necessário retry direcionado)`,
-        );
-        throw new Error(
-          `Falha parcial no lote: ${response.transportFailureCount} mensagens sem confirmação de transporte`,
         );
       }
 

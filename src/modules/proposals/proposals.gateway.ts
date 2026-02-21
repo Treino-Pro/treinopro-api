@@ -136,22 +136,31 @@ export class ProposalsGateway
               ? proposalData.proposal.trainingDate
               : '';
 
-        await this.firebaseNotificationService.sendProposalNotification(
-          personalId,
-          {
-            id: proposalData.proposal.id,
-            studentName:
-              proposalData.student.name ||
-              `${proposalData.student.firstName} ${proposalData.student.lastName}`,
-            location: proposalData.proposal.locationName || '',
-            time: proposalData.proposal.trainingTime || '',
-            date: trainingDateStr,
-            modality: proposalData.proposal.modalityName || '',
-            price: proposalData.proposal.price || 0,
-            expiresIn: 30,
-          },
-        );
-        this.logger.log(`Notificação push enviada para personal ${personalId}`);
+        try {
+          await this.firebaseNotificationService.sendProposalNotification(
+            personalId,
+            {
+              id: proposalData.proposal.id,
+              studentName:
+                proposalData.student.name ||
+                `${proposalData.student.firstName} ${proposalData.student.lastName}`,
+              location: proposalData.proposal.locationName || '',
+              time: proposalData.proposal.trainingTime || '',
+              date: trainingDateStr,
+              modality: proposalData.proposal.modalityName || '',
+              price: proposalData.proposal.price || 0,
+              expiresIn: 30,
+            },
+          );
+          this.logger.log(
+            `Notificação push enviada para personal ${personalId}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Falha ao enviar notificação push para personal ${personalId}:`,
+            error,
+          );
+        }
       }
     }
   }

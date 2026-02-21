@@ -32,20 +32,62 @@ ADD COLUMN IF NOT EXISTS "updated_at" timestamp DEFAULT now() NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_token"
 ON "user_push_tokens_migration_issues" ("token");
 
+CREATE TABLE IF NOT EXISTS "user_push_tokens_migration_issues_removed" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "original_issue_id" uuid,
+  "token" text NOT NULL,
+  "user_ids" text NOT NULL,
+  "issue_type" varchar(40) NOT NULL,
+  "original_created_at" timestamp,
+  "original_updated_at" timestamp,
+  "removed_at" timestamp DEFAULT now() NOT NULL,
+  "removal_reason" text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_removed_token"
+ON "user_push_tokens_migration_issues_removed" ("token");
+
 -- Limpar duplicatas prévias para permitir criação de índice único em bases legadas
 WITH "issues_deduplicadas" AS (
   SELECT
-    ctid,
+    id,
     row_number() OVER (
       PARTITION BY "token", "issue_type"
       ORDER BY "created_at" DESC, "id" DESC
     ) AS "rn"
   FROM "user_push_tokens_migration_issues"
+),
+"issues_removidas" AS (
+  DELETE FROM "user_push_tokens_migration_issues" "issues"
+  USING "issues_deduplicadas" "dedup"
+  WHERE "issues".id = "dedup".id
+    AND "dedup"."rn" > 1
+  RETURNING
+    "issues"."id",
+    "issues"."token",
+    "issues"."user_ids",
+    "issues"."issue_type",
+    "issues"."created_at",
+    "issues"."updated_at"
 )
-DELETE FROM "user_push_tokens_migration_issues" "issues"
-USING "issues_deduplicadas" "dedup"
-WHERE "issues".ctid = "dedup".ctid
-  AND "dedup"."rn" > 1;
+INSERT INTO "user_push_tokens_migration_issues_removed" (
+  "original_issue_id",
+  "token",
+  "user_ids",
+  "issue_type",
+  "original_created_at",
+  "original_updated_at",
+  "removal_reason"
+)
+SELECT
+  "id",
+  "token",
+  "user_ids",
+  "issue_type",
+  "created_at",
+  "updated_at",
+  'duplicate_cleanup_before_unique_index'
+FROM "issues_removidas";
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_unique"
 ON "user_push_tokens_migration_issues" ("token", "issue_type");
