@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS "user_push_tokens_migration_issues" (
 CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_token"
 ON "user_push_tokens_migration_issues" ("token");
 
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_unique"
+ON "user_push_tokens_migration_issues" ("token", "issue_type");
+
 -- Registrar tokens duplicados para remediação manual/auditoria
 INSERT INTO "user_push_tokens_migration_issues" ("token", "user_ids", "issue_type")
 SELECT
@@ -37,7 +40,11 @@ SELECT
 FROM "users"
 WHERE "fcm_token" IS NOT NULL AND "fcm_token" != ''
 GROUP BY "fcm_token"
-HAVING COUNT(*) > 1;
+HAVING COUNT(*) > 1
+ON CONFLICT ("token", "issue_type")
+DO UPDATE SET
+  "user_ids" = EXCLUDED."user_ids",
+  "created_at" = now();
 
 -- Migrate existing fcm_token data from users table to user_push_tokens
 -- Para evitar associação arbitrária em duplicados legados, migra apenas tokens com dono único

@@ -13,13 +13,26 @@ export class PushNotificationService {
     this.initializeFirebase();
   }
 
+  private isPushStrictModeEnabled(): boolean {
+    const rawValue = this.configService.get<string>(
+      'PUSH_FAIL_ON_MISSING_IOS_BUNDLE',
+    );
+
+    if (!rawValue) {
+      return true;
+    }
+
+    const normalized = rawValue.trim().toLowerCase();
+    const falseValues = ['false', '0', 'no', 'off', 'disabled'];
+
+    return !falseValues.includes(normalized);
+  }
+
   private getApnsTopic(): string | null {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
-      const strictMode =
-        this.configService.get<string>('PUSH_FAIL_ON_MISSING_IOS_BUNDLE') !==
-        'false';
+      const strictMode = this.isPushStrictModeEnabled();
 
       if (strictMode) {
         throw new Error(
@@ -336,6 +349,12 @@ export class PushNotificationService {
       if (hadChunkTransportError && totalSuccessCount > 0) {
         this.logger.error(
           '❌ Envio com sucesso parcial: alguns chunks falharam no transporte e exigem retry direcionado',
+        );
+      }
+
+      if (hadChunkTransportError) {
+        throw new Error(
+          'Falha parcial no envio de push: houve chunks com erro de transporte após retries',
         );
       }
 
