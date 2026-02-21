@@ -22,11 +22,30 @@ CREATE TABLE IF NOT EXISTS "user_push_tokens_migration_issues" (
   "token" text NOT NULL,
   "user_ids" text NOT NULL,
   "issue_type" varchar(40) NOT NULL,
-  "created_at" timestamp DEFAULT now() NOT NULL
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
 );
+
+ALTER TABLE "user_push_tokens_migration_issues"
+ADD COLUMN IF NOT EXISTS "updated_at" timestamp DEFAULT now() NOT NULL;
 
 CREATE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_token"
 ON "user_push_tokens_migration_issues" ("token");
+
+-- Limpar duplicatas prévias para permitir criação de índice único em bases legadas
+WITH "issues_deduplicadas" AS (
+  SELECT
+    ctid,
+    row_number() OVER (
+      PARTITION BY "token", "issue_type"
+      ORDER BY "created_at" DESC, "id" DESC
+    ) AS "rn"
+  FROM "user_push_tokens_migration_issues"
+)
+DELETE FROM "user_push_tokens_migration_issues" "issues"
+USING "issues_deduplicadas" "dedup"
+WHERE "issues".ctid = "dedup".ctid
+  AND "dedup"."rn" > 1;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_user_push_tokens_migration_issues_unique"
 ON "user_push_tokens_migration_issues" ("token", "issue_type");
@@ -44,7 +63,7 @@ HAVING COUNT(*) > 1
 ON CONFLICT ("token", "issue_type")
 DO UPDATE SET
   "user_ids" = EXCLUDED."user_ids",
-  "created_at" = now();
+  "updated_at" = now();
 
 -- Migrate existing fcm_token data from users table to user_push_tokens
 -- Para evitar associação arbitrária em duplicados legados, migra apenas tokens com dono único

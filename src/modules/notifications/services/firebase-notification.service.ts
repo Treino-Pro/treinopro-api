@@ -588,6 +588,9 @@ export class FirebaseNotificationService {
         this.logger.error(
           `❌ Multi-device com falha de transporte em ${response.transportFailureCount} mensagens para ${userId}`,
         );
+        throw new Error(
+          `Falha parcial no envio multi-device: ${response.transportFailureCount} mensagens sem confirmação de transporte`,
+        );
       }
 
       return firstSuccess;
@@ -793,6 +796,9 @@ export class FirebaseNotificationService {
         if (batchResp.transportFailureCount > 0) {
           this.logger.error(
             `❌ Proposta com falha de transporte em ${batchResp.transportFailureCount} mensagens para ${personalId}`,
+          );
+          throw new Error(
+            `Falha parcial no envio de proposta: ${batchResp.transportFailureCount} mensagens sem confirmação de transporte`,
           );
         }
 
@@ -1070,6 +1076,9 @@ export class FirebaseNotificationService {
       if (response.transportFailureCount > 0) {
         this.logger.error(
           `❌ Lote com falha de transporte em ${response.transportFailureCount} mensagens (necessário retry direcionado)`,
+        );
+        throw new Error(
+          `Falha parcial no lote: ${response.transportFailureCount} mensagens sem confirmação de transporte`,
         );
       }
 
