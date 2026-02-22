@@ -2,8 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
-import { users, userPushTokens } from '../../../database/schema';
-import { eq, desc } from 'drizzle-orm';
+import { users, userPushTokens, inAppNotifications } from '../../../database/schema';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { NonceService } from './nonce.service';
 
 @Injectable()
@@ -238,6 +238,39 @@ export class FirebaseNotificationService {
   }
 
   /**
+   * Busca a contagem de notificações não lidas para usar como badge no iOS
+   */
+  private async getUnreadBadgeCount(userId: string): Promise<number> {
+    try {
+      const result = await this.db
+        .select({ count: sql<number>`count(*)` })
+        .from(inAppNotifications)
+        .where(
+          and(
+            eq(inAppNotifications.userId, userId),
+            eq(inAppNotifications.isRead, false),
+          ),
+        );
+      return Math.min(Number(result[0]?.count || 0) + 1, 99); // +1 para incluir esta notificação, cap em 99
+    } catch (error) {
+      this.logger.warn(`⚠️ Erro ao buscar badge count para ${userId}: ${error.message}`);
+      return 1; // fallback seguro
+    }
+  }
+
+  /**
+   * Gera threadId baseado nos dados da notificação para agrupamento iOS
+   */
+  private getThreadId(data?: Record<string, string>): string | undefined {
+    if (!data) return undefined;
+    if (data.type === 'new_message' && data.classId) return `chat_${data.classId}`;
+    if (data.proposalId) return `proposta_${data.proposalId}`;
+    if (data.classId) return `aula_${data.classId}`;
+    if (data.type) return `type_${data.type}`;
+    return undefined;
+  }
+
+  /**
    * Remove token FCM inválido do banco de dados
    * Chamado pelo fluxo single-token (sendWithRetry → handleSendError).
    * Recebe o token concreto para remover apenas ele, preservando outros dispositivos.
@@ -399,6 +432,8 @@ export class FirebaseNotificationService {
       // - TTL: 24 horas garante entrega mesmo com atrasos
       // - Esta abordagem garante entrega imediata E customização quando possível
       const apnsTopic = this.getApnsTopic();
+      const badgeCount = await this.getUnreadBadgeCount(userId);
+      const threadId = this.getThreadId(sanitizedData);
 
       const message: admin.messaging.Message = {
         // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
@@ -415,19 +450,15 @@ export class FirebaseNotificationService {
         },
         token: fcmToken,
         android: {
-          priority: 'high' as const, // ✅ CRÍTICO: Alta prioridade para passar pelo Doze Mode
-          // ✅ TTL: 24 horas (86400 segundos) - garantir entrega mesmo com Doze Mode
-          ttl: 24 * 60 * 60 * 1000, // 24 horas em milissegundos
-          // Garante que notificação aparece mesmo após reinicialização
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
           directBootOk: true,
-          // ✅ CRÍTICO: collapseKey para agrupar notificações e evitar perda em Doze Mode
           collapseKey:
             sanitizedData.type === 'new_message'
               ? `message_${sanitizedData.classId || 'default'}`
               : sanitizedData.proposalId
                 ? `proposal_${sanitizedData.proposalId}`
                 : 'default',
-          // ✅ notification: Garante exibição imediata no Android
           notification: {
             title: notification.title,
             body: notification.body,
@@ -446,31 +477,23 @@ export class FirebaseNotificationService {
               apns: {
                 payload: {
                   aps: {
-                    // ✅ alert: iOS mostra notificação imediatamente
                     alert: {
                       title: notification.title,
                       body: notification.body,
                     },
                     sound: 'default',
-                    badge: 1,
+                    badge: badgeCount,
                     'mutable-content': 1,
-                    contentAvailable: true, // Permite que handler de background execute
+                    contentAvailable: true,
                   },
-                  // ✅ Thread-ID para iOS (equivalente ao collapse_key do Android)
-                  threadId: sanitizedData.proposalId
-                    ? `proposta_${sanitizedData.proposalId}`
-                    : undefined,
+                  ...(threadId ? { threadId } : {}),
                 },
                 headers: {
-                  // ✅ CRÍTICO: apns-push-type obrigatório para iOS 13+
                   'apns-push-type': 'alert',
-                  // ✅ CRÍTICO: apns-topic deve ser o bundle ID do app
                   'apns-topic': apnsTopic,
-                  // ✅ APNS Expiration: 24 horas (alinhado com TTL do Android)
                   'apns-expiration': String(
                     Math.floor(Date.now() / 1000) + 24 * 60 * 60,
                   ),
-                  // ✅ APNS Priority: 10 (alta prioridade)
                   'apns-priority': '10',
                 },
               },
@@ -517,6 +540,8 @@ export class FirebaseNotificationService {
     }
 
     const apnsTopic = this.getApnsTopic();
+    const badgeCount = await this.getUnreadBadgeCount(userId);
+    const threadId = this.getThreadId(sanitizedData);
 
     const messages: admin.messaging.Message[] = tokens.map((token) => ({
       notification: {
@@ -557,10 +582,11 @@ export class FirebaseNotificationService {
                     body: notification.body,
                   },
                   sound: 'default',
-                  badge: 1,
+                  badge: badgeCount,
                   'mutable-content': 1,
                   contentAvailable: true,
                 },
+                ...(threadId ? { threadId } : {}),
               },
               headers: {
                 'apns-push-type': 'alert',
@@ -721,13 +747,8 @@ export class FirebaseNotificationService {
       }
 
       const apnsTopic = this.getApnsTopic();
+      const badgeCount = await this.getUnreadBadgeCount(personalId);
 
-      // ✅ ESTRATÉGIA HÍBRIDA: Enviar notification + data
-      // - notification: Garante que Android mostre notificação IMEDIATAMENTE mesmo se handler falhar
-      // - data: Permite que Flutter processe e customize quando handler executar
-      // - priority: 'high' garante que passe pelo Doze Mode
-      // - TTL: 24 horas garante entrega mesmo com atrasos
-      // - Esta abordagem garante entrega imediata E customização quando possível
       // Construir payload base (sem token — será adicionado por device)
       const basePayload = {
         notification: { title, body },
@@ -762,7 +783,8 @@ export class FirebaseNotificationService {
                   aps: {
                     alert: { title, body },
                     sound: 'default',
-                    badge: 1,
+                    badge: badgeCount,
+                    'mutable-content': 1,
                     contentAvailable: true,
                   },
                   threadId: `proposta_${proposal.id}`,
@@ -1003,6 +1025,8 @@ export class FirebaseNotificationService {
       }
 
       const apnsTopic = this.getApnsTopic();
+      const badgeCount = await this.getUnreadBadgeCount(item.userId);
+      const threadId = this.getThreadId(sanitizedData);
 
       // Criar uma mensagem por token (multi-device)
       for (const token of tokens) {
@@ -1045,10 +1069,11 @@ export class FirebaseNotificationService {
                         body: item.notification.body,
                       },
                       sound: 'default',
-                      badge: 1,
+                      badge: badgeCount,
                       'mutable-content': 1,
                       contentAvailable: true,
                     },
+                    ...(threadId ? { threadId } : {}),
                   },
                   headers: {
                     'apns-push-type': 'alert',

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -19,6 +20,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly firebaseNotificationService: FirebaseNotificationService,
@@ -133,7 +136,9 @@ export class ChatService {
         },
       });
     } catch (error) {
-      console.error('❌ Erro ao enviar notificação push de mensagem:', error);
+      this.logger.error(
+        `❌ Falha ao enviar push de mensagem para ${receiverId} (classId: ${classId}): ${error?.message || error}`,
+      );
     }
 
     // 2. Criar notificação in-app (independente do sucesso do push)
@@ -149,7 +154,9 @@ export class ChatService {
         },
       );
     } catch (error) {
-      console.error('❌ Erro ao criar notificação in-app de mensagem:', error);
+      this.logger.error(
+        `❌ Falha ao criar notificação in-app para ${receiverId} (classId: ${classId}): ${error?.message || error}`,
+      );
     }
 
     return messageResponse;

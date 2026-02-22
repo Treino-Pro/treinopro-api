@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
+import { eq, and } from 'drizzle-orm';
+import { users, userPushTokens } from '../../../database/schema';
 
 @Injectable()
 export class PushNotificationService {
@@ -8,7 +10,10 @@ export class PushNotificationService {
   private readonly configService: ConfigService;
   private isFirebaseInitialized = false;
 
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
+  ) {
     this.configService = configService;
     this.initializeFirebase();
   }
@@ -198,11 +203,22 @@ export class PushNotificationService {
       return;
     }
 
-    if (tokens.length === 0) {
+    // Filtrar tokens inválidos e deduplicar
+    const validTokens = [...new Set(
+      tokens.filter((t): t is string => typeof t === 'string' && t.length > 0),
+    )];
+
+    if (validTokens.length === 0) {
       this.logger.warn(
-        '⚠️ Nenhum token fornecido para envio de push notification',
+        '⚠️ Nenhum token válido fornecido para envio de push notification',
       );
       return;
+    }
+
+    if (validTokens.length !== tokens.length) {
+      this.logger.warn(
+        `⚠️ ${tokens.length - validTokens.length} tokens inválidos/duplicados filtrados`,
+      );
     }
 
     try {
@@ -211,7 +227,8 @@ export class PushNotificationService {
 
       const maxBatchSize = 500;
       const maxChunkRetries = 2;
-      const tokenChunks = this.chunkArray(tokens, maxBatchSize);
+      const tokenChunks = this.chunkArray(validTokens, maxBatchSize);
+      const invalidTokensToClean: string[] = [];
       let totalSuccessCount = 0;
       let totalFailureCount = 0;
       let hadChunkTransportError = false;
@@ -326,6 +343,7 @@ export class PushNotificationService {
                 this.logger.warn(
                   `🗑️ Token inválido detectado (${errorCode}): ${chunk[idx].substring(0, 20)}...`,
                 );
+                invalidTokensToClean.push(chunk[idx]);
               } else {
                 this.logger.error(
                   `❌ Falha no token ${chunk[idx].substring(0, 20)}...: [${errorCode}] ${resp.error?.message}`,
@@ -336,13 +354,18 @@ export class PushNotificationService {
         }
       }
 
+      // Limpar tokens inválidos do banco de dados
+      if (invalidTokensToClean.length > 0) {
+        await this.cleanupInvalidTokens(invalidTokensToClean);
+      }
+
       this.logger.log(
-        `📱 Push notifications enviados: ${totalSuccessCount}/${tokens.length} com sucesso`,
+        `📱 Push notifications enviados: ${totalSuccessCount}/${validTokens.length} com sucesso`,
       );
 
       if (totalFailureCount > 0) {
         this.logger.warn(
-          `⚠️ Total de falhas no envio em lote: ${totalFailureCount}/${tokens.length}`,
+          `⚠️ Total de falhas no envio em lote: ${totalFailureCount}/${validTokens.length}`,
         );
       }
 
@@ -386,6 +409,7 @@ export class PushNotificationService {
 
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
       const message = {
         topic: topic,
@@ -397,6 +421,41 @@ export class PushNotificationService {
           template: template,
           ...this.stringifyDataValues(data),
         },
+        android: {
+          priority: 'high' as const,
+          notification: {
+            icon: 'ic_notification',
+            color: '#4CAF50',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+          },
+        },
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': 1,
+                    contentAvailable: true,
+                  },
+                },
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-topic': apnsTopic,
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  'apns-priority': '10',
+                },
+              },
+            }
+          : {}),
       };
 
       const response = await admin.messaging().send(message);
@@ -561,19 +620,67 @@ export class PushNotificationService {
     }
 
     try {
-      // Tentar enviar uma mensagem de teste (dry run)
-      // await admin.messaging().send({
-      //   token: token,
-      //   notification: {
-      //     title: 'Test',
-      //     body: 'Test',
-      //   },
-      // }, true); // dry run
+      // Dry run: envia mensagem de teste sem entregar ao dispositivo
+      await admin.messaging().send(
+        {
+          token: token,
+          notification: {
+            title: 'Validation',
+            body: 'Token validation test',
+          },
+        },
+        true, // dry run — não entrega, apenas valida
+      );
 
       return true;
     } catch (error) {
-      this.logger.warn(`⚠️ Token inválido: ${token} - ${error.message}`);
+      const errorCode = (error as any)?.code;
+      const isInvalid =
+        errorCode === 'messaging/invalid-registration-token' ||
+        errorCode === 'messaging/registration-token-not-registered';
+
+      if (isInvalid) {
+        this.logger.warn(
+          `⚠️ Token inválido (${errorCode}): ${token.substring(0, 20)}...`,
+        );
+        await this.cleanupInvalidTokens([token]);
+      } else {
+        this.logger.warn(
+          `⚠️ Erro ao validar token: ${token.substring(0, 20)}... - ${error.message}`,
+        );
+      }
       return false;
+    }
+  }
+
+  /**
+   * Remove tokens inválidos do banco de dados (user_push_tokens e users.fcmToken)
+   */
+  private async cleanupInvalidTokens(invalidTokens: string[]): Promise<void> {
+    if (invalidTokens.length === 0) return;
+
+    try {
+      for (const token of invalidTokens) {
+        // 1. Remover da tabela user_push_tokens
+        await this.db
+          .delete(userPushTokens)
+          .where(eq(userPushTokens.token, token));
+
+        // 2. Limpar users.fcmToken se for o mesmo token
+        await this.db
+          .update(users)
+          .set({ fcmToken: null })
+          .where(eq(users.fcmToken, token));
+      }
+
+      this.logger.log(
+        `🗑️ ${invalidTokens.length} tokens inválidos removidos do banco`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao limpar tokens inválidos do banco:`,
+        error,
+      );
     }
   }
 

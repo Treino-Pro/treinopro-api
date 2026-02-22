@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
-import { users } from '../../database/schema';
+import { users, userPushTokens } from '../../database/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 
 export interface NotificationData {
@@ -499,16 +499,36 @@ export class NotificationsService {
 
   private async getUserPushTokens(userId: string): Promise<string[]> {
     try {
+      // 1. Buscar tokens da tabela multi-device (user_push_tokens)
+      const multiTokens = await this.db
+        .select({ token: userPushTokens.token })
+        .from(userPushTokens)
+        .where(eq(userPushTokens.userId, userId));
+
+      if (multiTokens.length > 0) {
+        const tokens = multiTokens
+          .map((t) => t.token)
+          .filter((token): token is string => Boolean(token));
+
+        if (tokens.length > 0) {
+          this.logger.debug(
+            `📱 Encontrados ${tokens.length} tokens multi-device para usuário ${userId}`,
+          );
+          return [...new Set(tokens)]; // deduplicar
+        }
+      }
+
+      // 2. Fallback: token legado na tabela users
       const [user] = await this.db
-        .select({
-          fcmToken: users.fcmToken,
-        })
+        .select({ fcmToken: users.fcmToken })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
 
-      // Retornar array com token se existir, ou array vazio
       if (user?.fcmToken) {
+        this.logger.debug(
+          `📱 Usando token legado (users.fcmToken) para usuário ${userId}`,
+        );
         return [user.fcmToken];
       }
 
@@ -535,24 +555,40 @@ export class NotificationsService {
         return [];
       }
 
-      const usersWithTokens = await this.db
-        .select({
-          fcmToken: users.fcmToken,
-        })
+      // 1. Buscar da tabela multi-device
+      const multiTokens = await this.db
+        .select({ token: userPushTokens.token })
+        .from(userPushTokens)
+        .where(inArray(userPushTokens.userId, userIds));
+
+      const tokensFromMulti = multiTokens
+        .map((t) => t.token)
+        .filter((token): token is string => Boolean(token));
+
+      // 2. Buscar tokens legados de usuários que NÃO têm na tabela multi-device
+      const usersWithMultiTokens = multiTokens.length > 0
+        ? [...new Set(multiTokens.map((t) => t.token))]
+        : [];
+
+      const legacyTokens = await this.db
+        .select({ fcmToken: users.fcmToken })
         .from(users)
         .where(
           and(inArray(users.id, userIds), sql`${users.fcmToken} IS NOT NULL`),
         );
 
-      const tokens = usersWithTokens
+      const tokensFromLegacy = legacyTokens
         .map((user) => user.fcmToken)
         .filter((token): token is string => Boolean(token));
 
+      // Combinar e deduplicar
+      const allTokens = [...new Set([...tokensFromMulti, ...tokensFromLegacy])];
+
       this.logger.log(
-        `📱 Encontrados ${tokens.length} tokens FCM de ${userIds.length} usuários`,
+        `📱 Encontrados ${allTokens.length} tokens FCM de ${userIds.length} usuários (${tokensFromMulti.length} multi-device, ${tokensFromLegacy.length} legado)`,
       );
 
-      return tokens;
+      return allTokens;
     } catch (error) {
       this.logger.error(
         `❌ Erro ao buscar tokens FCM de múltiplos usuários:`,
