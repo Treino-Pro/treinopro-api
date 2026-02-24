@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
+import { FirebaseNotificationService } from './services/firebase-notification.service';
 import { users, userPushTokens } from '../../database/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 
@@ -22,6 +23,7 @@ export class NotificationsService {
     private readonly emailService: EmailService,
     private readonly inAppService: InAppNotificationService,
     private readonly pushService: PushNotificationService,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
   // ===== MÉTODOS PRINCIPAIS =====
@@ -198,6 +200,127 @@ export class NotificationsService {
       );
       throw error;
     }
+  }
+
+  async sendDirectPushNotification(
+    userId: string,
+    title: string,
+    body: string,
+    data: Record<string, any> = {},
+  ): Promise<{ delivered: boolean }> {
+    try {
+      const user = await this.getUserById(userId);
+      if (!user) {
+        throw new Error(`Usuário não encontrado: ${userId}`);
+      }
+
+      const response = await this.firebaseNotificationService.sendToUser(userId, {
+        title,
+        body,
+        data: this.normalizePushData(data),
+      });
+
+      const delivered = Boolean(response);
+      await this.saveNotificationRecord(
+        userId,
+        'push',
+        'manual-test',
+        { title, body, ...data },
+        delivered ? 'sent' : 'skipped',
+        delivered ? undefined : 'No push token or Firebase unavailable',
+      );
+
+      if (!delivered) {
+        this.logger.warn(
+          `⚠️ Push de teste não entregue para usuário ${userId} (sem token ou Firebase indisponível)`,
+        );
+      }
+
+      return { delivered };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Erro inesperado';
+      this.logger.error(
+        `❌ Erro ao enviar push de teste para usuário ${userId}:`,
+        error,
+      );
+      await this.saveNotificationRecord(
+        userId,
+        'push',
+        'manual-test',
+        { title, body, ...data },
+        'failed',
+        errorMessage,
+      );
+      throw error;
+    }
+  }
+
+  async sendDirectPushNotificationToAllUsers(
+    title: string,
+    body: string,
+    data: Record<string, any> = {},
+  ): Promise<{
+    totalUsers: number;
+    deliveredUsers: number;
+    skippedUsers: number;
+    failedUsers: number;
+  }> {
+    const usersList = await this.db.select({ id: users.id }).from(users);
+
+    if (!usersList.length) {
+      return {
+        totalUsers: 0,
+        deliveredUsers: 0,
+        skippedUsers: 0,
+        failedUsers: 0,
+      };
+    }
+
+    const normalizedData = this.normalizePushData(data);
+    const userIds = usersList.map((user) => user.id as string).filter(Boolean);
+
+    let deliveredUsers = 0;
+    let skippedUsers = 0;
+    let failedUsers = 0;
+
+    const batchSize = 50;
+    for (let i = 0; i < userIds.length; i += batchSize) {
+      const batch = userIds.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map((userId) =>
+          this.firebaseNotificationService.sendToUser(userId, {
+            title,
+            body,
+            data: normalizedData,
+          }),
+        ),
+      );
+
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          failedUsers += 1;
+          continue;
+        }
+
+        if (result.value) {
+          deliveredUsers += 1;
+        } else {
+          skippedUsers += 1;
+        }
+      }
+    }
+
+    this.logger.log(
+      `📣 Broadcast push concluído. Total: ${userIds.length}, Entregues: ${deliveredUsers}, Sem token/Firebase: ${skippedUsers}, Falhas: ${failedUsers}`,
+    );
+
+    return {
+      totalUsers: userIds.length,
+      deliveredUsers,
+      skippedUsers,
+      failedUsers,
+    };
   }
 
   // ===== MÉTODOS DE CONVENIÊNCIA =====
@@ -672,6 +795,18 @@ export class NotificationsService {
     } catch (error) {
       this.logger.error('❌ Erro ao salvar registro de notificação:', error);
     }
+  }
+
+  private normalizePushData(data: Record<string, any>): Record<string, string> {
+    const normalized: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && value !== null) {
+        normalized[key] = String(value);
+      }
+    }
+
+    return normalized;
   }
 
   // ===== PREFERÊNCIAS DE NOTIFICAÇÃO =====

@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { messages, users, classes } from '../../database/schema';
+import { messages, users, classes, files } from '../../database/schema';
 import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
 import {
   SendMessageDto,
@@ -99,11 +99,12 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(messages)
       .leftJoin(users, eq(messages.senderId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(eq(messages.id, newMessage.id))
       .limit(1);
 
@@ -211,11 +212,12 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(messages)
       .leftJoin(users, eq(messages.senderId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(eq(messages.classId, classId))
       .orderBy(asc(messages.sentAt))
       .limit(limit)
@@ -387,11 +389,12 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(classes)
       .leftJoin(users, eq(classes.studentId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(or(eq(classes.studentId, userId), eq(classes.personalId, userId)));
 
     const conversations = [];
@@ -409,9 +412,10 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         })
         .from(users)
+        .leftJoin(files, eq(users.profileImageId, files.id))
         .where(eq(users.id, otherParticipantId))
         .limit(1);
 

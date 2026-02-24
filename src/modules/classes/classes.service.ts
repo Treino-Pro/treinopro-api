@@ -2214,6 +2214,50 @@ export class ClassesService {
         }
       }
 
+      // Buscar URLs de imagens de perfil em batch (evita N queries por aula)
+      const profileImageIdSet = new Set<string>();
+
+      classesData.forEach((row: any) => {
+        const studentProfileImageId = row.users?.profileImageId as
+          | string
+          | undefined;
+        if (studentProfileImageId) {
+          profileImageIdSet.add(studentProfileImageId);
+        }
+
+        const personalProfileImageId = personalMap[row.classes.personalId]
+          ?.profileImageId as string | undefined;
+        if (personalProfileImageId) {
+          profileImageIdSet.add(personalProfileImageId);
+        }
+      });
+
+      const profileImageIds = [...profileImageIdSet];
+      const profileImageUrlById: Record<string, string> = {};
+
+      if (profileImageIds.length > 0) {
+        try {
+          const profileFiles = await this.db
+            .select({
+              id: files.id,
+              url: files.url,
+            })
+            .from(files)
+            .where(inArray(files.id, profileImageIds));
+
+          profileFiles.forEach((file: any) => {
+            if (file?.id && file?.url) {
+              profileImageUrlById[file.id] = file.url;
+            }
+          });
+        } catch (error) {
+          console.error(
+            '❌ [CLASSES] Erro ao buscar imagens de perfil em batch:',
+            error,
+          );
+        }
+      }
+
       // OTIMIZAÇÃO: Buscar stats e imagens em batch antes do loop
       const uniquePersonalIds = [
         ...new Set(classesData.map((row: any) => row.classes.personalId)),
@@ -2304,6 +2348,14 @@ export class ClassesService {
         const student = row.users;
         const proposal = row.proposals;
         const personal = personalMap[classData.personalId];
+        const studentProfilePicture =
+          student?.profileImageId != null
+            ? profileImageUrlById[student.profileImageId] || null
+            : null;
+        const personalProfilePicture =
+          personal?.profileImageId != null
+            ? profileImageUrlById[personal.profileImageId] || null
+            : null;
 
         // Montar resposta diretamente (otimizado)
         return {
@@ -2341,7 +2393,7 @@ export class ClassesService {
               id: student.id,
               firstName: student.firstName,
               lastName: student.lastName,
-              profilePicture: null, // Simplificado por performance
+              profilePicture: studentProfilePicture,
             }
             : null,
           personal: personal
@@ -2349,11 +2401,11 @@ export class ClassesService {
               id: personal.id,
               firstName: personal.firstName,
               lastName: personal.lastName,
-              profilePicture: null, // Simplificado por performance
+              profilePicture: personalProfilePicture,
             }
             : null,
           proposalModality: proposal?.modalityName || null,
-          personalProfileImageUrl: null, // Simplificado por performance
+          personalProfileImageUrl: personalProfilePicture,
           personalRating: personalRatingByClassId[classData.id] ?? null,
           personalTimeOnPlatform: '0 dias', // Simplificado por performance
           studentRating: studentRatingByClassId[classData.id] ?? null,
