@@ -7,6 +7,7 @@ import { PaymentsHealthController } from './payments-health.controller';
 import { WebhooksController } from './webhooks.controller';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoService } from './mercadopago.service';
+import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { FinancialProfileService } from './financial-profile.service';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
@@ -24,6 +25,7 @@ import { PaymentSimulationService } from './payment-simulation.service';
   providers: [
     PaymentsService,
     MercadoPagoService,
+    MercadoPagoOAuthService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,
@@ -34,6 +36,7 @@ import { PaymentSimulationService } from './payment-simulation.service';
   exports: [
     PaymentsService,
     MercadoPagoService,
+    MercadoPagoOAuthService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,

@@ -405,6 +405,48 @@ describe('ClassesService', () => {
         service.startClass(classId, startClassDto, userId),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('deve sempre gerar código de 4 dígitos ao iniciar aula', async () => {
+      const classId = 'class-1';
+      const userId = 'personal-1';
+      const startClassDto: StartClassDto = {};
+
+      const now = new Date();
+      const classTime = new Date(now.getTime() + 30 * 60 * 1000);
+      const mockClass = {
+        id: classId,
+        personalId: userId,
+        status: ClassStatus.SCHEDULED,
+        date: classTime,
+        time: classTime.toTimeString().slice(0, 5),
+        startedAt: null,
+      };
+
+      const updatedClass = {
+        ...mockClass,
+        status: ClassStatus.PENDING_CONFIRMATION,
+        pendingConfirmationAt: new Date(),
+        startConfirmationCodeHash: 'some-hash',
+        startConfirmationCodeExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        startConfirmationAttempts: 0,
+      };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      const result = await service.startClass(classId, startClassDto, userId);
+
+      // O código plaintext deve ser retornado na resposta
+      expect((result as any).startConfirmationCode).toBeDefined();
+      expect((result as any).startConfirmationCode).toMatch(/^\d{4}$/);
+      expect((result as any).startConfirmationCodeExpiresAt).toBeDefined();
+    });
   });
 
   describe('completeClass', () => {
@@ -621,6 +663,34 @@ describe('ClassesService', () => {
           studentId,
         ),
       ).rejects.toThrow(/INVALID_CONFIRMATION_CODE/);
+    });
+
+    it('regenera código se pending_confirmation sem hash (fallback)', async () => {
+      const rawClass = buildMockClass({
+        startConfirmationCodeHash: null, // sem hash — estado inconsistente
+        startConfirmationCodeExpiresAt: null,
+        startConfirmationAttempts: 0,
+      });
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(rawClass)
+        .mockResolvedValueOnce(rawClass);
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([rawClass]),
+          }),
+        }),
+      });
+
+      await expect(
+        service.confirmClassStart(
+          classId,
+          { confirmationCode: '1234' } as ConfirmClassStartDto,
+          studentId,
+        ),
+      ).rejects.toThrow(/CODE_REGENERATED/);
     });
 
     it('rejeita código expirado → BadRequestException CONFIRMATION_CODE_EXPIRED', async () => {

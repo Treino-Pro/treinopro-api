@@ -359,8 +359,8 @@ export class ClassesService {
       }
     }
 
-    // Verificar regra de 45 minutos mínimos
-    if (FeatureFlags.MIN_45_RULE && classData.startedAt) {
+    // Verificar regra de 45 minutos mínimos (obrigatória por regra de domínio)
+    if (classData.startedAt) {
       const now = new Date();
       const rawClassData = await this.db.query.classes.findFirst({
         where: eq(classes.id, id),
@@ -374,7 +374,7 @@ export class ClassesService {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
-          `A aula deve durar pelo menos 45 minutos. Faltam ${remainingMin} minuto(s).`,
+          `MIN_45_RULE: A aula deve durar pelo menos 45 minutos. Faltam ${remainingMin} minuto(s).`,
         );
       }
     }
@@ -1059,29 +1059,21 @@ export class ClassesService {
       }
     }
 
-    // Gerar código de 4 dígitos e hash (apenas se feature ativa)
-    let plainCode: string | null = null;
-    let codeHash: string | null = null;
-    let codeExpiresAt: Date | null = null;
+    // Gerar código de 4 dígitos e hash (obrigatório por regra de domínio)
+    const plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+    const codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
 
-    if (FeatureFlags.CODE_4_DIGITS) {
-      plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-      codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
-      codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
-    }
+    console.log('[CLASSES] class_started: code_generated', { classId });
 
     const [updatedClass] = await this.db
       .update(classes)
       .set({
         status: ClassStatus.PENDING_CONFIRMATION,
         pendingConfirmationAt: new Date(),
-        ...(FeatureFlags.CODE_4_DIGITS
-          ? {
-            startConfirmationCodeHash: codeHash,
-            startConfirmationCodeExpiresAt: codeExpiresAt,
-            startConfirmationAttempts: 0,
-          }
-          : {}),
+        startConfirmationCodeHash: codeHash,
+        startConfirmationCodeExpiresAt: codeExpiresAt,
+        startConfirmationAttempts: 0,
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -1130,10 +1122,8 @@ export class ClassesService {
 
     const response = await this.formatClassResponse(updatedClass);
     // Expor código somente para o personal (não persistido em plaintext)
-    if (FeatureFlags.CODE_4_DIGITS && plainCode) {
-      (response as any).startConfirmationCode = plainCode;
-      (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
-    }
+    (response as any).startConfirmationCode = plainCode;
+    (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
     return response;
   }
 
@@ -1162,8 +1152,8 @@ export class ClassesService {
       throw new BadRequestException('A aula não está aguardando confirmação');
     }
 
-    // Validar código de confirmação
-    if (FeatureFlags.CODE_4_DIGITS && rawClass.startConfirmationCodeHash) {
+    // Validar código de confirmação (obrigatório)
+    if (rawClass.startConfirmationCodeHash) {
       // Verificar expiração
       if (
         rawClass.startConfirmationCodeExpiresAt &&
@@ -1211,6 +1201,37 @@ export class ClassesService {
           `INVALID_CONFIRMATION_CODE: Código inválido. ${attemptsLeft > 0 ? `${attemptsLeft} tentativa(s) restante(s).` : 'Código bloqueado.'}`,
         );
       }
+    } else {
+      // Fallback: pending_confirmation sem hash — estado inconsistente (dados legados).
+      // Regenerar código e exigir nova confirmação.
+      console.warn('[CLASSES] code_missing: pending_confirmation sem hash, regenerando código', { classId });
+      const newPlainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      const newCodeHash = crypto.createHash('sha256').update(newPlainCode).digest('hex');
+      const newCodeExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+      await this.db
+        .update(classes)
+        .set({
+          startConfirmationCodeHash: newCodeHash,
+          startConfirmationCodeExpiresAt: newCodeExpiresAt,
+          startConfirmationAttempts: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(classes.id, classId));
+
+      // Notificar personal do novo código via WebSocket
+      this.chatGateway.server.emit('class_update', {
+        action: 'code_regenerated',
+        classId,
+        personalId: classData.personalId,
+        startConfirmationCode: newPlainCode,
+        startConfirmationCodeExpiresAt: newCodeExpiresAt,
+        timestamp: new Date(),
+      });
+
+      throw new BadRequestException(
+        'CODE_REGENERATED: Código de confirmação foi regenerado. O personal recebeu o novo código.',
+      );
     }
 
     const startTime = new Date();
