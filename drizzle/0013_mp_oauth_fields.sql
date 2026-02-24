@@ -1,7 +1,8 @@
 -- Migration: Add OAuth fields to financial_profiles for Mercado Pago OAuth flow
--- Adds refresh token, token expiration, and OAuth state tracking
+-- Adds refresh token, token expiration, OAuth state tracking, and state expiration
 
 ALTER TABLE "financial_profiles" ADD COLUMN IF NOT EXISTS "mp_refresh_token" text;
 ALTER TABLE "financial_profiles" ADD COLUMN IF NOT EXISTS "mp_token_expires_at" timestamp;
 ALTER TABLE "financial_profiles" ADD COLUMN IF NOT EXISTS "mp_connected_at" timestamp;
 ALTER TABLE "financial_profiles" ADD COLUMN IF NOT EXISTS "mp_oauth_state" varchar(255);
+ALTER TABLE "financial_profiles" ADD COLUMN IF NOT EXISTS "mp_oauth_state_created_at" timestamp;

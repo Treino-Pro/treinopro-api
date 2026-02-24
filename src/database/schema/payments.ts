@@ -224,6 +224,7 @@ export const financialProfiles = pgTable('financial_profiles', {
   mpTokenExpiresAt: timestamp('mp_token_expires_at'), // Expiração do access token
   mpConnectedAt: timestamp('mp_connected_at'), // Quando a conta foi conectada via OAuth
   mpOauthState: varchar('mp_oauth_state', { length: 255 }), // State anti-CSRF
+  mpOauthStateCreatedAt: timestamp('mp_oauth_state_created_at'), // Quando o state foi gerado (TTL)
   mpIsVerified: boolean('mp_is_verified').default(false),
 
   // Status e validação

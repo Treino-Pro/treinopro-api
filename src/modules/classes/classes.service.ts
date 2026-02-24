@@ -360,7 +360,8 @@ export class ClassesService {
     }
 
     // Verificar regra de 45 minutos mínimos (obrigatória por regra de domínio)
-    if (classData.startedAt) {
+    // Kill switch: KILL_MIN_45_RULE=true desativa enforcement
+    if (classData.startedAt && !FeatureFlags.KILL_MIN_45_RULE) {
       const now = new Date();
       const rawClassData = await this.db.query.classes.findFirst({
         where: eq(classes.id, id),
@@ -1060,20 +1061,30 @@ export class ClassesService {
     }
 
     // Gerar código de 4 dígitos e hash (obrigatório por regra de domínio)
-    const plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-    const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
-    const codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
+    // Kill switch: KILL_CODE_4_DIGITS=true reverte para behavior antigo (sem código se flag desligada)
+    let plainCode: string | null = null;
+    let codeHash: string | null = null;
+    let codeExpiresAt: Date | null = null;
 
-    console.log('[CLASSES] class_started: code_generated', { classId });
+    if (!FeatureFlags.KILL_CODE_4_DIGITS) {
+      plainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+      codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min para confirmar
+      console.log('[CLASSES] class_started: code_generated', { classId });
+    } else {
+      console.warn('[CLASSES] class_started: KILL_CODE_4_DIGITS ativo — código NÃO gerado', { classId });
+    }
 
     const [updatedClass] = await this.db
       .update(classes)
       .set({
         status: ClassStatus.PENDING_CONFIRMATION,
         pendingConfirmationAt: new Date(),
-        startConfirmationCodeHash: codeHash,
-        startConfirmationCodeExpiresAt: codeExpiresAt,
-        startConfirmationAttempts: 0,
+        ...(codeHash ? {
+          startConfirmationCodeHash: codeHash,
+          startConfirmationCodeExpiresAt: codeExpiresAt,
+          startConfirmationAttempts: 0,
+        } : {}),
         updatedAt: new Date(),
       })
       .where(eq(classes.id, classId))
@@ -1122,8 +1133,10 @@ export class ClassesService {
 
     const response = await this.formatClassResponse(updatedClass);
     // Expor código somente para o personal (não persistido em plaintext)
-    (response as any).startConfirmationCode = plainCode;
-    (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+    if (plainCode) {
+      (response as any).startConfirmationCode = plainCode;
+      (response as any).startConfirmationCodeExpiresAt = codeExpiresAt;
+    }
     return response;
   }
 

@@ -85,6 +85,20 @@
       "when": 1771618454737,
       "tag": "0011_friendly_justice",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1771951620402,
+      "tag": "0012_hesitant_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1771953334854,
+      "tag": "0013_absent_legion",
+      "breakpoints": true
     }
   ]
 }
