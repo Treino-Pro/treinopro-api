@@ -99,6 +99,13 @@
       "when": 1771953334854,
       "tag": "0013_absent_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1771954909147,
+      "tag": "0014_slim_serpent_society",
+      "breakpoints": true
     }
   ]
 }

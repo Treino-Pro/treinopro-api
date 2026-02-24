@@ -2,8 +2,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 
-// Mock fetch
-jest.mock('node-fetch', () => jest.fn());
+// Mock fetch — compatível com `import fetch from 'node-fetch'` (default import)
+// jest.mock é hoisted, então usamos jest.fn() diretamente no factory
+jest.mock('node-fetch', () => {
+  const fn = jest.fn();
+  return { __esModule: true, default: fn };
+});
+
+// Importar o mock após o jest.mock para obter a referência
+import fetch from 'node-fetch';
+const mockFetch = fetch as unknown as jest.Mock;
 
 describe('MercadoPagoOAuthService', () => {
   let service: MercadoPagoOAuthService;
@@ -133,8 +141,7 @@ describe('MercadoPagoOAuthService', () => {
       });
 
       // Mock fetch para falhar (não importa — queremos verificar que state foi invalidado)
-      const fetchMock = require('node-fetch') as jest.Mock;
-      fetchMock.mockResolvedValue({
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
         text: async () => 'invalid code',
@@ -164,9 +171,8 @@ describe('MercadoPagoOAuthService', () => {
         mpOauthStateCreatedAt: twoMinutesAgo,
       });
 
-      const fetchMock = require('node-fetch') as jest.Mock;
       // Primeiro fetch: token exchange
-      fetchMock.mockResolvedValueOnce({
+      mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
           access_token: 'APP_USR-new-token',
@@ -177,7 +183,7 @@ describe('MercadoPagoOAuthService', () => {
         }),
       });
       // Segundo fetch: user/me
-      fetchMock.mockResolvedValueOnce({
+      mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ email: 'personal@test.com' }),
       });
@@ -220,8 +226,7 @@ describe('MercadoPagoOAuthService', () => {
         mpRefreshToken: 'TG-old-refresh',
       });
 
-      const fetchMock = require('node-fetch') as jest.Mock;
-      fetchMock.mockResolvedValue({
+      mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
           access_token: 'APP_USR-refreshed',
@@ -248,8 +253,7 @@ describe('MercadoPagoOAuthService', () => {
         mpRefreshToken: 'TG-revoked',
       });
 
-      const fetchMock = require('node-fetch') as jest.Mock;
-      fetchMock.mockResolvedValue({
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
         text: async () => 'invalid_grant',

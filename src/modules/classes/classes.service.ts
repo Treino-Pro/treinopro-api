@@ -361,6 +361,12 @@ export class ClassesService {
 
     // Verificar regra de 45 minutos mínimos (obrigatória por regra de domínio)
     // Kill switch: KILL_MIN_45_RULE=true desativa enforcement
+    if (classData.startedAt && FeatureFlags.KILL_MIN_45_RULE) {
+      console.warn(
+        '[CLASSES] KILL_SWITCH_ACTIVE: regra 45min desativada (KILL_MIN_45_RULE=true)',
+        { classId: id, personalId: userId },
+      );
+    }
     if (classData.startedAt && !FeatureFlags.KILL_MIN_45_RULE) {
       const now = new Date();
       const rawClassData = await this.db.query.classes.findFirst({
@@ -1220,36 +1226,47 @@ export class ClassesService {
       }
     } else if (codeRequired) {
       // Sem hash + código obrigatório = estado inconsistente (dados legados).
-      // Regenerar código e exigir nova confirmação.
-      console.warn('[CLASSES] code_missing: pending_confirmation sem hash, regenerando código', { classId });
-      const newPlainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-      const newCodeHash = crypto.createHash('sha256').update(newPlainCode).digest('hex');
-      const newCodeExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      // Reverter para SCHEDULED para que o personal chame startClass de novo
+      // (único endpoint que gera código e retorna plaintext via HTTP de forma segura).
+      console.warn('[CLASSES] code_missing: pending_confirmation sem hash — revertendo para SCHEDULED', { classId });
 
-      await this.db
+      const [revertedClass] = await this.db
         .update(classes)
         .set({
-          startConfirmationCodeHash: newCodeHash,
-          startConfirmationCodeExpiresAt: newCodeExpiresAt,
+          status: ClassStatus.SCHEDULED,
+          pendingConfirmationAt: null,
+          startConfirmationCodeHash: null,
+          startConfirmationCodeExpiresAt: null,
           startConfirmationAttempts: 0,
           updatedAt: new Date(),
         })
-        .where(eq(classes.id, classId));
+        .where(eq(classes.id, classId))
+        .returning();
 
-      // Notificar participantes que código foi regenerado (SEM enviar plaintext por WS)
-      // O personal deve consultar o novo código via GET da aula ou re-iniciar a aula.
-      this.chatGateway.server.to(`class_${classId}`).emit('class_update', {
-        action: 'code_regenerated',
-        classId,
-        personalId: classData.personalId,
-        timestamp: new Date(),
-      });
+      // Emitir evento para sincronizar UI de ambos os participantes
+      if (revertedClass) {
+        try {
+          const classResponse = await this.formatClassResponse(revertedClass);
+          this.chatGateway.server.to(`class_${classId}`).emit('class_update', {
+            action: 'class_reverted_to_scheduled',
+            class: classResponse,
+          });
+        } catch (emitErr) {
+          console.error('[CLASSES] Erro ao emitir class_reverted_to_scheduled', emitErr);
+        }
+      }
 
       throw new BadRequestException(
-        'CODE_REGENERATED: Código de confirmação foi regenerado. O personal deve verificar o novo código.',
+        'CODE_MISSING: Código de confirmação ausente. O personal deve iniciar a aula novamente.',
+      );
+    } else {
+      // Kill switch KILL_CODE_4_DIGITS ativo + sem hash = confirma sem código.
+      // ATENÇÃO: isso reduz a garantia de presença. Usar somente em emergência.
+      console.warn(
+        '[CLASSES] KILL_SWITCH_ACTIVE: confirmação sem código (KILL_CODE_4_DIGITS=true)',
+        { classId, personalId: classData.personalId, studentId: userId },
       );
     }
-    // else: kill switch ativo + sem hash = confirma sem código (comportamento legado)
 
     const startTime = new Date();
     const minimumCompletionAt = new Date(startTime.getTime() + 45 * 60 * 1000); // T + 45min

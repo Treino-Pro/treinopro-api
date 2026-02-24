@@ -74,7 +74,13 @@ const mockGamificationService = {
   updateAchievementProgress: jest.fn(),
 };
 
-const mockChatGateway = { server: { emit: jest.fn() } };
+const mockEmit = jest.fn();
+const mockChatGateway = {
+  server: {
+    emit: mockEmit,
+    to: jest.fn().mockReturnValue({ emit: mockEmit }),
+  },
+};
 
 const mockPaymentsService = {
   cancelPaymentBeforeClass: jest.fn(),
@@ -665,7 +671,7 @@ describe('ClassesService', () => {
       ).rejects.toThrow(/INVALID_CONFIRMATION_CODE/);
     });
 
-    it('regenera código se pending_confirmation sem hash (fallback)', async () => {
+    it('reverte para SCHEDULED se pending_confirmation sem hash (fallback)', async () => {
       const rawClass = buildMockClass({
         startConfirmationCodeHash: null, // sem hash — estado inconsistente
         startConfirmationCodeExpiresAt: null,
@@ -676,13 +682,12 @@ describe('ClassesService', () => {
         .mockResolvedValueOnce(rawClass)
         .mockResolvedValueOnce(rawClass);
 
-      mockDb.update.mockReturnValue({
-        set: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            returning: jest.fn().mockResolvedValue([rawClass]),
-          }),
+      const mockSet = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([rawClass]),
         }),
       });
+      mockDb.update.mockReturnValue({ set: mockSet });
 
       await expect(
         service.confirmClassStart(
@@ -690,7 +695,22 @@ describe('ClassesService', () => {
           { confirmationCode: '1234' } as ConfirmClassStartDto,
           studentId,
         ),
-      ).rejects.toThrow(/CODE_REGENERATED/);
+      ).rejects.toThrow(/CODE_MISSING/);
+
+      // Verificar que o rollback persistiu os campos corretos
+      const rollbackCall = mockSet.mock.calls.find(
+        (call: any[]) => call[0]?.status === 'scheduled',
+      );
+      expect(rollbackCall).toBeDefined();
+      expect(rollbackCall[0]).toEqual(
+        expect.objectContaining({
+          status: 'scheduled',
+          pendingConfirmationAt: null,
+          startConfirmationCodeHash: null,
+          startConfirmationCodeExpiresAt: null,
+          startConfirmationAttempts: 0,
+        }),
+      );
     });
 
     it('rejeita código expirado → BadRequestException CONFIRMATION_CODE_EXPIRED', async () => {

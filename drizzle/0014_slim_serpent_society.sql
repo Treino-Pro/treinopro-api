@@ -1,0 +1,1 @@
+ALTER TABLE "financial_profiles" ADD CONSTRAINT "financial_profiles_mp_oauth_state_unique" UNIQUE("mp_oauth_state");
