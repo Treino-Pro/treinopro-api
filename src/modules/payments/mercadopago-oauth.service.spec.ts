@@ -152,6 +152,168 @@ describe('MercadoPagoOAuthService', () => {
     });
   });
 
+  describe('handleCallback — sucesso', () => {
+    it('deve persistir todos os campos OAuth no perfil financeiro', async () => {
+      const validState = 'd'.repeat(64);
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'user-1',
+        mpOauthState: validState,
+        mpOauthStateCreatedAt: twoMinutesAgo,
+      });
+
+      const fetchMock = require('node-fetch') as jest.Mock;
+      // Primeiro fetch: token exchange
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: 'APP_USR-new-token',
+          refresh_token: 'TG-new-refresh',
+          expires_in: 21600,
+          user_id: 12345,
+          public_key: 'APP_USR-pk',
+        }),
+      });
+      // Segundo fetch: user/me
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ email: 'personal@test.com' }),
+      });
+
+      const result = await service.handleCallback('valid-code', validState);
+
+      expect(result.success).toBe(true);
+      expect(result.mpUserId).toBe('12345');
+      expect(result.mpEmail).toBe('personal@test.com');
+
+      // Verificar que o segundo update (persistir tokens) contém todos os campos
+      const setCalls = mockUpdateChain.set.mock.calls;
+      const tokenUpdate = setCalls.find(
+        (call: any[]) => call[0]?.mpAccessToken === 'APP_USR-new-token',
+      );
+      expect(tokenUpdate).toBeDefined();
+      expect(tokenUpdate[0]).toEqual(
+        expect.objectContaining({
+          mpAccessToken: 'APP_USR-new-token',
+          mpRefreshToken: 'TG-new-refresh',
+          mpUserId: '12345',
+          mpEmail: 'personal@test.com',
+          mpIsVerified: true,
+          mpOauthState: null,
+          mpOauthStateCreatedAt: null,
+          isComplete: true,
+          canReceivePayments: true,
+        }),
+      );
+      expect(tokenUpdate[0].mpTokenExpiresAt).toBeInstanceOf(Date);
+      expect(tokenUpdate[0].mpConnectedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('refreshAccessToken', () => {
+    it('deve renovar token e salvar novo refresh token (rotation)', async () => {
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'user-1',
+        mpRefreshToken: 'TG-old-refresh',
+      });
+
+      const fetchMock = require('node-fetch') as jest.Mock;
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'APP_USR-refreshed',
+          refresh_token: 'TG-rotated-refresh',
+          expires_in: 21600,
+        }),
+      });
+
+      const newToken = await service.refreshAccessToken('user-1');
+
+      expect(newToken).toBe('APP_USR-refreshed');
+      expect(mockUpdateChain.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mpAccessToken: 'APP_USR-refreshed',
+          mpRefreshToken: 'TG-rotated-refresh',
+        }),
+      );
+    });
+
+    it('deve limpar TODOS os campos MP quando refresh é revogado (400)', async () => {
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'user-1',
+        mpRefreshToken: 'TG-revoked',
+      });
+
+      const fetchMock = require('node-fetch') as jest.Mock;
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => 'invalid_grant',
+      });
+
+      await expect(service.refreshAccessToken('user-1')).rejects.toThrow();
+
+      // Verificar limpeza completa de metadados
+      expect(mockUpdateChain.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mpAccessToken: null,
+          mpRefreshToken: null,
+          mpUserId: null,
+          mpEmail: null,
+          mpConnectedAt: null,
+          mpIsVerified: false,
+          canReceivePayments: false,
+          isComplete: false,
+        }),
+      );
+    });
+
+    it('deve rejeitar sem limpar dados se não tiver refresh token', async () => {
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'user-1',
+        mpRefreshToken: null,
+      });
+
+      await expect(service.refreshAccessToken('user-1')).rejects.toThrow(
+        /Reconecte a conta/,
+      );
+      // Não deve ter chamado update (sem limpeza)
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('disconnect', () => {
+    it('deve limpar todos os campos OAuth', async () => {
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'user-1',
+        mpUserId: '123',
+      });
+
+      await service.disconnect('user-1');
+
+      expect(mockUpdateChain.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mpAccessToken: null,
+          mpRefreshToken: null,
+          mpUserId: null,
+          mpEmail: null,
+          mpTokenExpiresAt: null,
+          mpConnectedAt: null,
+          mpOauthState: null,
+          mpOauthStateCreatedAt: null,
+          mpIsVerified: false,
+          canReceivePayments: false,
+        }),
+      );
+    });
+  });
+
   describe('getOAuthStatus', () => {
     it('retorna connected=false sem perfil', async () => {
       mockDb.query.financialProfiles.findFirst.mockResolvedValue(null);

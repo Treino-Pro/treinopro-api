@@ -719,6 +719,47 @@ describe('ClassesService', () => {
         ),
       ).rejects.toThrow(/CONFIRMATION_CODE_EXPIRED/);
     });
+
+    it('permite confirmação sem código quando KILL_CODE_4_DIGITS está ativo e hash é null', async () => {
+      // Ativar kill switch
+      process.env.KILL_CODE_4_DIGITS = 'true';
+
+      const rawClass = buildMockClass({
+        startConfirmationCodeHash: null,
+        startConfirmationCodeExpiresAt: null,
+        startConfirmationAttempts: 0,
+        duration: 60,
+      });
+
+      const updatedClass = {
+        ...rawClass,
+        status: ClassStatus.ACTIVE,
+        startedAt: new Date(),
+      };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(rawClass)
+        .mockResolvedValueOnce(rawClass);
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      const result = await service.confirmClassStart(
+        classId,
+        { confirmationCode: '' } as ConfirmClassStartDto,
+        studentId,
+      );
+
+      expect(result.status).toBe(ClassStatus.ACTIVE);
+
+      // Limpar kill switch
+      delete process.env.KILL_CODE_4_DIGITS;
+    });
   });
 
   describe('cancelClass', () => {

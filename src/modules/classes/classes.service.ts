@@ -1165,8 +1165,12 @@ export class ClassesService {
       throw new BadRequestException('A aula não está aguardando confirmação');
     }
 
-    // Validar código de confirmação (obrigatório)
+    // Validar código de confirmação
+    // Kill switch ativo + sem hash = skip da validação (comportamento legado: confirma sem código)
+    const codeRequired = !FeatureFlags.KILL_CODE_4_DIGITS;
+
     if (rawClass.startConfirmationCodeHash) {
+      // Hash presente: sempre validar, independentemente do kill switch
       // Verificar expiração
       if (
         rawClass.startConfirmationCodeExpiresAt &&
@@ -1214,8 +1218,8 @@ export class ClassesService {
           `INVALID_CONFIRMATION_CODE: Código inválido. ${attemptsLeft > 0 ? `${attemptsLeft} tentativa(s) restante(s).` : 'Código bloqueado.'}`,
         );
       }
-    } else {
-      // Fallback: pending_confirmation sem hash — estado inconsistente (dados legados).
+    } else if (codeRequired) {
+      // Sem hash + código obrigatório = estado inconsistente (dados legados).
       // Regenerar código e exigir nova confirmação.
       console.warn('[CLASSES] code_missing: pending_confirmation sem hash, regenerando código', { classId });
       const newPlainCode = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
@@ -1232,20 +1236,20 @@ export class ClassesService {
         })
         .where(eq(classes.id, classId));
 
-      // Notificar personal do novo código via WebSocket
-      this.chatGateway.server.emit('class_update', {
+      // Notificar participantes que código foi regenerado (SEM enviar plaintext por WS)
+      // O personal deve consultar o novo código via GET da aula ou re-iniciar a aula.
+      this.chatGateway.server.to(`class_${classId}`).emit('class_update', {
         action: 'code_regenerated',
         classId,
         personalId: classData.personalId,
-        startConfirmationCode: newPlainCode,
-        startConfirmationCodeExpiresAt: newCodeExpiresAt,
         timestamp: new Date(),
       });
 
       throw new BadRequestException(
-        'CODE_REGENERATED: Código de confirmação foi regenerado. O personal recebeu o novo código.',
+        'CODE_REGENERATED: Código de confirmação foi regenerado. O personal deve verificar o novo código.',
       );
     }
+    // else: kill switch ativo + sem hash = confirma sem código (comportamento legado)
 
     const startTime = new Date();
     const minimumCompletionAt = new Date(startTime.getTime() + 45 * 60 * 1000); // T + 45min

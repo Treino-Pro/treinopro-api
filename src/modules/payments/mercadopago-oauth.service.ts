@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   Inject,
 } from '@nestjs/common';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import fetch from 'node-fetch';
 // DATABASE_CONNECTION injetado via DatabaseModule
@@ -347,21 +347,27 @@ export class MercadoPagoOAuthService {
         `[OAUTH] oauth_refresh_failed: user=${userId} status=${tokenResponse.status} body=${errorBody}`,
       );
 
-      // Se refresh falhou com 400/401, o refresh token foi revogado — desconectar
+      // Se refresh falhou com 400/401, o refresh token foi revogado — limpeza completa
       if (tokenResponse.status === 400 || tokenResponse.status === 401) {
         await this.db
           .update(financialProfiles)
           .set({
             mpAccessToken: null,
             mpRefreshToken: null,
+            mpUserId: null,
+            mpEmail: null,
             mpTokenExpiresAt: null,
+            mpConnectedAt: null,
             mpIsVerified: false,
+            mpOauthState: null,
+            mpOauthStateCreatedAt: null,
             canReceivePayments: false,
+            isComplete: false,
             updatedAt: new Date(),
           })
           .where(eq(financialProfiles.userId, userId));
         this.logger.warn(
-          `[OAUTH] oauth_revoked: user=${userId} — refresh token inválido, conta desconectada`,
+          `[OAUTH] oauth_revoked: user=${userId} — refresh token inválido, conta totalmente desconectada`,
         );
       }
 
