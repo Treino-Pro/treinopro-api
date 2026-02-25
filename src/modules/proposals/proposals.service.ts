@@ -659,6 +659,21 @@ export class ProposalsService {
       createRecontractDto.personalId,
     );
 
+    // Validar se o solicitante é aluno
+    const [studentUser] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, studentId))
+      .limit(1);
+
+    if (!studentUser) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    if (studentUser.userType !== 'student') {
+      throw new ForbiddenException('Apenas alunos podem criar recontratação');
+    }
+
     // Validar se o personal trainer existe e está aprovado
     const [personal] = await this.db
       .select()
@@ -690,16 +705,7 @@ export class ProposalsService {
       throw new BadRequestException('A data do treino não pode ser no passado');
     }
 
-    // Buscar dados do aluno
-    const [user] = await this.db
-      .select()
-      .from(users)
-      .where(eq(users.id, studentId))
-      .limit(1);
-
-    if (!user) {
-      throw new NotFoundException('Usuário não encontrado');
-    }
+    const user = studentUser;
 
     // ===== CRIAR PROPOSTA DE RECONTRATAÇÃO PRIMEIRO =====
     const [proposal] = await this.db
@@ -790,57 +796,23 @@ export class ProposalsService {
 
       // ===== NOTIFICAR PERSONAL ESPECÍFICO =====
       try {
-        // Emitir evento específico para o personal da recontratação
-        this.chatGateway.server.emit('recontract_proposal', {
-          action: 'recontract_created',
+        // Enviar push/app notification para o personal alvo (online ou offline)
+        await this.proposalsGateway.sendProposalCreated({
           proposal: proposalResponse,
           student: {
             id: user?.id,
             name: `${user?.firstName} ${user?.lastName}`,
+            firstName: user?.firstName,
+            lastName: user?.lastName,
             profileImageUrl: user?.profileImageUrl,
           },
-          personalId: createRecontractDto.personalId,
-          timestamp: new Date(),
+          nearbyPersonals: [createRecontractDto.personalId],
         });
 
         console.log(
-          '📡 [PROPOSALS SERVICE] Evento de recontratação emitido para personal:',
+          '📡 [PROPOSALS SERVICE] Notificação de recontratação enviada para personal:',
           createRecontractDto.personalId,
         );
-
-        // ✅ NOVO: Enviar FCM para o personal específico da recontratação
-        // Verificar se o personal está online antes de enviar FCM
-        const [personalForFCM] = await this.db
-          .select()
-          .from(users)
-          .where(
-            and(
-              eq(users.id, createRecontractDto.personalId),
-              eq(users.isPersonalOnline, true), // ✅ Apenas se estiver online
-            ),
-          )
-          .limit(1);
-
-        if (personalForFCM) {
-          console.log(
-            `🔥 [PROPOSALS SERVICE] Personal está online - enviando FCM para recontratação: ${createRecontractDto.personalId}`,
-          );
-          await this.proposalsGateway.sendProposalCreated({
-            proposal: proposalResponse,
-            student: {
-              id: user?.id,
-              name: `${user?.firstName} ${user?.lastName}`,
-              firstName: user?.firstName,
-              lastName: user?.lastName,
-              profileImageUrl: user?.profileImageUrl,
-            },
-            nearbyPersonals: [createRecontractDto.personalId], // Apenas o personal específico
-          });
-        } else {
-          console.log(
-            `⚠️ [PROPOSALS SERVICE] Personal não está online - FCM não enviado para recontratação: ${createRecontractDto.personalId}`,
-          );
-        }
       } catch (error) {
         console.error(
           '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',
@@ -918,6 +890,13 @@ export class ProposalsService {
     } else if (userType === 'personal') {
       // Personal trainers veem propostas pendentes (para aceitar)
       conditions.push(eq(proposals.status, ProposalStatus.PENDING));
+      // Recontratações diretas só aparecem para o personal alvo
+      conditions.push(
+        or(
+          eq(proposals.targetPersonalId, userId),
+          sql`${proposals.targetPersonalId} IS NULL`,
+        ),
+      );
     }
 
     if (status) {
@@ -955,6 +934,7 @@ export class ProposalsService {
           additionalNotes: proposals.additionalNotes,
           status: proposals.status,
           paymentStatus: proposals.paymentStatus,
+          targetPersonalId: proposals.targetPersonalId,
           createdAt: proposals.createdAt,
           updatedAt: proposals.updatedAt,
           // Campos do estudante
@@ -1176,6 +1156,12 @@ export class ProposalsService {
       if (proposal.status !== ProposalStatus.PENDING) {
         throw new ConflictException(
           'Proposta já foi aceita ou cancelada por outro personal trainer',
+        );
+      }
+
+      if (proposal.targetPersonalId && proposal.targetPersonalId !== personalId) {
+        throw new ForbiddenException(
+          'Esta proposta é direcionada a outro personal trainer',
         );
       }
 
@@ -2020,6 +2006,17 @@ export class ProposalsService {
 
       console.log('🆔 [PROPOSALS] Proposal ID real:', proposalId);
 
+      const resolvedPayerEmail =
+        createProposalDto.payerEmail?.trim() || userData?.email?.trim();
+      const fallbackDocumentNumber = String(
+        userData?.documentNumber ?? '',
+      ).replace(/\D/g, '');
+      const resolvedPayerCpf =
+        createProposalDto.payerCpf?.trim() ||
+        (userData?.documentType === 'CPF' && fallbackDocumentNumber.length === 11
+          ? fallbackDocumentNumber
+          : undefined);
+
       // Calcular taxa da plataforma
       const platformFeePercentage =
         parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
@@ -2063,8 +2060,8 @@ export class ProposalsService {
             installments: createProposalDto.installments || '1',
             saveCard: createProposalDto.saveCard || false,
             cardNickname: createProposalDto.cardNickname,
-            payerEmail: createProposalDto.payerEmail, // ✅ Passar email do pagador
-            payerCpf: createProposalDto.payerCpf, // ✅ Passar CPF do pagador
+            payerEmail: resolvedPayerEmail, // ✅ Fallback para email do usuário autenticado
+            payerCpf: resolvedPayerCpf, // ✅ Fallback para CPF do documento do usuário
           };
 
           console.log(
@@ -2137,7 +2134,7 @@ export class ProposalsService {
           createProposalDto.cardId = undefined;
         }
 
-        if (!createProposalDto.payerEmail) {
+        if (!resolvedPayerEmail) {
           throw new BadRequestException(
             'payerEmail é obrigatório para pagamento via PIX',
           );
@@ -2154,8 +2151,8 @@ export class ProposalsService {
           amount: createProposalDto.price,
           description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
           externalReference: proposalId,
-          payerEmail: createProposalDto.payerEmail,
-          payerCpf: createProposalDto.payerCpf,
+          payerEmail: resolvedPayerEmail,
+          payerCpf: resolvedPayerCpf,
           notificationUrl,
         });
 
@@ -2745,6 +2742,8 @@ export class ProposalsService {
       additionalNotes: proposal.additionalNotes,
       status: proposal.status,
       paymentStatus: proposal.paymentStatus,
+      isRecontract: !!proposal.targetPersonalId,
+      targetPersonalId: proposal.targetPersonalId || undefined,
       createdAt: proposal.createdAt,
       updatedAt: proposal.updatedAt,
     };

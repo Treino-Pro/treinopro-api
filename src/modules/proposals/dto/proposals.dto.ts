@@ -359,6 +359,20 @@ export class ProposalResponseDto {
   paymentStatus?: string;
 
   @ApiProperty({
+    description: 'Indica se a proposta é uma recontratação direta',
+    example: true,
+    required: false,
+  })
+  isRecontract?: boolean;
+
+  @ApiProperty({
+    description: 'ID do personal alvo na recontratação direta',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
+  })
+  targetPersonalId?: string;
+
+  @ApiProperty({
     description: 'Data de criação',
     example: '2024-01-10T10:00:00.000Z',
   })
