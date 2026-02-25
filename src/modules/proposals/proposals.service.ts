@@ -51,6 +51,17 @@ import { LocationsService } from '../locations/locations.service';
 
 @Injectable()
 export class ProposalsService {
+  private readonly paymentConfirmedStatuses = new Set([
+    'authorized',
+    'approved',
+    'captured',
+  ]);
+
+  private isPaymentConfirmedStatus(status?: string | null): boolean {
+    const normalized = String(status || '').toLowerCase();
+    return this.paymentConfirmedStatuses.has(normalized);
+  }
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
@@ -794,31 +805,37 @@ export class ProposalsService {
       // Retornar proposta com dados do pagamento e do usuário
       const proposalResponse = await this.mapToResponseDto(proposal, user);
 
-      // ===== NOTIFICAR PERSONAL ESPECÍFICO =====
-      try {
-        // Enviar push/app notification para o personal alvo (online ou offline)
-        await this.proposalsGateway.sendProposalCreated({
-          proposal: proposalResponse,
-          student: {
-            id: user?.id,
-            name: `${user?.firstName} ${user?.lastName}`,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
-            profileImageUrl: user?.profileImageUrl,
-          },
-          nearbyPersonals: [createRecontractDto.personalId],
-        });
+      // ===== NOTIFICAR PERSONAL ESPECÍFICO (APENAS COM PAGAMENTO CONFIRMADO) =====
+      if (this.isPaymentConfirmedStatus(paymentResult.status)) {
+        try {
+          // Enviar push/app notification para o personal alvo (online ou offline)
+          await this.proposalsGateway.sendProposalCreated({
+            proposal: proposalResponse,
+            student: {
+              id: user?.id,
+              name: `${user?.firstName} ${user?.lastName}`,
+              firstName: user?.firstName,
+              lastName: user?.lastName,
+              profileImageUrl: user?.profileImageUrl,
+            },
+            nearbyPersonals: [createRecontractDto.personalId],
+          });
 
+          console.log(
+            '📡 [PROPOSALS SERVICE] Notificação de recontratação enviada para personal:',
+            createRecontractDto.personalId,
+          );
+        } catch (error) {
+          console.error(
+            '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',
+            error,
+          );
+          // Não falhar a operação por causa de problemas de WebSocket
+        }
+      } else {
         console.log(
-          '📡 [PROPOSALS SERVICE] Notificação de recontratação enviada para personal:',
-          createRecontractDto.personalId,
+          `⏳ [PROPOSALS SERVICE] Recontratação ${proposal.id} criada sem envio ao personal (aguardando pagamento). paymentStatus=${paymentResult.status}`,
         );
-      } catch (error) {
-        console.error(
-          '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',
-          error,
-        );
-        // Não falhar a operação por causa de problemas de WebSocket
       }
 
       console.log(
@@ -893,7 +910,10 @@ export class ProposalsService {
       // Recontratações diretas só aparecem para o personal alvo
       conditions.push(
         or(
-          eq(proposals.targetPersonalId, userId),
+          and(
+            eq(proposals.targetPersonalId, userId),
+            inArray(proposals.paymentStatus, ['authorized', 'approved', 'captured']),
+          ),
           sql`${proposals.targetPersonalId} IS NULL`,
         ),
       );
@@ -1162,6 +1182,16 @@ export class ProposalsService {
       if (proposal.targetPersonalId && proposal.targetPersonalId !== personalId) {
         throw new ForbiddenException(
           'Esta proposta é direcionada a outro personal trainer',
+        );
+      }
+
+      // Segurança extra: recontratação só pode ser aceita após pagamento confirmado.
+      if (
+        proposal.targetPersonalId &&
+        !this.isPaymentConfirmedStatus(proposal.paymentStatus)
+      ) {
+        throw new BadRequestException(
+          'Pagamento da recontratação ainda não foi confirmado.',
         );
       }
 
@@ -1459,7 +1489,7 @@ export class ProposalsService {
             personalAmount: payment?.personalAmount,
           });
 
-          if (payment && payment.status === 'authorized') {
+          if (payment) {
             // Atualizar pagamento com classId e personalId
             await tx
               .update(payments)
@@ -1470,13 +1500,19 @@ export class ProposalsService {
               })
               .where(eq(payments.id, payment.id));
 
-            // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
-            console.log(
-              'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
-            );
+            if (payment.status === 'authorized') {
+              // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
+              console.log(
+                'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
+              );
+            } else {
+              console.log(
+                `ℹ️ [PROPOSALS] Pagamento vinculado à aula com status "${payment.status}". Captura/reasse seguirá regra na conclusão.`,
+              );
+            }
           } else {
             console.log(
-              '⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:',
+              '⚠️ [PROPOSALS] Pagamento não encontrado para proposta:',
               payment?.status,
             );
           }
@@ -1722,6 +1758,20 @@ export class ProposalsService {
     }
 
     try {
+      const [currentProposal] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, proposalId))
+        .limit(1);
+
+      if (!currentProposal) {
+        throw new NotFoundException('Proposta não encontrada');
+      }
+
+      const wasConfirmed = this.isPaymentConfirmedStatus(
+        currentProposal.paymentStatus,
+      );
+
       await this.db
         .update(proposals)
         .set({
@@ -1730,8 +1780,41 @@ export class ProposalsService {
         })
         .where(eq(proposals.id, proposalId));
 
-      // Se pagamento foi aprovado, notificar que proposta está pronta
-      if (paymentStatus === 'approved' || paymentStatus === 'captured') {
+      // Recontratação: quando pagamento for confirmado, liberar envio ao personal alvo.
+      if (
+        currentProposal.targetPersonalId &&
+        !wasConfirmed &&
+        this.isPaymentConfirmedStatus(paymentStatus)
+      ) {
+        const [student] = await this.db
+          .select()
+          .from(users)
+          .where(eq(users.id, currentProposal.studentId))
+          .limit(1);
+
+        const proposalResponse = await this.mapToResponseDto(
+          {
+            ...currentProposal,
+            paymentStatus,
+          },
+          student,
+        );
+
+        await this.proposalsGateway.sendProposalCreated({
+          proposal: proposalResponse,
+          student: {
+            id: student?.id,
+            name: `${student?.firstName || ''} ${student?.lastName || ''}`.trim(),
+            firstName: student?.firstName,
+            lastName: student?.lastName,
+            profileImageUrl: student?.profileImageUrl,
+          },
+          nearbyPersonals: [currentProposal.targetPersonalId],
+        });
+
+        console.log(
+          `📡 [PROPOSALS] Recontratação ${proposalId} liberada para personal ${currentProposal.targetPersonalId} após confirmação de pagamento (${paymentStatus})`,
+        );
       }
 
       // Se pagamento falhou, cancelar proposta automaticamente

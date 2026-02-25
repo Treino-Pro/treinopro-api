@@ -436,13 +436,14 @@ export class ClassesService {
     // ===== APLICAR SPLIT E ATUALIZAR CARTEIRA APÓS CONCLUSÃO DA AULA =====
     try {
       // Buscar pagamento da aula
-      const payment = await this.db.query.payments.findFirst({
-        where: eq(payments.classId, id),
-        with: {
-          student: true,
-          personal: true,
-        },
-      });
+      let payment = await this.findPaymentForClass(id, classData.proposalId);
+      if (payment) {
+        payment = await this.ensurePaymentLinkedToClass(
+          payment,
+          id,
+          classData.personalId,
+        );
+      }
       if (payment) {
         if (payment.status === 'authorized' || payment.status === 'pending') {
           await this.paymentsService.capturePaymentAfterClass(
@@ -524,9 +525,17 @@ export class ClassesService {
       // Buscar valor correto do repasse (personalAmount) para notificação
       let personalAmountValue = 0;
       try {
-        const paymentForWs = await this.db.query.payments.findFirst({
-          where: eq(payments.classId, id),
-        });
+        let paymentForWs = await this.findPaymentForClass(
+          id,
+          classData.proposalId,
+        );
+        if (paymentForWs) {
+          paymentForWs = await this.ensurePaymentLinkedToClass(
+            paymentForWs,
+            id,
+            classData.personalId,
+          );
+        }
         personalAmountValue = paymentForWs
           ? Number(paymentForWs.personalAmount)
           : 0;
@@ -557,16 +566,22 @@ export class ClassesService {
       });
 
       // Evento específico de dados financeiros para o personal (pagamento liberado)
-      this.chatGateway.server.emit('financial_update', {
-        action: 'payment_released',
-        class: classResponse,
-        financial: {
-          classId: id,
-          amount: personalAmountValue,
-        },
-        userId: userId,
-        timestamp: new Date(),
-      });
+      if (personalAmountValue > 0) {
+        this.chatGateway.server.emit('financial_update', {
+          action: 'payment_released',
+          class: classResponse,
+          financial: {
+            classId: id,
+            amount: personalAmountValue,
+          },
+          userId: userId,
+          timestamp: new Date(),
+        });
+      } else {
+        this.logger.warn(
+          `[COMPLETE_CLASS] financial_update suprimido para aula ${id} (amount=${personalAmountValue})`,
+        );
+      }
     } catch (error) {
       console.error('❌ [CLASSES] Erro ao emitir eventos WebSocket:', error);
       // Não falhar a operação por causa de problemas de WebSocket
@@ -657,9 +672,14 @@ export class ClassesService {
 
     // ===== CAPTURAR PAGAMENTO E APLICAR SPLIT (SE EM CUSTÓDIA) =====
     try {
-      const payment = await this.db.query.payments.findFirst({
-        where: eq(payments.classId, classId),
-      });
+      let payment = await this.findPaymentForClass(classId, classData.proposalId);
+      if (payment) {
+        payment = await this.ensurePaymentLinkedToClass(
+          payment,
+          classId,
+          classData.personalId,
+        );
+      }
       if (payment) {
         if (payment.status === 'authorized' || payment.status === 'pending') {
           console.log(
@@ -695,9 +715,17 @@ export class ClassesService {
       // Buscar valor correto do repasse (personalAmount) para notificação
       let personalAmountValue = 0;
       try {
-        const paymentForWs = await this.db.query.payments.findFirst({
-          where: eq(payments.classId, classId),
-        });
+        let paymentForWs = await this.findPaymentForClass(
+          classId,
+          classData.proposalId,
+        );
+        if (paymentForWs) {
+          paymentForWs = await this.ensurePaymentLinkedToClass(
+            paymentForWs,
+            classId,
+            classData.personalId,
+          );
+        }
         personalAmountValue = paymentForWs
           ? Number(paymentForWs.personalAmount)
           : 0;
@@ -728,16 +756,22 @@ export class ClassesService {
       });
 
       // Evento específico de dados financeiros para o personal (pagamento liberado)
-      this.chatGateway.server.emit('financial_update', {
-        action: 'payment_released',
-        class: classResponse,
-        financial: {
-          classId: classId,
-          amount: personalAmountValue,
-        },
-        userId: classData.personalId,
-        timestamp: new Date(),
-      });
+      if (personalAmountValue > 0) {
+        this.chatGateway.server.emit('financial_update', {
+          action: 'payment_released',
+          class: classResponse,
+          financial: {
+            classId: classId,
+            amount: personalAmountValue,
+          },
+          userId: classData.personalId,
+          timestamp: new Date(),
+        });
+      } else {
+        this.logger.warn(
+          `[TIMER_EXPIRATION] financial_update suprimido para aula ${classId} (amount=${personalAmountValue})`,
+        );
+      }
 
       console.log('✅ [TIMER_EXPIRATION] Eventos WebSocket emitidos');
     } catch (error) {
@@ -897,6 +931,52 @@ export class ClassesService {
     }
 
     return this.formatClassResponse(updatedClass);
+  }
+
+  private async findPaymentForClass(
+    classId: string,
+    proposalId?: string,
+  ): Promise<any | null> {
+    let payment = await this.db.query.payments.findFirst({
+      where: eq(payments.classId, classId),
+    });
+
+    if (!payment && proposalId) {
+      payment = await this.db.query.payments.findFirst({
+        where: eq(payments.proposalId, proposalId),
+      });
+    }
+
+    return payment ?? null;
+  }
+
+  private async ensurePaymentLinkedToClass(
+    payment: any,
+    classId: string,
+    personalId?: string,
+  ): Promise<any> {
+    const shouldUpdateClassId = payment.classId !== classId;
+    const shouldUpdatePersonalId =
+      personalId != null && payment.personalId !== personalId;
+
+    if (!shouldUpdateClassId && !shouldUpdatePersonalId) {
+      return payment;
+    }
+
+    await this.db
+      .update(payments)
+      .set({
+        classId,
+        personalId: personalId ?? payment.personalId ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, payment.id));
+
+    return {
+      ...payment,
+      classId,
+      personalId: personalId ?? payment.personalId ?? null,
+    };
   }
 
   async getClassStats(userId: string): Promise<ClassStatsDto> {
