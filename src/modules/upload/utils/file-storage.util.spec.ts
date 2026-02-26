@@ -1,11 +1,24 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { FileStorageUtil } from './file-storage.util';
 import * as fs from 'fs/promises';
-import * as path from 'path';
+import * as sharp from 'sharp';
 
 // Mock fs/promises
 jest.mock('fs/promises');
 const mockedFs = fs as jest.Mocked<typeof fs>;
+
+// Mock Sharp
+jest.mock('sharp', () => {
+  const mockSharp = jest.fn(() => ({
+    metadata: jest.fn().mockResolvedValue({
+      width: 1920,
+      height: 1080,
+      format: 'jpeg',
+    }),
+  }));
+
+  return mockSharp;
+});
 
 describe('FileStorageUtil', () => {
   let service: FileStorageUtil;
@@ -140,7 +153,7 @@ describe('FileStorageUtil', () => {
   });
 
   describe('validateFile', () => {
-    it('should pass validation for valid file', () => {
+    it('should pass validation for valid file', async () => {
       const buffer = Buffer.alloc(1024); // 1KB
       const mimeType = 'image/jpeg';
       const options = {
@@ -149,12 +162,12 @@ describe('FileStorageUtil', () => {
         category: 'profile',
       };
 
-      expect(() =>
+      await expect(
         service.validateFile(buffer, mimeType, options),
-      ).not.toThrow();
+      ).resolves.not.toThrow();
     });
 
-    it('should throw error for file too large', () => {
+    it('should throw error for file too large', async () => {
       const buffer = Buffer.alloc(10 * 1024 * 1024); // 10MB
       const mimeType = 'image/jpeg';
       const options = {
@@ -163,12 +176,12 @@ describe('FileStorageUtil', () => {
         category: 'profile',
       };
 
-      expect(() => service.validateFile(buffer, mimeType, options)).toThrow(
-        'Arquivo muito grande',
-      );
+      await expect(
+        service.validateFile(buffer, mimeType, options),
+      ).rejects.toThrow('Arquivo muito grande');
     });
 
-    it('should throw error for invalid MIME type', () => {
+    it('should throw error for invalid MIME type', async () => {
       const buffer = Buffer.alloc(1024);
       const mimeType = 'text/plain';
       const options = {
@@ -177,9 +190,55 @@ describe('FileStorageUtil', () => {
         category: 'profile',
       };
 
-      expect(() => service.validateFile(buffer, mimeType, options)).toThrow(
-        'Tipo de arquivo não permitido',
-      );
+      await expect(
+        service.validateFile(buffer, mimeType, options),
+      ).rejects.toThrow('Tipo de arquivo não permitido');
+    });
+
+    it('should throw error when image dimensions exceed limits', async () => {
+      // Mock sharp to return large image
+      (sharp as any).mockImplementation(() => ({
+        metadata: jest.fn().mockResolvedValue({
+          width: 5000,
+          height: 5000,
+        }),
+      }));
+
+      const buffer = Buffer.alloc(1024);
+      const mimeType = 'image/jpeg';
+      const options = {
+        maxSize: 5 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg'],
+        maxDimensions: { width: 2048, height: 2048 },
+        category: 'profile',
+      };
+
+      await expect(
+        service.validateFile(buffer, mimeType, options),
+      ).rejects.toThrow('Imagem muito grande');
+    });
+
+    it('should pass when image dimensions are within limits', async () => {
+      // Mock sharp to return normal image
+      (sharp as any).mockImplementation(() => ({
+        metadata: jest.fn().mockResolvedValue({
+          width: 1024,
+          height: 768,
+        }),
+      }));
+
+      const buffer = Buffer.alloc(1024);
+      const mimeType = 'image/jpeg';
+      const options = {
+        maxSize: 5 * 1024 * 1024,
+        allowedMimeTypes: ['image/jpeg'],
+        maxDimensions: { width: 2048, height: 2048 },
+        category: 'profile',
+      };
+
+      await expect(
+        service.validateFile(buffer, mimeType, options),
+      ).resolves.not.toThrow();
     });
   });
 

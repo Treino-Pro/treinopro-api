@@ -83,7 +83,11 @@ export class LocationsService {
     try {
       // Por enquanto, retornar array vazio para evitar stack overflow
       // TODO: Implementar busca de favoritos quando necessário
-      this.logger.log('Buscando locais favoritos para usuário:', userId);
+      this.logger.log('Buscando locais favoritos para usuário:', {
+        userId,
+        query,
+        limit,
+      });
       return [];
     } catch (error) {
       this.logger.warn('Erro ao buscar locais favoritos:', error);
@@ -512,7 +516,9 @@ export class LocationsService {
    * Buscar coordenadas de um endereço usando Google Places API (Text Search)
    * Usa a mesma API que já está habilitada para busca de lugares
    */
-  async geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  async geocodeAddress(
+    address: string,
+  ): Promise<{ lat: number; lng: number } | null> {
     if (!this.googlePlacesApiKey) {
       this.logger.warn('Google Places API key não configurada para geocoding');
       return null;
@@ -556,10 +562,15 @@ export class LocationsService {
         }
       }
 
-      this.logger.warn(`Geocoding falhou para endereço: ${address}. Nenhum resultado encontrado.`);
+      this.logger.warn(
+        `Geocoding falhou para endereço: ${address}. Nenhum resultado encontrado.`,
+      );
       return null;
     } catch (error) {
-      this.logger.error(`Erro ao fazer geocoding do endereço ${address}:`, error);
+      this.logger.error(
+        `Erro ao fazer geocoding do endereço ${address}:`,
+        error,
+      );
       return null;
     }
   }
@@ -601,7 +612,7 @@ export class LocationsService {
         // Atualizar coordenadas se necessário
         const existingLat = parseFloat(String(existingLocation.lat));
         const existingLng = parseFloat(String(existingLocation.lng));
-        
+
         if (existingLat !== lat || existingLng !== lng) {
           await this.db
             .update(locations)
@@ -613,7 +624,9 @@ export class LocationsService {
             })
             .where(eq(locations.id, existingLocation.id));
         }
-        this.logger.log(`Local atualizado: ${existingLocation.id} - ${locationName}`);
+        this.logger.log(
+          `Local atualizado: ${existingLocation.id} - ${locationName}`,
+        );
         return existingLocation.id;
       }
 

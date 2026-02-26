@@ -21,12 +21,11 @@ import {
 import {
   MercadoPagoService,
   CreatePreferenceData,
+  MPPreferenceResponse,
 } from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
-  CreatePaymentDto,
   CreatePaymentPreferenceDto,
-  UpdatePaymentDto,
   CreateDisputeDto,
   SubmitEvidenceDto,
   ResolveDisputeDto,
@@ -37,9 +36,7 @@ import {
   WalletResponseDto,
   TransactionResponseDto,
   PaymentStatsDto,
-  WalletStatsDto,
   PaymentFiltersDto,
-  DisputeFiltersDto,
   PaymentStatus,
   PaymentType,
   DisputeStatus,
@@ -58,6 +55,42 @@ export class PaymentsService {
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  // Delegador público para createPixPayment (evita acesso por string de index)
+  async createPixPayment(pixData: {
+    amount: number;
+    description: string;
+    externalReference: string;
+    payerEmail: string;
+    payerFirstName?: string;
+    payerLastName?: string;
+    payerCpf?: string;
+    notificationUrl?: string;
+  }): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  }> {
+    return this.mercadoPagoService.createPixPayment(pixData);
+  }
+
+  // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)
+  async getMpPayment(mpPaymentId: string): Promise<any> {
+    return this.mercadoPagoService.getPayment(mpPaymentId);
+  }
+
+  mapMpPaymentStatus(mpStatus: string): string {
+    return this.mercadoPagoService.mapPaymentStatus(mpStatus);
+  }
+
+  async createMpPreference(
+    data: CreatePreferenceData,
+  ): Promise<MPPreferenceResponse> {
+    return this.mercadoPagoService.createPreference(data);
+  }
 
   // Criar preferência de pagamento no Mercado Pago
   async createPaymentPreference(
@@ -164,7 +197,7 @@ export class PaymentsService {
     webhookDto: MercadoPagoWebhookDto,
     headers?: any,
   ): Promise<void> {
-    const { id, type, action, data } = webhookDto;
+    const { id, type } = webhookDto;
 
     // Validar webhook
     if (
@@ -201,7 +234,6 @@ export class PaymentsService {
       // Mapear status do MP para nosso sistema
       const newStatus = this.mercadoPagoService.mapPaymentStatus(
         mpPaymentData.status,
-        mpPaymentData.status_detail,
       );
 
       // Atualizar status do pagamento
@@ -467,18 +499,23 @@ export class PaymentsService {
 
     // Criar notificação in-app para o outro usuário (que não criou a disputa)
     try {
-      const otherUserId = payment.studentId === userId ? payment.personalId : payment.studentId;
+      const otherUserId =
+        payment.studentId === userId ? payment.personalId : payment.studentId;
       const classData = await this.db.query.classes.findFirst({
         where: eq(classes.id, payment.classId),
       });
-      
-      await this.notificationsService.sendInAppNotification(otherUserId, 'dispute-created', {
-        disputeId: newDispute.id,
-        classId: payment.classId,
-        paymentId: createDto.paymentId,
-        reason: createDto.reason,
-        message: `Uma disputa foi criada sobre sua aula${classData ? ` de ${classData.date}` : ''}`,
-      });
+
+      await this.notificationsService.sendInAppNotification(
+        otherUserId,
+        'dispute-created',
+        {
+          disputeId: newDispute.id,
+          classId: payment.classId,
+          paymentId: createDto.paymentId,
+          reason: createDto.reason,
+          message: `Uma disputa foi criada sobre sua aula${classData ? ` de ${classData.date}` : ''}`,
+        },
+      );
     } catch (error) {
       console.error('❌ Erro ao criar notificação in-app de disputa:', error);
       // Não bloquear a criação da disputa se notificação falhar
@@ -563,7 +600,11 @@ export class PaymentsService {
     status?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ items: DisputeResponseDto[]; total: number; totalPages: number }> {
+  }): Promise<{
+    items: DisputeResponseDto[];
+    total: number;
+    totalPages: number;
+  }> {
     const pageNum = Math.max(1, filters?.page ?? 1);
     const limitNum = Math.min(100, Math.max(1, filters?.limit ?? 20));
     const offset = (pageNum - 1) * limitNum;
@@ -862,7 +903,6 @@ export class PaymentsService {
   async processNoShowDispute(
     disputeId: string,
     resolution: 'pro_student' | 'pro_personal',
-    adminNotes?: string,
   ): Promise<void> {
     const dispute = await this.db.query.paymentDisputes.findFirst({
       where: eq(paymentDisputes.id, disputeId),
@@ -1112,10 +1152,6 @@ export class PaymentsService {
     pendingWithdrawals: number;
     recentTransactions: TransactionResponseDto[];
   }> {
-    console.log(
-      `📊 [PERSONAL_STATS] Buscando estatísticas para personal ${userId}`,
-    );
-
     // Buscar carteira
     const wallet = await this.getUserWallet(userId);
 
@@ -1130,13 +1166,6 @@ export class PaymentsService {
     const totalEarnings = parseFloat(wallet.totalEarned.toString());
     const totalWithdrawals = parseFloat(wallet.totalWithdrawn.toString());
     const pendingWithdrawals = parseFloat(wallet.pendingBalance.toString());
-
-    console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, {
-      totalEarnings,
-      totalWithdrawals,
-      pendingWithdrawals,
-      availableBalance: wallet.availableBalance,
-    });
 
     return {
       wallet,
@@ -1296,9 +1325,10 @@ export class PaymentsService {
         ? {
             id: payment.student.id,
             name:
-              payment.student.firstName != null && payment.student.lastName != null
+              payment.student.firstName != null &&
+              payment.student.lastName != null
                 ? `${payment.student.firstName} ${payment.student.lastName}`.trim()
-                : (payment.student as any).name ?? payment.student.email,
+                : ((payment.student as any).name ?? payment.student.email),
             email: payment.student.email,
           }
         : undefined,
@@ -1306,9 +1336,10 @@ export class PaymentsService {
         ? {
             id: payment.personal.id,
             name:
-              payment.personal.firstName != null && payment.personal.lastName != null
+              payment.personal.firstName != null &&
+              payment.personal.lastName != null
                 ? `${payment.personal.firstName} ${payment.personal.lastName}`.trim()
-                : (payment.personal as any).name ?? payment.personal.email,
+                : ((payment.personal as any).name ?? payment.personal.email),
             email: payment.personal.email,
           }
         : undefined,
@@ -1347,9 +1378,13 @@ export class PaymentsService {
               dispute.reportedByUser.firstName != null &&
               dispute.reportedByUser.lastName != null
                 ? `${dispute.reportedByUser.firstName} ${dispute.reportedByUser.lastName}`.trim()
-                : (dispute.reportedByUser as any).name ?? dispute.reportedByUser.email,
+                : ((dispute.reportedByUser as any).name ??
+                  dispute.reportedByUser.email),
             email: dispute.reportedByUser.email,
-            role: (dispute.reportedByUser as any).role ?? dispute.reportedByUser.userType ?? 'user',
+            role:
+              (dispute.reportedByUser as any).role ??
+              dispute.reportedByUser.userType ??
+              'user',
           }
         : undefined,
       createdAt: dispute.createdAt,
@@ -1672,7 +1707,11 @@ export class PaymentsService {
 
   // Listar solicitações de saque pendentes (admin) – atalho para getWithdrawals({ status: 'pending' })
   async getPendingWithdrawals(): Promise<WithdrawalResponseDto[]> {
-    const result = await this.getWithdrawals({ status: 'pending', page: 1, limit: 500 });
+    const result = await this.getWithdrawals({
+      status: 'pending',
+      page: 1,
+      limit: 500,
+    });
     return result.items;
   }
 
@@ -1692,9 +1731,15 @@ export class PaymentsService {
     const limit = Math.min(100, Math.max(1, filters?.limit ?? 20));
     const offset = (page - 1) * limit;
 
-    let statusWhere: ReturnType<typeof eq> | ReturnType<typeof inArray> | undefined;
+    let statusWhere:
+      | ReturnType<typeof eq>
+      | ReturnType<typeof inArray>
+      | undefined;
     if (filters?.status) {
-      const statuses = filters.status.split(',').map((s) => s.trim()).filter(Boolean);
+      const statuses = filters.status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       if (statuses.length === 1) {
         statusWhere = eq(withdrawalRequests.status, statuses[0]);
       } else if (statuses.length > 1) {

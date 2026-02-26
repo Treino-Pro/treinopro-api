@@ -21,6 +21,10 @@ import {
   ResetPasswordDto,
   ChangePasswordDto,
   CreateAdminDto,
+  CheckEmailDto,
+  CheckDocumentDto,
+  SendVerificationCodeDto,
+  VerifyCodeDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
@@ -142,8 +146,8 @@ export class AuthController {
     status: 400,
     description: 'Email inválido ou usuário não encontrado',
   })
-  async sendVerificationCode(@Body() body: { email: string }) {
-    return this.authService.sendVerificationCode(body.email);
+  async sendVerificationCode(@Body() dto: SendVerificationCodeDto) {
+    return this.authService.sendVerificationCode(dto.email);
   }
 
   @Post('verify-code')
@@ -154,8 +158,36 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'Código verificado com sucesso' })
   @ApiResponse({ status: 400, description: 'Código inválido ou expirado' })
-  async verifyCode(@Body() body: { email: string; code: string }) {
-    return this.authService.verifyCode(body.email, body.code);
+  async verifyCode(@Body() dto: VerifyCodeDto) {
+    return this.authService.verifyCode(dto.email, dto.code);
+  }
+
+  @Post('check-email')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar se um email já está cadastrado' })
+  @ApiResponse({ status: 200, description: 'Verificação realizada com sucesso' })
+  async checkEmail(@Body() dto: CheckEmailDto) {
+    return this.authService.checkEmail(dto.email);
+  }
+
+  @Post('check-document')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verificar se um documento já está cadastrado' })
+  @ApiResponse({
+    status: 200,
+    description: 'Verificação realizada com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        exists: { type: 'boolean', example: false },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async checkDocument(@Body() dto: CheckDocumentDto) {
+    return this.authService.checkDocument(dto.documentType, dto.documentNumber);
   }
 
   @Post('send-guardian-authorization')

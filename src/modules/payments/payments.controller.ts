@@ -10,18 +10,20 @@ import {
   UseGuards,
   Request,
   BadRequestException,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
 import { MercadoPagoService } from './mercadopago.service';
+import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { PaymentsService } from './payments.service';
 import { FinancialProfileService } from './financial-profile.service';
 import { PaymentStatus } from './dto/payments.dto';
 import { db } from '../../database/connection';
 import { users } from '../../database/schema';
 import { eq } from 'drizzle-orm';
-import { Public } from '../../common/decorators/public.decorator';
 import { CardType } from './dto/student-payment-methods.dto';
 
 export interface RemoveCardDto {
@@ -47,6 +49,7 @@ export class PaymentsController {
     private readonly studentPaymentMethodsService: StudentPaymentMethodsService,
     private readonly refundsService: RefundsService,
     private readonly mercadoPagoService: MercadoPagoService,
+    private readonly mercadoPagoOAuthService: MercadoPagoOAuthService,
     private readonly paymentsService: PaymentsService,
     private readonly financialProfileService: FinancialProfileService,
   ) {}
@@ -54,31 +57,30 @@ export class PaymentsController {
   // ===== STUDENT PAYMENT METHODS =====
 
   @Get('test/public')
-  @Public()
   async publicTest() {
-    console.log('🌐 [PUBLIC TEST] Endpoint público chamado');
+    // Endpoint restrito a ambientes não-produção
+    if (process.env.NODE_ENV === 'production') {
+      throw new BadRequestException('Endpoint indisponivel em producao');
+    }
 
     try {
       if (!db) {
         return { error: 'Conexão com banco não disponível' };
       }
 
-      // Teste simples de query
       const userCount = await db.select().from(users).limit(1);
 
       return {
         success: true,
-        message: 'Endpoint público funcionando',
+        message: 'Endpoint de diagnóstico (apenas desenvolvimento)',
         databaseConnected: true,
         userCount: userCount.length,
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      console.error('❌ [PUBLIC TEST] Erro:', error);
       return {
         success: false,
         error: error.message,
-        stack: error.stack,
       };
     }
   }
@@ -478,14 +480,10 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   async getPersonalFinancialStats(@Request() req) {
     const userId = req.user.sub;
-    console.log(
-      `📊 [PERSONAL_STATS] Consultando estatísticas financeiras para personal ${userId}`,
-    );
 
     try {
       const stats =
         await this.paymentsService.getPersonalFinancialStats(userId);
-      console.log(`📊 [PERSONAL_STATS] Estatísticas calculadas:`, stats);
 
       return {
         success: true,
@@ -553,7 +551,6 @@ export class PaymentsController {
     @Request() req,
     @Param('classId') classId: string,
   ) {
-    const userId = req.user.sub;
     console.log(
       `🧪 [TEST_CAPTURE] Testando captura manual para aula ${classId}`,
     );
@@ -619,6 +616,85 @@ export class PaymentsController {
       limit,
       offset,
     });
+  }
+
+  // ===== MERCADO PAGO OAUTH =====
+
+  @Get('mercadopago/oauth/start')
+  @UseGuards(JwtAuthGuard)
+  async startMercadoPagoOAuth(@Request() req) {
+    const userId = req.user.sub;
+    console.log(`🔗 [MP_OAUTH] Iniciando fluxo OAuth para user ${userId}`);
+
+    try {
+      const result = await this.mercadoPagoOAuthService.startOAuth(userId);
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      console.error(`❌ [MP_OAUTH] Erro ao iniciar OAuth:`, error);
+      throw error;
+    }
+  }
+
+  @Get('mercadopago/oauth/callback')
+  async handleMercadoPagoOAuthCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    console.log(`🔗 [MP_OAUTH] Callback recebido com state=${state?.substring(0, 8)}...`);
+
+    try {
+      const result = await this.mercadoPagoOAuthService.handleCallback(
+        code,
+        state,
+      );
+
+      // Redirecionar para deep link do app após sucesso
+      const deepLink = `treinopro://mercadopago/callback?success=true&email=${encodeURIComponent(result.mpEmail)}`;
+      return res.redirect(deepLink);
+    } catch (error) {
+      console.error(`❌ [MP_OAUTH] Erro no callback:`, error);
+      const deepLink = `treinopro://mercadopago/callback?success=false&error=${encodeURIComponent(error.message || 'Erro desconhecido')}`;
+      return res.redirect(deepLink);
+    }
+  }
+
+  @Get('mercadopago/oauth/status')
+  @UseGuards(JwtAuthGuard)
+  async getMercadoPagoOAuthStatus(@Request() req) {
+    const userId = req.user.sub;
+
+    try {
+      const status = await this.mercadoPagoOAuthService.getOAuthStatus(userId);
+      return {
+        success: true,
+        data: status,
+      };
+    } catch (error) {
+      console.error(`❌ [MP_OAUTH] Erro ao buscar status:`, error);
+      throw new BadRequestException('Erro ao buscar status da conta Mercado Pago');
+    }
+  }
+
+  @Post('mercadopago/oauth/disconnect')
+  @UseGuards(JwtAuthGuard)
+  async disconnectMercadoPago(@Request() req) {
+    const userId = req.user.sub;
+    console.log(`🔗 [MP_OAUTH] Desconectando MP para user ${userId}`);
+
+    try {
+      await this.mercadoPagoOAuthService.disconnect(userId);
+      return {
+        success: true,
+        message: 'Conta Mercado Pago desconectada com sucesso',
+      };
+    } catch (error) {
+      console.error(`❌ [MP_OAUTH] Erro ao desconectar:`, error);
+      throw error;
+    }
   }
 
   // ===== FINANCIAL PROFILE ROUTES =====

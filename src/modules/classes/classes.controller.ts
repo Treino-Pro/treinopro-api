@@ -35,6 +35,9 @@ import {
   ResolveNoShowDisputeDto,
   ClassTimelineDto,
   ClassDisputeDto,
+  DisputeDefenseDto,
+  PresenceSnapshotDto,
+  GetDisputesQueryDto,
 } from './dto/classes.dto';
 
 @ApiTags('Classes')
@@ -45,7 +48,7 @@ export class ClassesController {
   constructor(
     private readonly classesService: ClassesService,
     private readonly classesCleanupService: ClassesCleanupService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Criar nova aula' })
@@ -120,13 +123,29 @@ export class ClassesController {
 
   @Get('disputes')
   @ApiOperation({ summary: 'Listar disputas do usuário' })
+  @ApiQuery({ name: 'status', required: false, enum: ['open', 'resolved', 'all'], description: 'Filtro de status' })
   @ApiResponse({
     status: 200,
     description: 'Disputas listadas com sucesso',
     type: [ClassDisputeDto],
   })
-  async getClassDisputes(@Request() req: any): Promise<any[]> {
-    return this.classesService.getClassDisputes(req.user.sub);
+  async getClassDisputes(
+    @Query() queryDto: GetDisputesQueryDto,
+    @Request() req: any,
+  ): Promise<any[]> {
+    return this.classesService.getClassDisputes(req.user.sub, queryDto.status);
+  }
+
+  @Get('disputes/:disputeId')
+  @ApiOperation({ summary: 'Obter disputa por ID (= classId)' })
+  @ApiParam({ name: 'disputeId', description: 'ID da disputa (= ID da aula)' })
+  @ApiResponse({ status: 200, description: 'Disputa encontrada', type: ClassDisputeDto })
+  @ApiResponse({ status: 404, description: 'Disputa não encontrada' })
+  async getClassDisputeById(
+    @Param('disputeId') disputeId: string,
+    @Request() req: any,
+  ): Promise<any> {
+    return this.classesService.getClassDisputeById(disputeId, req.user.sub);
   }
 
   @Get(':id')
@@ -281,6 +300,32 @@ export class ClassesController {
       resolveDto,
       req.user.sub,
     );
+  }
+
+  @Post(':id/dispute-defense')
+  @ApiOperation({ summary: 'Enviar defesa (replica) na disputa' })
+  @ApiParam({ name: 'id', description: 'ID da aula em disputa' })
+  @ApiResponse({ status: 200, description: 'Defesa registrada com sucesso', type: ClassResponseDto })
+  @ApiResponse({ status: 400, description: 'Prazo expirado ou aula não está em disputa' })
+  @ApiResponse({ status: 403, description: 'Apenas a parte reportada pode enviar defesa' })
+  async submitDisputeDefense(
+    @Param('id') id: string,
+    @Body() defenseDto: DisputeDefenseDto,
+    @Request() req: any,
+  ): Promise<ClassResponseDto> {
+    return this.classesService.submitDisputeDefense(id, defenseDto, req.user.sub);
+  }
+
+  @Post(':id/presence-snapshot')
+  @ApiOperation({ summary: 'Registrar snapshot de geolocalização de presença (1x por participante)' })
+  @ApiParam({ name: 'id', description: 'ID da aula' })
+  @ApiResponse({ status: 200, description: 'Snapshot registrado (ou existente retornado)' })
+  async createPresenceSnapshot(
+    @Param('id') id: string,
+    @Body() snapshotDto: PresenceSnapshotDto,
+    @Request() req: any,
+  ): Promise<any> {
+    return this.classesService.createPresenceSnapshot(id, snapshotDto, req.user.sub);
   }
 
   @Post(':id/cleanup')

@@ -27,7 +27,7 @@ async function bootstrap() {
       // Permitir origins configurados (web)
       const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
         'http://localhost:3001',
-        'http://localhost:5173'
+        'http://localhost:5173',
       ];
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -53,8 +53,11 @@ async function bootstrap() {
   });
 
   // Configuração de arquivos estáticos (use STORAGE_PATH absoluto em produção)
-  const storagePath = process.env.STORAGE_PATH || join(process.cwd(), 'storage');
-  const staticDir = isAbsolute(storagePath) ? storagePath : join(process.cwd(), storagePath);
+  const storagePath =
+    process.env.STORAGE_PATH || join(process.cwd(), 'storage');
+  const staticDir = isAbsolute(storagePath)
+    ? storagePath
+    : join(process.cwd(), storagePath);
   app.useStaticAssets(staticDir, {
     prefix: '/static/',
   });

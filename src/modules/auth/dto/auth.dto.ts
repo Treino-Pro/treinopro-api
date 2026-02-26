@@ -10,8 +10,12 @@ import {
   ValidateIf,
   IsNotEmpty,
   IsUUID,
+  registerDecorator,
+  ValidationOptions,
+  ValidationArguments,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { isValidCPF } from '../../../common/utils/document.utils';
 
 export enum UserType {
   STUDENT = 'student',
@@ -20,8 +24,94 @@ export enum UserType {
 }
 
 export enum DocumentType {
+  CPF = 'CPF',
   RG = 'RG',
   CNH = 'CNH',
+}
+
+// ===== Validadores de documento =====
+
+function isValidCNH(cnh: string): boolean {
+  const clean = cnh.replace(/\D/g, '');
+  if (clean.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(clean)) return false;
+
+  const digits = clean.split('').map(Number);
+
+  // DV1 (pesos 9 -> 1)
+  let sum1 = 0;
+  for (let i = 0; i < 9; i++) {
+    sum1 += digits[i] * (9 - i);
+  }
+  const rest1 = sum1 % 11;
+  let desc = 0;
+  let dv1: number;
+  if (rest1 > 9) {
+    dv1 = 0;
+    desc = 2;
+  } else {
+    dv1 = rest1;
+  }
+
+  // DV2 (pesos 1 -> 9)
+  let sum2 = 0;
+  for (let i = 0; i < 9; i++) {
+    sum2 += digits[i] * (1 + i);
+  }
+  const rest2 = sum2 % 11;
+  let dv2 = rest2 - desc;
+  if (dv2 < 0 || dv2 > 9) {
+    dv2 = 0;
+  }
+
+  return digits[9] === dv1 && digits[10] === dv2;
+}
+
+/**
+ * Decorator customizado que valida documentNumber baseado no documentType.
+ * CPF: algoritmo módulo 11 com 2 dígitos verificadores.
+ * CNH: algoritmo módulo 11 com ajuste desc.
+ * RG: apenas valida formato básico (7 a 11 dígitos).
+ */
+function IsValidDocument(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isValidDocument',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, args: ValidationArguments) {
+          const obj = args.object as any;
+          const docType = obj.documentType;
+          const clean = (value || '').replace(/\D/g, '');
+
+          switch (docType) {
+            case DocumentType.CPF:
+              return isValidCPF(clean);
+            case DocumentType.CNH:
+              return isValidCNH(clean);
+            case DocumentType.RG:
+              return clean.length >= 7 && clean.length <= 14;
+            default:
+              return clean.length >= 7 && clean.length <= 14;
+          }
+        },
+        defaultMessage(args: ValidationArguments) {
+          const obj = args.object as any;
+          const docType = obj.documentType;
+          switch (docType) {
+            case DocumentType.CPF:
+              return 'CPF inválido. Verifique os dígitos e tente novamente.';
+            case DocumentType.CNH:
+              return 'CNH inválida. Verifique o número de registro e tente novamente.';
+            default:
+              return 'Número de documento inválido.';
+          }
+        },
+      },
+    });
+  };
 }
 
 export class RegisterDto {
@@ -61,6 +151,9 @@ export class RegisterDto {
   @ApiProperty({ example: '12345678901' })
   @IsString()
   @IsNotEmpty()
+  @IsValidDocument({
+    message: 'Número de documento inválido para o tipo selecionado.',
+  })
   documentNumber: string;
 
   @ApiProperty({
@@ -189,4 +282,59 @@ export class ChangePasswordDto {
   @IsString()
   @MinLength(6)
   newPassword: string;
+}
+
+export class CheckEmailDto {
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email para verificar disponibilidade',
+  })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+}
+
+export class SendVerificationCodeDto {
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email para enviar código de verificação',
+  })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+}
+
+export class VerifyCodeDto {
+  @ApiProperty({
+    example: 'usuario@exemplo.com',
+    description: 'Email cadastrado',
+  })
+  @IsEmail({}, { message: 'Formato de email inválido' })
+  @IsNotEmpty({ message: 'Email é obrigatório' })
+  email: string;
+
+  @ApiProperty({
+    example: '123456',
+    description: 'Código de verificação de 6 dígitos',
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Código é obrigatório' })
+  @MinLength(6, { message: 'Código deve ter 6 dígitos' })
+  code: string;
+}
+
+export class CheckDocumentDto {
+  @ApiProperty({
+    example: 'CPF',
+    description: 'Tipo de documento',
+    enum: DocumentType,
+  })
+  @IsEnum(DocumentType, { message: 'Tipo de documento inválido' })
+  @IsNotEmpty({ message: 'Tipo de documento é obrigatório' })
+  documentType: DocumentType;
+
+  @ApiProperty({ example: '12345678900', description: 'Número do documento' })
+  @IsString()
+  @IsNotEmpty({ message: 'Número do documento é obrigatório' })
+  documentNumber: string;
 }

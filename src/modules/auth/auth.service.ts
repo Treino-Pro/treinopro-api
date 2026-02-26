@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { users } from '../../database/schema';
 import { files } from '../../database/schema/files';
 import {
@@ -20,14 +21,17 @@ import {
   ResetPasswordDto,
   ChangePasswordDto,
   CreateAdminDto,
+  DocumentType,
 } from './dto/auth.dto';
 import { CrefService } from '../cref/cref.service';
+import { CrefTechnicalErrorException } from '../cref/exceptions/cref-technical.exception';
 import { EmailVerificationService } from './services/email-verification.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly USER_CACHE_TTL = 300; // 5 minutos em segundos
   private readonly USER_CACHE_PREFIX = 'user:';
   private readonly USER_EMAIL_CACHE_PREFIX = 'user:email:';
@@ -43,16 +47,29 @@ export class AuthService {
     private notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * Normaliza email para garantir consistência (trim + lowercase)
+   */
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   async register(registerDto: RegisterDto) {
     console.log('🚀 [AUTH] Iniciando processo de registro...');
     console.log(
       '📝 [AUTH] Dados recebidos:',
-      JSON.stringify(registerDto, null, 2),
+      JSON.stringify({
+        email: registerDto.email,
+        userType: registerDto.userType,
+        firstName: registerDto.firstName,
+        lastName: registerDto.lastName,
+        documentType: registerDto.documentType,
+        isMinor: registerDto.isMinor,
+      }),
     );
 
     try {
       const {
-        email,
         password,
         firstName,
         lastName,
@@ -72,8 +89,11 @@ export class AuthService {
         privacyPolicyAccepted,
       } = registerDto;
 
+      // Normalizar email
+      const email = this.normalizeEmail(registerDto.email);
+
       console.log('🔍 [AUTH] Verificando se usuário já existe...');
-      console.log('🔍 [AUTH] Email a verificar:', email);
+      console.log('🔍 [AUTH] Email a verificar (normalizado):', email);
       console.log('🔍 [AUTH] Tipo de usuário:', userType);
 
       // Verificar se o usuário já existe
@@ -97,7 +117,9 @@ export class AuthService {
       // Isso previne problemas se usuário deletou conta e está recriando com mesmo email
       try {
         await this.invalidateUserCache(undefined, email);
-        console.log('✅ [AUTH] Cache invalidado para email antes de criar novo usuário');
+        console.log(
+          '✅ [AUTH] Cache invalidado para email antes de criar novo usuário',
+        );
       } catch (error) {
         console.warn('⚠️ [AUTH] Erro ao invalidar cache:', error);
         // Continuar mesmo se invalidação de cache falhar
@@ -176,6 +198,8 @@ export class AuthService {
       // Validar CREF para Personal Trainers
       let crefValidation = null;
       let crefParsed = null;
+      let crefApprovalStatus: 'approved' | 'pending_review' = 'approved';
+      let crefAdminNotes: string | null = null;
 
       if (userType === 'personal') {
         if (!cref) {
@@ -191,16 +215,44 @@ export class AuthService {
 
         console.log('🔍 [AUTH] Validando CREF:', cref);
 
-        // Validar CREF via API do CONFEF
+        // Validar CREF via API do CONFEF com fallback seletivo:
+        // - Erro de negócio (BadRequestException): CREF inválido/não encontrado/não bacharel → bloquear cadastro
+        // - Erro técnico (CrefTechnicalErrorException): instabilidade do CONFEF → fallback manual
         try {
           crefValidation = await this.crefService.validateCref(cref);
           crefParsed = this.crefService.parseCrefNumber(cref);
+          crefApprovalStatus = 'approved';
           console.log('✅ [AUTH] CREF validado com sucesso:', crefValidation);
-        } catch (error) {
-          console.error('❌ [AUTH] Erro na validação do CREF:', error.message);
-          throw new BadRequestException(
-            `Erro na validação do CREF: ${error.message}`,
+          this.logger.log(
+            `[AUTH] cref_validation_auto_success: CREF=${cref} user=${email}`,
           );
+        } catch (error) {
+          if (error instanceof BadRequestException) {
+            // Erro de negócio: formato inválido, não encontrado, não bacharel
+            console.error(
+              '❌ [AUTH] Erro de negócio na validação do CREF:',
+              error.message,
+            );
+            this.logger.warn(
+              `[AUTH] cref_validation_business_error: CREF=${cref} user=${email} reason=${error.message}`,
+            );
+            throw error;
+          }
+          // Erro técnico recuperável: CONFEF instável, timeout, rede, etc.
+          const technicalMsg =
+            error instanceof CrefTechnicalErrorException
+              ? error.message
+              : `Erro técnico inesperado: ${error.message}`;
+          console.warn(
+            '⚠️ [AUTH] Erro técnico no CONFEF, acionando aprovação manual:',
+            technicalMsg,
+          );
+          this.logger.warn(
+            `[AUTH] cref_validation_auto_fallback_manual: CREF=${cref} user=${email} reason=${technicalMsg}`,
+          );
+          crefApprovalStatus = 'pending_review';
+          crefAdminNotes = `Aprovação manual necessária. Validação automática do CONFEF falhou em ${new Date().toISOString()}: ${technicalMsg}`;
+          crefParsed = this.crefService.parseCrefNumber(cref);
         }
       }
 
@@ -221,6 +273,7 @@ export class AuthService {
         userType,
         cref,
         specialties,
+        approvalStatus: crefApprovalStatus,
       });
 
       const [newUser] = await this.db
@@ -262,6 +315,8 @@ export class AuthService {
           termsAccepted,
           privacyPolicyAccepted,
           termsAcceptedDate: new Date(),
+          approvalStatus: crefApprovalStatus,
+          adminNotes: crefAdminNotes,
         })
         .returning();
 
@@ -305,6 +360,7 @@ export class AuthService {
           lastName: newUser.lastName,
           userType: newUser.userType,
           isVerified: newUser.isVerified,
+          approvalStatus: newUser.approvalStatus,
         },
         ...tokens,
       };
@@ -327,8 +383,10 @@ export class AuthService {
    * Busca usuário do cache ou do banco de dados
    */
   private async getUserByEmail(email: string): Promise<any> {
-    const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`;
-    
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    const cacheKey = `${this.USER_EMAIL_CACHE_PREFIX}${normalizedEmail}`;
+
     // Tentar buscar do cache primeiro
     try {
       const cachedUser = await this.cacheManager.get<any>(cacheKey);
@@ -340,10 +398,12 @@ export class AuthService {
           where: eq(users.id, cachedUser.id),
           columns: { id: true },
         });
-        
+
         if (!userStillExists) {
-          console.warn('⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache');
-          await this.invalidateUserCache(cachedUser.id, email);
+          console.warn(
+            '⚠️ [AUTH][Service] Usuário no cache não existe mais no banco, invalidando cache',
+          );
+          await this.invalidateUserCache(cachedUser.id, normalizedEmail);
           // Continuar para buscar do banco (retornará null)
         } else {
           return cachedUser;
@@ -357,7 +417,7 @@ export class AuthService {
     // Buscar do banco de dados
     // ✅ OTIMIZAÇÃO: Buscar apenas campos necessários para login
     const user = await this.db.query.users.findFirst({
-      where: eq(users.email, email),
+      where: eq(users.email, normalizedEmail),
       columns: {
         id: true,
         email: true,
@@ -369,6 +429,7 @@ export class AuthService {
         cref: true,
         isVerified: true,
         profileImageId: true,
+        approvalStatus: true,
       },
     });
 
@@ -394,13 +455,18 @@ export class AuthService {
   /**
    * Invalida cache de um usuário (por ID ou email)
    */
-  private async invalidateUserCache(userId?: string, email?: string): Promise<void> {
+  private async invalidateUserCache(
+    userId?: string,
+    email?: string,
+  ): Promise<void> {
     try {
       if (userId) {
         await this.cacheManager.del(`${this.USER_CACHE_PREFIX}${userId}`);
       }
       if (email) {
-        await this.cacheManager.del(`${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`);
+        await this.cacheManager.del(
+          `${this.USER_EMAIL_CACHE_PREFIX}${email.toLowerCase()}`,
+        );
       }
       console.log('✅ [AUTH][Service] Cache invalidado para usuário');
     } catch (error) {
@@ -416,7 +482,7 @@ export class AuthService {
 
     try {
       const startTime = Date.now();
-      
+
       // ✅ OTIMIZAÇÃO: Buscar usuário com cache
       const user = await this.getUserByEmail(email);
 
@@ -475,16 +541,17 @@ export class AuthService {
           userType: user.userType,
           isVerified: user.isVerified,
           profileImageUrl: profileImageUrl,
+          approvalStatus: user.approvalStatus ?? 'approved',
         },
         ...tokens,
       };
     } catch (error) {
       console.error('❌ [AUTH][Service] Erro no login:', error);
-      
+
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      
+
       throw new BadRequestException(
         'Erro ao processar login. Tente novamente em alguns instantes.',
       );
@@ -543,7 +610,7 @@ export class AuthService {
   }
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
-    const { password, token } = resetPasswordDto;
+    const { token } = resetPasswordDto;
 
     console.log(`🔐 [AUTH] Iniciando reset de senha com token: ${token}`);
 
@@ -668,6 +735,7 @@ export class AuthService {
               document: true,
               cref: true,
               isVerified: true,
+              approvalStatus: true,
             },
           });
 
@@ -677,7 +745,10 @@ export class AuthService {
           }
         }
       } catch (error) {
-        console.warn('⚠️ [AUTH][Service] Erro ao buscar usuário (cache/banco):', error);
+        console.warn(
+          '⚠️ [AUTH][Service] Erro ao buscar usuário (cache/banco):',
+          error,
+        );
         // Se cache/banco falhar, usar dados do token (já validado)
         user = {
           id: payload.sub,
@@ -714,6 +785,7 @@ export class AuthService {
           lastName: user.lastName || payload.lastName || '',
           userType: user.userType || payload.userType,
           isVerified: user.isVerified !== undefined ? user.isVerified : true,
+          approvalStatus: user.approvalStatus ?? 'approved',
         },
         ...tokens,
       };
@@ -763,17 +835,22 @@ export class AuthService {
   async sendVerificationCode(
     email: string,
   ): Promise<{ message: string; expiresAt: Date }> {
-    console.log('📧 [AUTH] Enviando código de verificação para:', email);
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log(
+      '📧 [AUTH] Enviando código de verificação para:',
+      normalizedEmail,
+    );
 
     // Validar formato do email
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       throw new BadRequestException('Formato de email inválido');
     }
 
     // Verificar se o email já está em uso
     const existingUser = await this.db.query.users.findFirst({
-      where: eq(users.email, email),
+      where: eq(users.email, normalizedEmail),
     });
 
     if (existingUser) {
@@ -784,8 +861,8 @@ export class AuthService {
 
     // Enviar código de verificação (usar email como firstName temporariamente)
     return this.emailVerificationService.sendVerificationCode(
-      email,
-      email.split('@')[0],
+      normalizedEmail,
+      normalizedEmail.split('@')[0],
     );
   }
 
@@ -793,12 +870,56 @@ export class AuthService {
     email: string,
     code: string,
   ): Promise<{ message: string; verified: boolean }> {
-    console.log('🔍 [AUTH] Verificando código para:', email, 'Código:', code);
-    return this.emailVerificationService.verifyCode(email, code);
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log(
+      '🔍 [AUTH] Verificando código para:',
+      normalizedEmail,
+      'Código:',
+      code,
+    );
+    return this.emailVerificationService.verifyCode(normalizedEmail, code);
+  }
+
+  async checkEmail(email: string): Promise<{ exists: boolean }> {
+    // Normalizar email
+    const normalizedEmail = this.normalizeEmail(email);
+    console.log('🔍 [AUTH] Verificando existência do email:', normalizedEmail);
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.email, normalizedEmail),
+      columns: { id: true },
+    });
+
+    return { exists: !!user };
+  }
+
+  async checkDocument(
+    documentType: DocumentType,
+    documentNumber: string,
+  ): Promise<{ exists: boolean }> {
+    // Normalizar número do documento (remover espaços e caracteres especiais)
+    const normalizedDocNumber = documentNumber.replace(/\D/g, '');
+    console.log(
+      `🔍 [AUTH] Verificando existência do documento: ${documentType} ${normalizedDocNumber}`,
+    );
+
+    const user = await this.db.query.users.findFirst({
+      where: and(
+        eq(users.documentType, documentType),
+        eq(users.documentNumber, normalizedDocNumber),
+      ),
+      columns: { id: true },
+    });
+
+    console.log(
+      `🔍 [AUTH] Documento ${documentType} ${normalizedDocNumber} ${user ? 'JÁ EXISTE' : 'disponível'}`,
+    );
+    return { exists: !!user };
   }
 
   async isEmailVerified(email: string): Promise<boolean> {
-    return this.emailVerificationService.isEmailVerified(email);
+    const normalizedEmail = this.normalizeEmail(email);
+    return this.emailVerificationService.isEmailVerified(normalizedEmail);
   }
 
   // ===== MÉTODOS PARA ADMIN =====
@@ -807,16 +928,18 @@ export class AuthService {
    * Criar usuário admin (método interno/sistema)
    */
   async createAdmin(createAdminDto: CreateAdminDto) {
+    // Normalizar email
+    const email = this.normalizeEmail(createAdminDto.email);
     console.log('👑 [AUTH] Criando usuário admin...');
-    console.log('👑 [AUTH] Email:', createAdminDto.email);
+    console.log('👑 [AUTH] Email (normalizado):', email);
 
     // Verificar se email já existe
     const existingUser = await this.db.query.users.findFirst({
-      where: eq(users.email, createAdminDto.email),
+      where: eq(users.email, email),
     });
 
     if (existingUser) {
-      console.log('❌ [AUTH] Email já existe:', createAdminDto.email);
+      console.log('❌ [AUTH] Email já existe:', email);
       throw new ConflictException('Email já está em uso');
     }
 
@@ -826,7 +949,7 @@ export class AuthService {
 
     // Preparar dados para inserção (campos mínimos para admin)
     const adminData = {
-      email: createAdminDto.email,
+      email,
       passwordHash,
       firstName: createAdminDto.firstName,
       lastName: createAdminDto.lastName,
@@ -839,6 +962,8 @@ export class AuthService {
       privacyPolicyAccepted: true,
       termsAcceptedDate: new Date(),
       isVerified: true, // Admin é verificado automaticamente
+      // Aprovação explícita: admins não passam por revisão CREF
+      approvalStatus: 'approved' as const,
     };
 
     // Inserir admin

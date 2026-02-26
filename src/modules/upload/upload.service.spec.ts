@@ -95,7 +95,7 @@ describe('UploadService', () => {
 
       const userId = 'user-id';
 
-      mockFileStorageUtil.validateFile.mockImplementation(() => {});
+      mockFileStorageUtil.validateFile.mockResolvedValue(undefined);
       mockImageProcessingUtil.processImage.mockResolvedValue({
         mainFile: {
           storedName: 'uuid-test.jpg',
@@ -129,7 +129,7 @@ describe('UploadService', () => {
 
       const userId = 'user-id';
 
-      mockFileStorageUtil.validateFile.mockImplementation(() => {});
+      mockFileStorageUtil.validateFile.mockResolvedValue(undefined);
       mockFileStorageUtil.saveFile.mockResolvedValue({
         storedName: 'uuid-test.pdf',
         path: '/path/test.pdf',
@@ -160,9 +160,9 @@ describe('UploadService', () => {
 
       const userId = 'user-id';
 
-      mockFileStorageUtil.validateFile.mockImplementation(() => {
-        throw new Error('File too large');
-      });
+      mockFileStorageUtil.validateFile.mockRejectedValue(
+        new Error('File too large'),
+      );
 
       await expect(service.uploadFile(file, uploadDto, userId)).rejects.toThrow(
         BadRequestException,
@@ -184,7 +184,7 @@ describe('UploadService', () => {
 
       const userId = 'user-id';
 
-      mockFileStorageUtil.validateFile.mockImplementation(() => {});
+      mockFileStorageUtil.validateFile.mockResolvedValue(undefined);
       mockImageProcessingUtil.processImage.mockRejectedValue(
         new Error('Processing failed'),
       );

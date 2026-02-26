@@ -1,0 +1,1 @@
+ALTER TABLE "financial_profiles" ADD COLUMN "mp_oauth_state_created_at" timestamp;

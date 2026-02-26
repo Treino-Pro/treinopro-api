@@ -66,8 +66,7 @@ export class CrefController {
       properties: {
         token: {
           type: 'string',
-          example:
-            'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+          example: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
         },
         expiresAt: {
           type: 'string',

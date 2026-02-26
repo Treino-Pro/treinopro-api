@@ -12,6 +12,58 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+// ===== PERSONAL APPROVAL DTOs =====
+
+export class ReviewPersonalApprovalDto {
+  @ApiProperty({
+    description: 'Decisão de aprovação',
+    enum: ['approved', 'rejected'],
+    example: 'approved',
+  })
+  @IsEnum(['approved', 'rejected'])
+  status: 'approved' | 'rejected';
+
+  @ApiPropertyOptional({
+    description: 'Notas administrativas sobre a decisão',
+    example: 'Documentação verificada manualmente. CREF confirmado por ligação.',
+  })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class PendingPersonalItemDto {
+  @ApiProperty({ description: 'ID do personal trainer' })
+  id: string;
+
+  @ApiProperty({ description: 'Email' })
+  email: string;
+
+  @ApiProperty({ description: 'Primeiro nome' })
+  firstName: string;
+
+  @ApiProperty({ description: 'Sobrenome' })
+  lastName: string;
+
+  @ApiPropertyOptional({ description: 'CREF informado no cadastro' })
+  cref?: string;
+
+  @ApiPropertyOptional({ description: 'Imagem do CREF (ID)' })
+  crefImageId?: string;
+
+  @ApiPropertyOptional({ description: 'URL da imagem do CREF' })
+  crefImageUrl?: string;
+
+  @ApiProperty({ description: 'Status de aprovação', enum: ['pending_review', 'approved', 'rejected'] })
+  approvalStatus: string;
+
+  @ApiPropertyOptional({ description: 'Notas administrativas sobre a pendência' })
+  adminNotes?: string;
+
+  @ApiProperty({ description: 'Data de criação da conta' })
+  createdAt: string;
+}
+
 // ===== DASHBOARD DTOs =====
 
 export class DashboardSummaryResponseDto {
@@ -120,6 +172,12 @@ export class UserItemDto {
   @ApiProperty({ description: 'Se o usuário está verificado' })
   isVerified: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Status de aprovação profissional (personals)',
+    enum: ['pending_review', 'approved', 'rejected'],
+  })
+  approvalStatus?: string;
+
   @ApiProperty({ description: 'Data de criação' })
   createdAt: string;
 
@@ -131,7 +189,10 @@ export class UserDetailsDto extends UserItemDto {
   @ApiPropertyOptional({ description: 'Data de nascimento' })
   birthDate?: string;
 
-  @ApiPropertyOptional({ description: 'Tipo de documento', enum: ['RG', 'CNH'] })
+  @ApiPropertyOptional({
+    description: 'Tipo de documento',
+    enum: ['RG', 'CNH'],
+  })
   documentType?: string;
 
   @ApiPropertyOptional({ description: 'Número do documento' })
@@ -178,6 +239,18 @@ export class UserDetailsDto extends UserItemDto {
 
   @ApiPropertyOptional({ description: 'URL da imagem de perfil' })
   profileImageUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'Status de aprovação profissional (personals)',
+    enum: ['pending_review', 'approved', 'rejected'],
+  })
+  approvalStatus?: string;
+
+  @ApiPropertyOptional({ description: 'Notas administrativas' })
+  adminNotes?: string;
+
+  @ApiPropertyOptional({ description: 'Data da revisão de aprovação' })
+  approvalReviewedAt?: string;
 }
 
 export class UserListResponseDto {
@@ -284,7 +357,9 @@ export class FinancialSummaryResponseDto {
     mpPaymentId: string | null;
   }>;
 
-  @ApiPropertyOptional({ description: 'Total de pagamentos no período filtrado' })
+  @ApiPropertyOptional({
+    description: 'Total de pagamentos no período filtrado',
+  })
   total?: number;
 
   @ApiPropertyOptional({ description: 'Página atual' })
@@ -363,7 +438,9 @@ export class UpdateMissionDto {
   @IsBoolean()
   isActive?: boolean;
 
-  @ApiPropertyOptional({ description: 'Data de início da missão (null = fixa)' })
+  @ApiPropertyOptional({
+    description: 'Data de início da missão (null = fixa)',
+  })
   @IsOptional()
   @IsDateString()
   startDate?: string | null;
@@ -375,7 +452,12 @@ export class UpdateMissionDto {
 
   @ApiPropertyOptional({ description: 'Requisitos da missão' })
   @IsOptional()
-  requirements?: { action: string; count: number; timeframe?: string; conditions?: Record<string, any> };
+  requirements?: {
+    action: string;
+    count: number;
+    timeframe?: string;
+    conditions?: Record<string, any>;
+  };
 }
 
 // ===== ANALYTICS DTOs =====

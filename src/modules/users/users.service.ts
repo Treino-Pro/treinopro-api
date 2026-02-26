@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { eq, and, or, like, desc, asc, count, sql } from 'drizzle-orm';
-import { users, files } from '../../database/schema';
+import { eq, and, or, like, desc, count, sql } from 'drizzle-orm';
+import { users, files, userPushTokens } from '../../database/schema';
 import {
   CreateUserDto,
   UpdateUserDto,
@@ -175,7 +175,8 @@ export class UsersService {
             const normalizedBase = new URL(baseUrl);
             const normalizedUrl = `${normalizedBase.origin}${original.pathname}`;
             (user as any).profileImageUrl = normalizedUrl;
-          } catch (_) {
+          } catch (e) {
+            console.error('⚠️ Falha ao normalizar URL da imagem de perfil:', e);
             // Se parsing falhar, usar fallback simples
             (user as any).profileImageUrl = file.url.replace(
               'https://api.treinopro.com',
@@ -189,20 +190,6 @@ export class UsersService {
     }
 
     const response = this.mapUserToResponse(user);
-    try {
-      console.log('👤 [USERS] getUserById - Response DTO:', {
-        id: response.id,
-        email: response.email,
-        firstName: response.firstName,
-        lastName: response.lastName,
-        documentType: response.documentType,
-        documentNumber: response.documentNumber,
-        profileImageId: response.profileImageId,
-        profileImageUrl: (response as any).profileImageUrl,
-        userType: response.userType,
-        status: response.status,
-      });
-    } catch (_) {}
 
     return response;
   }
@@ -214,15 +201,13 @@ export class UsersService {
     id: string,
     updateUserDto: UpdateUserDto,
   ): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Atualizando usuário:', id);
-
     // Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, id),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', id);
+      console.error('❌ [USERS] Usuário não encontrado:', id);
       throw new NotFoundException('Usuário não encontrado');
     }
 
@@ -246,7 +231,6 @@ export class UsersService {
       .where(eq(users.id, id))
       .returning();
 
-    console.log('✅ [USERS] Usuário atualizado com sucesso:', id);
     return this.mapUserToResponse(updatedUser);
   }
 
@@ -257,20 +241,13 @@ export class UsersService {
     id: string,
     updateStatusDto: UpdateUserStatusDto,
   ): Promise<UserResponseDto> {
-    console.log(
-      '👤 [USERS] Atualizando status do usuário:',
-      id,
-      'para:',
-      updateStatusDto.status,
-    );
-
     // Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, id),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', id);
+      console.error('❌ [USERS] Usuário não encontrado:', id);
       throw new NotFoundException('Usuário não encontrado');
     }
 
@@ -283,8 +260,6 @@ export class UsersService {
       })
       .where(eq(users.id, id))
       .returning();
-
-    console.log('✅ [USERS] Status atualizado com sucesso:', id);
     return this.mapUserToResponse(updatedUser);
   }
 
@@ -292,15 +267,13 @@ export class UsersService {
    * Deletar usuário (soft delete - apenas desativar)
    */
   async deleteUser(id: string): Promise<void> {
-    console.log('👤 [USERS] Desativando usuário:', id);
-
     // Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, id),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', id);
+      console.error('❌ [USERS] Usuário não encontrado:', id);
       throw new NotFoundException('Usuário não encontrado');
     }
 
@@ -312,8 +285,6 @@ export class UsersService {
         updatedAt: new Date(),
       })
       .where(eq(users.id, id));
-
-    console.log('✅ [USERS] Usuário desativado com sucesso:', id);
   }
 
   /**
@@ -321,15 +292,13 @@ export class UsersService {
    * Apenas permitido se não houver aulas agendadas
    */
   async deleteAccount(userId: string): Promise<void> {
-    console.log('🗑️ [USERS] Iniciando exclusão permanente da conta:', userId);
-
     // 1. Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      console.error('❌ [USERS] Usuário não encontrado:', userId);
       throw new NotFoundException('Usuário não encontrado');
     }
 
@@ -343,18 +312,20 @@ export class UsersService {
           eq(classes.status, 'scheduled'),
           eq(classes.status, 'pending_confirmation'),
           eq(classes.status, 'active'),
+          eq(classes.status, 'no_show_dispute'),
+          eq(classes.status, 'custody'),
         ),
       ),
     });
 
     if (scheduledClasses && scheduledClasses.length > 0) {
-      console.log(
-        '❌ [USERS] Usuário tem aulas agendadas:',
+      console.error(
+        '❌ [USERS] Usuário tem aulas pendentes ou em disputa:',
         scheduledClasses.length,
       );
       throw new BadRequestException(
-        'Não é possível excluir a conta. Você possui aulas agendadas. ' +
-          'Cancele ou complete todas as aulas antes de excluir sua conta.',
+        'Não é possível excluir a conta. Você possui aulas pendentes ou em disputa de no-show. ' +
+          'Resolva todas as pendências antes de excluir sua conta.',
       );
     }
 
@@ -367,7 +338,6 @@ export class UsersService {
           `${this.USER_EMAIL_CACHE_PREFIX}${existingUser.email.toLowerCase()}`,
         );
       }
-      console.log('✅ [USERS] Cache invalidado para usuário deletado');
     } catch (error) {
       console.warn('⚠️ [USERS] Erro ao invalidar cache:', error);
       // Continuar mesmo se invalidação de cache falhar
@@ -377,9 +347,6 @@ export class UsersService {
     // O histórico de aulas, propostas, avaliações, etc. será mantido
     // pois as foreign keys permitem NULL ou não têm CASCADE DELETE
     await this.db.delete(users).where(eq(users.id, userId));
-
-    console.log('✅ [USERS] Conta excluída permanentemente:', userId);
-    console.log('ℹ️ [USERS] Histórico de aulas e propostas foi mantido');
   }
 
   // ===== GERENCIAMENTO DE PERFIL =====
@@ -396,14 +363,6 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Debug de documentos
-    try {
-      console.log('👤 [USERS] getProfile - userId:', userId);
-      console.log('👤 [USERS] documentType:', user.documentType);
-      console.log('👤 [USERS] documentNumber:', user.documentNumber);
-      console.log('👤 [USERS] completo:', user);
-    } catch (_) {}
-
     // Enriquecer com URL da imagem de perfil, se existir
     if (user.profileImageId) {
       try {
@@ -418,7 +377,8 @@ export class UsersService {
             const normalizedBase = new URL(baseUrl);
             const normalizedUrl = `${normalizedBase.origin}${original.pathname}`;
             (user as any).profileImageUrl = normalizedUrl;
-          } catch (_) {
+          } catch (e) {
+            console.error('⚠️ Falha ao normalizar URL da imagem de perfil:', e);
             // Se parsing falhar, usar fallback simples
             (user as any).profileImageUrl = file.url.replace(
               'https://api.treinopro.com',
@@ -441,15 +401,13 @@ export class UsersService {
     userId: string,
     updateProfileDto: UpdateProfileDto,
   ): Promise<UserResponseDto> {
-    console.log('👤 [USERS] Atualizando perfil do usuário:', userId);
-
     // Verificar se usuário existe
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      console.error('❌ [USERS] Usuário não encontrado:', userId);
       throw new NotFoundException('Usuário não encontrado');
     }
 
@@ -473,7 +431,6 @@ export class UsersService {
       .where(eq(users.id, userId))
       .returning();
 
-    console.log('✅ [USERS] Perfil atualizado com sucesso:', userId);
     return this.mapUserToResponse(updatedUser);
   }
 
@@ -484,21 +441,18 @@ export class UsersService {
     userId: string,
     updateServiceLocationDto: UpdateServiceLocationDto,
   ): Promise<UserResponseDto> {
-    console.log('📍 [USERS] Atualizando localização de atendimento:', userId);
-    console.log('📍 [USERS] Dados recebidos:', updateServiceLocationDto);
-
     // Verificar se usuário existe e é personal
     const existingUser = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
 
     if (!existingUser) {
-      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      console.error('❌ [USERS] Usuário não encontrado:', userId);
       throw new NotFoundException('Usuário não encontrado');
     }
 
     if (existingUser.userType !== 'personal') {
-      console.log('❌ [USERS] Usuário não é personal trainer:', userId);
+      console.error('❌ [USERS] Usuário não é personal trainer:', userId);
       throw new ForbiddenException(
         'Apenas personal trainers podem atualizar localização de atendimento',
       );
@@ -510,13 +464,16 @@ export class UsersService {
     };
 
     if (updateServiceLocationDto.serviceLocationLat !== undefined) {
-      updateData.serviceLocationLat = updateServiceLocationDto.serviceLocationLat.toString();
+      updateData.serviceLocationLat =
+        updateServiceLocationDto.serviceLocationLat.toString();
     }
     if (updateServiceLocationDto.serviceLocationLng !== undefined) {
-      updateData.serviceLocationLng = updateServiceLocationDto.serviceLocationLng.toString();
+      updateData.serviceLocationLng =
+        updateServiceLocationDto.serviceLocationLng.toString();
     }
     if (updateServiceLocationDto.serviceRadiusKm !== undefined) {
-      updateData.serviceRadiusKm = updateServiceLocationDto.serviceRadiusKm.toString();
+      updateData.serviceRadiusKm =
+        updateServiceLocationDto.serviceRadiusKm.toString();
     }
 
     // Atualizar localização
@@ -525,14 +482,6 @@ export class UsersService {
       .set(updateData)
       .where(eq(users.id, userId))
       .returning();
-
-    console.log('✅ [USERS] Localização de atendimento atualizada:', {
-      userId,
-      lat: updateData.serviceLocationLat,
-      lng: updateData.serviceLocationLng,
-      radius: updateData.serviceRadiusKm,
-    });
-
     return this.mapUserToResponse(updatedUser);
   }
 
@@ -544,8 +493,6 @@ export class UsersService {
   async getPersonalTrainers(
     searchDto: UserSearchDto,
   ): Promise<UserListResponseDto> {
-    console.log('👤 [USERS] Buscando personal trainers...');
-
     return this.getUsers({
       ...searchDto,
       userType: UserType.PERSONAL,
@@ -556,8 +503,6 @@ export class UsersService {
    * Buscar alunos
    */
   async getStudents(searchDto: UserSearchDto): Promise<UserListResponseDto> {
-    console.log('👤 [USERS] Buscando alunos...');
-
     return this.getUsers({
       ...searchDto,
       userType: UserType.STUDENT,
@@ -571,8 +516,6 @@ export class UsersService {
     specialty: string,
     searchDto: UserSearchDto,
   ): Promise<UserListResponseDto> {
-    console.log('👤 [USERS] Buscando usuários por especialidade:', specialty);
-
     return this.getUsers({
       ...searchDto,
       specialty,
@@ -585,8 +528,6 @@ export class UsersService {
    * Obter estatísticas gerais de usuários
    */
   async getUserStatistics(): Promise<any> {
-    console.log('👤 [USERS] Calculando estatísticas de usuários...');
-
     const [
       totalUsers,
       activeUsers,
@@ -639,7 +580,6 @@ export class UsersService {
       recent: recentUsers[0].count,
     };
 
-    console.log('✅ [USERS] Estatísticas calculadas:', stats);
     return stats;
   }
 
@@ -706,25 +646,26 @@ export class UsersService {
   }
 
   /**
-   * Salvar token FCM do usuário
+   * Salvar token FCM do usuário (multi-device)
+   * Registra token na tabela user_push_tokens e mantém retrocompatibilidade com users.fcmToken
    */
   async saveFcmToken(
     userId: string,
     fcmToken: string,
+    platform?: string,
+    deviceInfo?: string,
   ): Promise<{ success: boolean; message: string }> {
-    console.log('🔥 [USERS] Salvando token FCM para usuário:', userId);
-
     // Verificar se usuário existe
     const user = await this.db.query.users.findFirst({
       where: eq(users.id, userId),
     });
 
     if (!user) {
-      console.log('❌ [USERS] Usuário não encontrado:', userId);
+      console.error('❌ [USERS] Usuário não encontrado:', userId);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Atualizar token FCM
+    // ✅ Retrocompatibilidade: ainda salvar na coluna legacy
     await this.db
       .update(users)
       .set({
@@ -733,7 +674,34 @@ export class UsersService {
       })
       .where(eq(users.id, userId));
 
-    console.log('✅ [USERS] Token FCM salvo com sucesso para usuário:', userId);
+    // ✅ NOVO: Upsert na tabela user_push_tokens
+    // Se o token já existe, atualizar userId e lastUsedAt (token pode migrar de usuário em logout/login)
+    try {
+      const detectedPlatform = platform || 'unknown';
+
+      await this.db
+        .insert(userPushTokens)
+        .values({
+          userId,
+          token: fcmToken,
+          platform: detectedPlatform,
+          deviceInfo: deviceInfo || null,
+          lastUsedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: userPushTokens.token,
+          set: {
+            userId,
+            platform: detectedPlatform,
+            deviceInfo: deviceInfo || null,
+            lastUsedAt: new Date(),
+          },
+        });
+    } catch (error) {
+      // Não bloquear se a tabela nova ainda não existir (migration pendente)
+      console.warn('⚠️ [USERS] Erro ao salvar token na tabela user_push_tokens:', error.message);
+    }
+
     return {
       success: true,
       message: 'Token FCM salvo com sucesso',

@@ -2,7 +2,8 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
-import { users } from '../../database/schema';
+import { FirebaseNotificationService } from './services/firebase-notification.service';
+import { users, userPushTokens } from '../../database/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 
 export interface NotificationData {
@@ -22,6 +23,7 @@ export class NotificationsService {
     private readonly emailService: EmailService,
     private readonly inAppService: InAppNotificationService,
     private readonly pushService: PushNotificationService,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
   ) {}
 
   // ===== MÉTODOS PRINCIPAIS =====
@@ -200,6 +202,127 @@ export class NotificationsService {
     }
   }
 
+  async sendDirectPushNotification(
+    userId: string,
+    title: string,
+    body: string,
+    data: Record<string, any> = {},
+  ): Promise<{ delivered: boolean }> {
+    try {
+      const user = await this.getUserById(userId);
+      if (!user) {
+        throw new Error(`Usuário não encontrado: ${userId}`);
+      }
+
+      const response = await this.firebaseNotificationService.sendToUser(userId, {
+        title,
+        body,
+        data: this.normalizePushData(data),
+      });
+
+      const delivered = Boolean(response);
+      await this.saveNotificationRecord(
+        userId,
+        'push',
+        'manual-test',
+        { title, body, ...data },
+        delivered ? 'sent' : 'skipped',
+        delivered ? undefined : 'No push token or Firebase unavailable',
+      );
+
+      if (!delivered) {
+        this.logger.warn(
+          `⚠️ Push de teste não entregue para usuário ${userId} (sem token ou Firebase indisponível)`,
+        );
+      }
+
+      return { delivered };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Erro inesperado';
+      this.logger.error(
+        `❌ Erro ao enviar push de teste para usuário ${userId}:`,
+        error,
+      );
+      await this.saveNotificationRecord(
+        userId,
+        'push',
+        'manual-test',
+        { title, body, ...data },
+        'failed',
+        errorMessage,
+      );
+      throw error;
+    }
+  }
+
+  async sendDirectPushNotificationToAllUsers(
+    title: string,
+    body: string,
+    data: Record<string, any> = {},
+  ): Promise<{
+    totalUsers: number;
+    deliveredUsers: number;
+    skippedUsers: number;
+    failedUsers: number;
+  }> {
+    const usersList = await this.db.select({ id: users.id }).from(users);
+
+    if (!usersList.length) {
+      return {
+        totalUsers: 0,
+        deliveredUsers: 0,
+        skippedUsers: 0,
+        failedUsers: 0,
+      };
+    }
+
+    const normalizedData = this.normalizePushData(data);
+    const userIds = usersList.map((user) => user.id as string).filter(Boolean);
+
+    let deliveredUsers = 0;
+    let skippedUsers = 0;
+    let failedUsers = 0;
+
+    const batchSize = 50;
+    for (let i = 0; i < userIds.length; i += batchSize) {
+      const batch = userIds.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map((userId) =>
+          this.firebaseNotificationService.sendToUser(userId, {
+            title,
+            body,
+            data: normalizedData,
+          }),
+        ),
+      );
+
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          failedUsers += 1;
+          continue;
+        }
+
+        if (result.value) {
+          deliveredUsers += 1;
+        } else {
+          skippedUsers += 1;
+        }
+      }
+    }
+
+    this.logger.log(
+      `📣 Broadcast push concluído. Total: ${userIds.length}, Entregues: ${deliveredUsers}, Sem token/Firebase: ${skippedUsers}, Falhas: ${failedUsers}`,
+    );
+
+    return {
+      totalUsers: userIds.length,
+      deliveredUsers,
+      skippedUsers,
+      failedUsers,
+    };
+  }
+
   // ===== MÉTODOS DE CONVENIÊNCIA =====
 
   async sendMultiChannelNotification(
@@ -311,7 +434,10 @@ export class NotificationsService {
         break;
 
       case 'mission-completed':
-        await this.inAppService.createMissionCompletedNotification(userId, data);
+        await this.inAppService.createMissionCompletedNotification(
+          userId,
+          data,
+        );
         break;
 
       default:
@@ -496,16 +622,36 @@ export class NotificationsService {
 
   private async getUserPushTokens(userId: string): Promise<string[]> {
     try {
+      // 1. Buscar tokens da tabela multi-device (user_push_tokens)
+      const multiTokens = await this.db
+        .select({ token: userPushTokens.token })
+        .from(userPushTokens)
+        .where(eq(userPushTokens.userId, userId));
+
+      if (multiTokens.length > 0) {
+        const tokens = multiTokens
+          .map((t) => t.token)
+          .filter((token): token is string => Boolean(token));
+
+        if (tokens.length > 0) {
+          this.logger.debug(
+            `📱 Encontrados ${tokens.length} tokens multi-device para usuário ${userId}`,
+          );
+          return Array.from(new Set<string>(tokens));
+        }
+      }
+
+      // 2. Fallback: token legado na tabela users
       const [user] = await this.db
-        .select({
-          fcmToken: users.fcmToken,
-        })
+        .select({ fcmToken: users.fcmToken })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
 
-      // Retornar array com token se existir, ou array vazio
       if (user?.fcmToken) {
+        this.logger.debug(
+          `📱 Usando token legado (users.fcmToken) para usuário ${userId}`,
+        );
         return [user.fcmToken];
       }
 
@@ -532,27 +678,53 @@ export class NotificationsService {
         return [];
       }
 
-      const usersWithTokens = await this.db
-        .select({
-          fcmToken: users.fcmToken,
-        })
-        .from(users)
-        .where(
-          and(
-            inArray(users.id, userIds),
-            sql`${users.fcmToken} IS NOT NULL`,
-          ),
-        );
+      // 1. Buscar da tabela multi-device (com userId para saber quem já tem)
+      const multiTokenRows = await this.db
+        .select({ token: userPushTokens.token, userId: userPushTokens.userId })
+        .from(userPushTokens)
+        .where(inArray(userPushTokens.userId, userIds));
 
-      const tokens = usersWithTokens
-        .map((user) => user.fcmToken)
+      const tokensFromMulti: string[] = multiTokenRows
+        .map((t) => t.token)
         .filter((token): token is string => Boolean(token));
 
-      this.logger.log(
-        `📱 Encontrados ${tokens.length} tokens FCM de ${userIds.length} usuários`,
+      // IDs de usuários que já têm tokens na tabela multi-device
+      const usersWithMultiTokenIds = new Set<string>(
+        multiTokenRows.map((t) => t.userId as string),
       );
 
-      return tokens;
+      // 2. Buscar tokens legados APENAS de usuários SEM tokens multi-device
+      const usersNeedingLegacy = userIds.filter(
+        (id) => !usersWithMultiTokenIds.has(id),
+      );
+
+      let tokensFromLegacy: string[] = [];
+      if (usersNeedingLegacy.length > 0) {
+        const legacyRows = await this.db
+          .select({ fcmToken: users.fcmToken })
+          .from(users)
+          .where(
+            and(
+              inArray(users.id, usersNeedingLegacy),
+              sql`${users.fcmToken} IS NOT NULL`,
+            ),
+          );
+
+        tokensFromLegacy = legacyRows
+          .map((user) => user.fcmToken)
+          .filter((token): token is string => Boolean(token));
+      }
+
+      // Combinar e deduplicar
+      const allTokens = Array.from(
+        new Set<string>([...tokensFromMulti, ...tokensFromLegacy]),
+      );
+
+      this.logger.log(
+        `📱 Encontrados ${allTokens.length} tokens FCM de ${userIds.length} usuários (${tokensFromMulti.length} multi-device, ${tokensFromLegacy.length} legado)`,
+      );
+
+      return allTokens;
     } catch (error) {
       this.logger.error(
         `❌ Erro ao buscar tokens FCM de múltiplos usuários:`,
@@ -623,6 +795,18 @@ export class NotificationsService {
     } catch (error) {
       this.logger.error('❌ Erro ao salvar registro de notificação:', error);
     }
+  }
+
+  private normalizePushData(data: Record<string, any>): Record<string, string> {
+    const normalized: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && value !== null) {
+        normalized[key] = String(value);
+      }
+    }
+
+    return normalized;
   }
 
   // ===== PREFERÊNCIAS DE NOTIFICAÇÃO =====

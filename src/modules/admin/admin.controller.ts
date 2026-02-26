@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Put,
+  Patch,
   Param,
   Body,
   Query,
@@ -16,11 +17,13 @@ import {
 import { createReadStream } from 'fs';
 import {
   ApiBearerAuth,
+  ApiExtraModels,
   ApiOperation,
   ApiTags,
   ApiResponse,
   ApiParam,
   ApiQuery,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -39,6 +42,8 @@ import {
   UpdateMissionDto,
   AnalyticsResponseDto,
   ResolveClassDisputeDto,
+  ReviewPersonalApprovalDto,
+  PendingPersonalItemDto,
 } from './dto/admin.dto';
 import {
   ApproveWithdrawalDto,
@@ -50,6 +55,7 @@ import { CreateMissionDto } from '../gamification/dto/gamification.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
+@ApiExtraModels(PendingPersonalItemDto)
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 @Controller('admin')
@@ -136,6 +142,12 @@ export class AdminController {
     type: Boolean,
     description: 'Filtro por verificação (true/false)',
   })
+  @ApiQuery({
+    name: 'approvalStatus',
+    required: false,
+    enum: ['pending_review', 'approved', 'rejected'],
+    description: 'Filtro por status de aprovação profissional (personals)',
+  })
   @ApiOperation({
     summary: 'Listar usuários da plataforma',
     description: 'Retorna lista paginada de usuários com filtros e busca',
@@ -160,6 +172,7 @@ export class AdminController {
     @Query('userType') userType?: string,
     @Query('status') status?: string,
     @Query('isVerified') isVerified?: string,
+    @Query('approvalStatus') approvalStatus?: string,
   ): Promise<UserListResponseDto> {
     const filters = {
       page: page ? parseInt(page, 10) : undefined,
@@ -167,7 +180,13 @@ export class AdminController {
       search,
       userType,
       status,
-      isVerified: isVerified === 'true' ? true : isVerified === 'false' ? false : undefined,
+      isVerified:
+        isVerified === 'true'
+          ? true
+          : isVerified === 'false'
+            ? false
+            : undefined,
+      approvalStatus,
     };
     return this.adminService.listUsers(filters);
   }
@@ -242,6 +261,62 @@ export class AdminController {
     return this.adminService.updateUser(id, body);
   }
 
+  // ===== APROVAÇÃO PROFISSIONAL DE PERSONALS =====
+
+  @Get('personals/pending')
+  @ApiOperation({
+    summary: 'Listar personals com aprovação pendente',
+    description:
+      'Retorna personals com approval_status = pending_review aguardando análise manual',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista paginada de personals pendentes retornada com sucesso',
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { $ref: getSchemaPath(PendingPersonalItemDto) } },
+        total: { type: 'number', example: 5 },
+        page: { type: 'number', example: 1 },
+        limit: { type: 'number', example: 20 },
+        totalPages: { type: 'number', example: 1 },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
+  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  async listPendingPersonals(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ items: PendingPersonalItemDto[]; total: number; page: number; limit: number; totalPages: number }> {
+    const filters: { page?: number; limit?: number } = {};
+    if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
+    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    return this.adminService.listPendingPersonals(filters);
+  }
+
+  @Patch('personals/:id/approval')
+  @ApiOperation({
+    summary: 'Aprovar ou rejeitar personal trainer',
+    description:
+      'Registra decisão de aprovação manual com notas e auditoria de quem decidiu',
+  })
+  @ApiParam({ name: 'id', description: 'ID do personal trainer' })
+  @ApiResponse({ status: 200, description: 'Decisão registrada com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  @ApiResponse({ status: 404, description: 'Personal não encontrado' })
+  @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
+  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  async reviewPersonalApproval(
+    @Param('id') id: string,
+    @Body() body: ReviewPersonalApprovalDto,
+    @Request() req: { user: { sub: string } },
+  ) {
+    return this.adminService.reviewPersonalApproval(id, body, req.user.sub);
+  }
+
   // ===== FINANCIAL =====
   @Get('financial')
   @ApiOperation({
@@ -262,9 +337,21 @@ export class AdminController {
     status: 403,
     description: 'Acesso negado - apenas administradores',
   })
-  @ApiQuery({ name: 'startDate', required: false, description: 'Data inicial (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'endDate', required: false, description: 'Data final (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'page', required: false, description: 'Página da listagem' })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    description: 'Data inicial (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    description: 'Data final (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Página da listagem',
+  })
   @ApiQuery({ name: 'limit', required: false, description: 'Itens por página' })
   async getFinancialSummary(
     @Query('startDate') startDate?: string,
@@ -272,11 +359,17 @@ export class AdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ): Promise<FinancialSummaryResponseDto> {
-    const filters: { startDate?: string; endDate?: string; page?: number; limit?: number } = {};
+    const filters: {
+      startDate?: string;
+      endDate?: string;
+      page?: number;
+      limit?: number;
+    } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
-    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    if (limit)
+      filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.adminService.getFinancialSummary(filters);
   }
 
@@ -284,20 +377,25 @@ export class AdminController {
   @Get('disputes/classes')
   @ApiOperation({
     summary: 'Listar disputas de aula (no-show)',
-    description: 'Retorna lista paginada de aulas em disputa (status no_show_dispute). Resolução é feita pelo admin.',
+    description:
+      'Retorna lista paginada de aulas em disputa (status no_show_dispute). Resolução é feita pelo admin.',
   })
   @ApiQuery({ name: 'page', required: false, description: 'Página' })
   @ApiQuery({ name: 'limit', required: false, description: 'Itens por página' })
   @ApiResponse({ status: 200, description: 'Lista de disputas de aula' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async listClassDisputes(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ): Promise<{ items: any[]; total: number; totalPages: number }> {
     const filters: { page?: number; limit?: number } = {};
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
-    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    if (limit)
+      filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.adminService.listClassDisputes(filters);
   }
 
@@ -311,7 +409,10 @@ export class AdminController {
   @ApiResponse({ status: 400, description: 'Aula não está em disputa' })
   @ApiResponse({ status: 404, description: 'Aula não encontrada' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async resolveClassDispute(
     @Param('id') id: string,
     @Body() body: ResolveClassDisputeDto,
@@ -322,14 +423,22 @@ export class AdminController {
   @Get('disputes')
   @ApiOperation({
     summary: 'Listar disputas de pagamento',
-    description: 'Retorna lista paginada de disputas com filtro opcional por status',
+    description:
+      'Retorna lista paginada de disputas com filtro opcional por status',
   })
-  @ApiQuery({ name: 'status', required: false, description: 'Filtro por status (pending, under_review, etc.)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Filtro por status (pending, under_review, etc.)',
+  })
   @ApiQuery({ name: 'page', required: false, description: 'Página' })
   @ApiQuery({ name: 'limit', required: false, description: 'Itens por página' })
   @ApiResponse({ status: 200, description: 'Lista de disputas' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async listDisputes(
     @Query('status') status?: string,
     @Query('page') page?: string,
@@ -338,7 +447,8 @@ export class AdminController {
     const filters: { status?: string; page?: number; limit?: number } = {};
     if (status) filters.status = status;
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
-    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    if (limit)
+      filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.paymentsService.listDisputes(filters);
   }
 
@@ -351,7 +461,10 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Disputa encontrada' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async getDisputeById(@Param('id') id: string) {
     return this.paymentsService.getDisputeById(id);
   }
@@ -359,14 +472,18 @@ export class AdminController {
   @Post('disputes/:id/resolve')
   @ApiOperation({
     summary: 'Resolver disputa de pagamento',
-    description: 'Resolve uma disputa em análise (under_review). Resolução a favor do aluno ou do personal.',
+    description:
+      'Resolve uma disputa em análise (under_review). Resolução a favor do aluno ou do personal.',
   })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
   @ApiResponse({ status: 200, description: 'Disputa resolvida' })
   @ApiResponse({ status: 400, description: 'Disputa não está em análise' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async resolveDispute(
     @Param('id') id: string,
     @Body() body: ResolveDisputeDto,
@@ -407,7 +524,10 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Missão encontrada' })
   @ApiResponse({ status: 404, description: 'Missão não encontrada' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async getMissionById(@Param('id') id: string) {
     return this.gamificationService.getMissionById(id);
   }
@@ -420,7 +540,10 @@ export class AdminController {
   @ApiResponse({ status: 201, description: 'Missão criada com sucesso' })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async createMission(
     @Request() req: { user: { sub: string } },
     @Body() body: CreateMissionDto,
@@ -438,7 +561,10 @@ export class AdminController {
   @ApiResponse({ status: 204, description: 'Missão excluída com sucesso' })
   @ApiResponse({ status: 404, description: 'Missão não encontrada' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async deleteMission(@Param('id') id: string): Promise<void> {
     return this.gamificationService.deleteMission(id);
   }
@@ -582,7 +708,11 @@ export class AdminController {
     description:
       'Retorna saques por status (pending, approved, completed, rejected). Suporta múltiplos status separados por vírgula.',
   })
-  @ApiQuery({ name: 'status', required: false, description: 'Filtro por status (ex: pending ou approved,rejected)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Filtro por status (ex: pending ou approved,rejected)',
+  })
   @ApiQuery({ name: 'page', required: false, description: 'Página' })
   @ApiQuery({ name: 'limit', required: false, description: 'Itens por página' })
   @ApiResponse({
@@ -611,7 +741,8 @@ export class AdminController {
     const filters: { status?: string; page?: number; limit?: number } = {};
     if (status) filters.status = status;
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
-    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    if (limit)
+      filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.paymentsService.getWithdrawals(filters);
   }
 
@@ -794,5 +925,11 @@ export class AdminController {
       monthlyWithdrawals: 0,
       monthlyAmount: 0,
     };
+  }
+
+  @Get('monitoring/classes')
+  @ApiOperation({ summary: 'Monitoramento de aulas (métricas operacionais)' })
+  async getClassesMonitoring() {
+    return this.adminService.getClassesMonitoring();
   }
 }

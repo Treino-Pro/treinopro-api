@@ -15,4 +15,3 @@ export const usedNonces = pgTable(
     proposalIdx: index('idx_used_nonces_proposal').on(table.proposalId),
   }),
 );
-

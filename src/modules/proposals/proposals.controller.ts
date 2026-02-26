@@ -7,12 +7,12 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   Request,
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -25,6 +25,7 @@ import {
 import { ProposalsService } from './proposals.service';
 import { ProposalCleanupService } from './proposal-cleanup.service';
 import { ProposalBackgroundService } from './proposal-background.service';
+import { PersonalApprovalGuard } from '../../common/guards/personal-approval.guard';
 import {
   CreateProposalDto,
   CreateRecontractDto,
@@ -34,7 +35,6 @@ import {
   ProposalListResponseDto,
   PaymentStatusWebhookDto,
 } from './dto/proposals.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Proposals')
 @Controller('proposals')
@@ -432,6 +432,7 @@ export class ProposalsController {
   }
 
   @Post(':id/accept')
+  @UseGuards(PersonalApprovalGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Aceitar proposta',
@@ -504,7 +505,6 @@ export class ProposalsController {
     await this.proposalsService.updatePaymentStatus(
       webhookData.proposalId,
       webhookData.paymentStatus,
-      webhookData.mpPaymentId,
     );
 
     return { message: 'Status do pagamento atualizado com sucesso' };

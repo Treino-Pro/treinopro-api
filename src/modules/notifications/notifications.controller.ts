@@ -21,10 +21,15 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import {
   NotificationsService,
   NotificationData,
 } from './notifications.service';
+import {
+  SendTestPushToAllUsersDto,
+  SendTestPushToUserDto,
+} from './dto/notifications.dto';
 
 @ApiTags('notifications')
 @ApiBearerAuth()
@@ -400,6 +405,84 @@ export class NotificationsController {
   }
 
   // ===== TESTE DE NOTIFICAÇÕES =====
+
+  @Post('test/push/all')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Testar push para todos os usuários',
+    description:
+      'Envia push notification de teste para todos os usuários cadastrados',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Broadcast push processado',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Payload inválido',
+  })
+  async testPushNotificationToAllUsers(
+    @Body(ValidationPipe) body: SendTestPushToAllUsersDto,
+  ): Promise<{
+    message: string;
+    totalUsers: number;
+    deliveredUsers: number;
+    skippedUsers: number;
+    failedUsers: number;
+  }> {
+    const result =
+      await this.notificationsService.sendDirectPushNotificationToAllUsers(
+        body.title,
+        body.body,
+        body.data ?? {},
+      );
+
+    return {
+      message: 'Broadcast push processado',
+      ...result,
+    };
+  }
+
+  @Post('test/push/user')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Testar push para um usuário específico',
+    description:
+      'Envia push notification de teste para um usuário específico informando userId, title e body',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Push de teste processado',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Payload inválido',
+  })
+  async testPushNotificationToUser(
+    @Body(ValidationPipe) body: SendTestPushToUserDto,
+  ): Promise<{ message: string; delivered: boolean }> {
+    const result = await this.notificationsService.sendDirectPushNotification(
+      body.userId,
+      body.title,
+      body.body,
+      body.data ?? {},
+    );
+
+    if (!result.delivered) {
+      return {
+        message:
+          'Push processado, mas não entregue (usuário sem token FCM ou Firebase indisponível)',
+        delivered: false,
+      };
+    }
+
+    return {
+      message: 'Push notification de teste enviada com sucesso',
+      delivered: true,
+    };
+  }
 
   @Post('test/email')
   @HttpCode(HttpStatus.OK)

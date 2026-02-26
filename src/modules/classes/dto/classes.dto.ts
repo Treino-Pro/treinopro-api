@@ -9,6 +9,9 @@ import {
   Max,
   IsArray,
   IsBoolean,
+  IsNumber,
+  Length,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -29,6 +32,8 @@ export enum ClassDisputeStatus {
   STUDENT_DENIED_ABSENCE = 'student_denied_absence',
   RESOLVED_FOR_STUDENT = 'resolved_for_student',
   RESOLVED_FOR_PERSONAL = 'resolved_for_personal',
+  DEFENSE_SUBMITTED_BY_STUDENT = 'defense_submitted_by_student',
+  DEFENSE_SUBMITTED_BY_PERSONAL = 'defense_submitted_by_personal',
 }
 
 export class CreateClassDto {
@@ -72,6 +77,9 @@ export class CreateClassDto {
     example: '14:00',
   })
   @IsString()
+  @Matches(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: 'O horário deve estar no formato HH:MM (00:00 a 23:59)',
+  })
   time: string;
 
   @ApiProperty({
@@ -109,6 +117,9 @@ export class UpdateClassDto {
   })
   @IsOptional()
   @IsString()
+  @Matches(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: 'O horário deve estar no formato HH:MM (00:00 a 23:59)',
+  })
   time?: string;
 
   @ApiPropertyOptional({
@@ -359,15 +370,17 @@ export class ClassResponseDto {
 
   @ApiPropertyOptional({
     description: 'Evidências enviadas pelo aluno',
-    example: 'Foto do local de treino',
+    example: ['Foto do local de treino'],
+    type: [String],
   })
-  studentEvidence?: string;
+  studentEvidence?: string[];
 
   @ApiPropertyOptional({
     description: 'Evidências enviadas pelo personal',
-    example: 'Foto do local de treino',
+    example: ['Foto do local de treino'],
+    type: [String],
   })
-  personalEvidence?: string;
+  personalEvidence?: string[];
 
   @ApiPropertyOptional({
     description: 'Resolução da disputa',
@@ -554,13 +567,75 @@ export class ConfirmClassStartDto {
   @IsBoolean()
   confirmed: boolean;
 
+  @ApiProperty({
+    description: 'Código de 4 dígitos exibido ao personal no início da aula',
+    example: '7391',
+  })
+  @IsString()
+  @Length(4, 4)
+  confirmationCode: string;
+
   @ApiPropertyOptional({
     description: 'Observações do aluno ao confirmar início',
     example: 'Confirmado, estou no local',
   })
   @IsString()
   @IsOptional()
-  notes?: string; // Observações do aluno ao confirmar
+  notes?: string;
+}
+
+export class DisputeDefenseDto {
+  @ApiProperty({
+    description: 'Texto da defesa (replica) da parte reportada',
+    example: 'Eu estava no local às 14:00 conforme combinado...',
+  })
+  @IsString()
+  text: string;
+
+  @ApiPropertyOptional({
+    description: 'URLs de evidências (imagens/vídeos)',
+    example: ['https://example.com/foto1.jpg'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  evidenceUrls?: string[];
+}
+
+export class PresenceSnapshotDto {
+  @ApiProperty({ description: 'Latitude', example: -23.5505 })
+  @IsNumber()
+  latitude: number;
+
+  @ApiProperty({ description: 'Longitude', example: -46.6333 })
+  @IsNumber()
+  longitude: number;
+
+  @ApiPropertyOptional({ description: 'Precisão em metros', example: 12.5 })
+  @IsNumber()
+  @IsOptional()
+  accuracyMeters?: number;
+
+  @ApiProperty({
+    description: 'Timestamp da captura (ISO 8601)',
+    example: '2024-01-15T14:00:00.000Z',
+  })
+  @IsDateString()
+  capturedAt: string;
+
+  @ApiProperty({
+    description: 'Fonte da captura',
+    enum: ['foreground', 'resume', 'background_task'],
+  })
+  @IsEnum(['foreground', 'resume', 'background_task'])
+  captureSource: 'foreground' | 'resume' | 'background_task';
+
+  @ApiProperty({
+    description: 'Estado do app no momento da captura',
+    enum: ['foreground', 'background', 'resumed'],
+  })
+  @IsEnum(['foreground', 'background', 'resumed'])
+  appState: 'foreground' | 'background' | 'resumed';
 }
 
 export class ReportNoShowDto {
@@ -660,6 +735,12 @@ export class ClassTimelineDto {
   canReportPersonalNoShow: boolean;
 
   @ApiProperty({
+    description: 'Se pode finalizar a aula (regra de 45min)',
+    example: false,
+  })
+  canComplete: boolean;
+
+  @ApiProperty({
     description: 'Prazo para cancelamento',
     example: '2024-01-15T12:00:00.000Z',
   })
@@ -670,11 +751,29 @@ export class ClassTimelineDto {
     example: '2024-01-15T16:00:00.000Z',
   })
   noShowReportDeadline: Date;
+
+  @ApiPropertyOptional({
+    description: 'Horário mínimo para finalizar aula (startedAt + 45min)',
+    example: '2024-01-15T14:45:00.000Z',
+  })
+  minimumCompletionAt?: Date;
+
+  @ApiPropertyOptional({
+    description: 'Segundos restantes até poder finalizar (0 = já pode)',
+    example: 1800,
+  })
+  remainingToCompleteSeconds?: number;
+
+  @ApiPropertyOptional({
+    description: 'Se o usuário atual já registrou snapshot de presença',
+    example: false,
+  })
+  hasPresenceSnapshot?: boolean;
 }
 
 export class ClassDisputeDto {
   @ApiProperty({
-    description: 'ID da disputa',
+    description: 'ID da disputa (= ID da aula)',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
   id: string;
@@ -686,11 +785,29 @@ export class ClassDisputeDto {
   classId: string;
 
   @ApiProperty({
-    description: 'Quem reportou a disputa',
+    description: 'Quem reportou a disputa (role)',
     enum: ['student', 'personal'],
     example: 'personal',
   })
   reportedBy: 'student' | 'personal';
+
+  @ApiProperty({
+    description: 'ID do usuário que reportou',
+    example: '123e4567-e89b-12d3-a456-426614174002',
+  })
+  reporterUserId: string;
+
+  @ApiProperty({
+    description: 'ID do usuário reportado',
+    example: '123e4567-e89b-12d3-a456-426614174003',
+  })
+  reportedUserId: string;
+
+  @ApiPropertyOptional({ description: 'Nome do reporter' })
+  reporterName?: string;
+
+  @ApiPropertyOptional({ description: 'Nome do reportado' })
+  reportedUserName?: string;
 
   @ApiProperty({
     description: 'Status da disputa',
@@ -706,26 +823,36 @@ export class ClassDisputeDto {
   reportedAt: Date;
 
   @ApiPropertyOptional({
-    description: 'Evidências do aluno',
-    example: 'Foto do local de treino',
+    description: 'Evidências do aluno (lista de URLs)',
+    type: [String],
   })
-  studentEvidence?: string;
+  studentEvidence?: string[];
 
   @ApiPropertyOptional({
-    description: 'Evidências do personal',
-    example: 'Foto do local de treino',
+    description: 'Evidências do personal (lista de URLs)',
+    type: [String],
   })
-  personalEvidence?: string;
+  personalEvidence?: string[];
+
+  @ApiPropertyOptional({ description: 'Texto de defesa do aluno' })
+  studentDefenseText?: string;
+
+  @ApiPropertyOptional({ description: 'Texto de defesa do personal' })
+  personalDefenseText?: string;
+
+  @ApiPropertyOptional({ description: 'Data de envio da defesa do aluno' })
+  studentDefenseSubmittedAt?: Date;
+
+  @ApiPropertyOptional({ description: 'Data de envio da defesa do personal' })
+  personalDefenseSubmittedAt?: Date;
 
   @ApiPropertyOptional({
     description: 'Resolução da disputa',
-    example: 'Disputa resolvida a favor do aluno',
   })
   resolution?: string;
 
   @ApiPropertyOptional({
     description: 'Data de resolução',
-    example: '2024-01-16T10:00:00.000Z',
   })
   resolvedAt?: Date;
 
@@ -736,8 +863,32 @@ export class ClassDisputeDto {
   custodyExpiresAt: Date;
 
   @ApiProperty({
-    description: 'Prazo para envio de evidências',
+    description: 'Prazo para envio de evidências/defesa',
     example: '2024-01-16T14:00:00.000Z',
   })
   evidenceDeadline: Date;
+
+  // Campos de geolocalização/presença
+  @ApiPropertyOptional({ description: 'Reporter registrou snapshot de presença' })
+  reporterHasSnapshot?: boolean;
+
+  @ApiPropertyOptional({ description: 'Reportado registrou snapshot de presença' })
+  reportedHasSnapshot?: boolean;
+
+  @ApiPropertyOptional({ description: 'Data do snapshot do reporter' })
+  reporterSnapshotAt?: Date;
+
+  @ApiPropertyOptional({ description: 'Data do snapshot do reportado' })
+  reportedSnapshotAt?: Date;
+}
+
+export class GetDisputesQueryDto {
+  @ApiPropertyOptional({
+    description: 'Filtro de status da disputa',
+    enum: ['open', 'resolved', 'all'],
+    default: 'all',
+  })
+  @IsOptional()
+  @IsString()
+  status?: 'open' | 'resolved' | 'all' = 'all';
 }

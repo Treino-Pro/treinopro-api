@@ -1,10 +1,27 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getQueueToken } from '@nestjs/bull';
 import { GamificationService } from './gamification.service';
+import { ChatGateway } from '../chat/chat.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   XPSource,
   MissionType,
   AchievementCategory,
 } from '../../database/schema';
+
+// Mocks de dependências extras
+const mockChatGateway = {
+  emitGamificationEvent: jest.fn(),
+  server: { emit: jest.fn() },
+};
+
+const mockEventsQueue = {
+  add: jest.fn(),
+};
+
+const mockNotificationsService = {
+  sendNotification: jest.fn(),
+};
 
 // Mock do banco de dados
 const mockDb = {
@@ -44,6 +61,18 @@ describe('GamificationService', () => {
           provide: 'DATABASE_CONNECTION',
           useValue: mockDb,
         },
+        {
+          provide: ChatGateway,
+          useValue: mockChatGateway,
+        },
+        {
+          provide: getQueueToken('gamification-events'),
+          useValue: mockEventsQueue,
+        },
+        {
+          provide: NotificationsService,
+          useValue: mockNotificationsService,
+        },
       ],
     }).compile();
 
@@ -61,11 +90,12 @@ describe('GamificationService', () => {
   describe('getUserProfile', () => {
     it('should return user profile if exists', async () => {
       const userId = 'user-1';
+      // totalXP=2050 → student level formula: 100+250+500+1000=1850 → level 5, currentLevelXP=200
       const mockProfile = {
         id: 'profile-1',
         userId,
         level: 5,
-        totalXP: 1000,
+        totalXP: 2050,
         currentLevelXP: 200,
         achievements: [],
         missions: [],
@@ -73,10 +103,27 @@ describe('GamificationService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.select.mockReturnValue({
+      // 1. User existence check
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ id: userId }]),
+          }),
+        }),
+      });
+      // 2. Profile query
+      mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue([mockProfile]),
+          }),
+        }),
+      });
+      // 3. userType query (to recalculate level)
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
           }),
         }),
       });
@@ -91,30 +138,46 @@ describe('GamificationService', () => {
 
     it('should create initial profile if not exists', async () => {
       const userId = 'user-1';
+      const newProfile = {
+        id: 'profile-1',
+        userId,
+        level: 1,
+        totalXP: 0,
+        currentLevelXP: 0,
+        achievements: [],
+        missions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-      mockDb.select.mockReturnValue({
+      // 1. User existence check in getUserProfile
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ id: userId }]),
+          }),
+        }),
+      });
+      // 2. Profile query → empty (triggers createInitialProfile)
+      mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
             limit: jest.fn().mockResolvedValue([]),
           }),
         }),
       });
-
-      mockDb.insert.mockReturnValue({
+      // 3. User/userType check inside createInitialProfile
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student', id: userId }]),
+          }),
+        }),
+      });
+      // 4. Insert userProfile returning
+      mockDb.insert.mockReturnValueOnce({
         values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([
-            {
-              id: 'profile-1',
-              userId,
-              level: 1,
-              totalXP: 0,
-              currentLevelXP: 0,
-              achievements: [],
-              missions: [],
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ]),
+          returning: jest.fn().mockResolvedValue([newProfile]),
         }),
       });
 
@@ -130,7 +193,6 @@ describe('GamificationService', () => {
     it('should add XP without level up', async () => {
       const userId = 'user-1';
       const addXPDto = {
-        userId,
         xpAmount: 25,
         source: XPSource.CLASS_COMPLETION,
         sourceId: 'class-1',
@@ -167,7 +229,7 @@ describe('GamificationService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       });
 
-      const result = await service.addXP(addXPDto);
+      const result = await service.addXP(userId, addXPDto);
 
       expect(result).toBeNull(); // Não subiu de nível
     });
@@ -175,7 +237,6 @@ describe('GamificationService', () => {
     it('should add XP with level up', async () => {
       const userId = 'user-1';
       const addXPDto = {
-        userId,
         xpAmount: 100,
         source: XPSource.CLASS_COMPLETION,
         sourceId: 'class-1',
@@ -212,7 +273,7 @@ describe('GamificationService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       });
 
-      const result = await service.addXP(addXPDto);
+      const result = await service.addXP(userId, addXPDto);
 
       expect(result).toEqual({
         userId,
@@ -306,13 +367,216 @@ describe('GamificationService', () => {
 
       await service.processClassCompletion(userId, classId);
 
-      expect(service.addXP).toHaveBeenCalledWith({
-        userId,
+      expect(service.addXP).toHaveBeenCalledWith(userId, {
         xpAmount: 10,
         source: XPSource.CLASS_COMPLETION,
         sourceId: classId,
         description: 'Aula completada',
       });
+    });
+  });
+
+  // ===== NOVOS TESTES: checkAndUnlockAchievements (via método privado) =====
+
+  describe('checkAndUnlockAchievements - level check', () => {
+    const userId = 'user-1';
+    const level5Achievement = {
+      id: 'ach-level5',
+      name: 'Mestre',
+      action: 'reach_level',
+      requirements: { count: 5 },
+      xpReward: 100,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('should NOT unlock reach_level achievement when currentLevel < requiredLevel', async () => {
+      // 1. achievements query (no .limit())
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([level5Achievement]),
+        }),
+      });
+      // 2. userType query (with .limit())
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
+          }),
+        }),
+      });
+      // Step 3 (check existing) is SKIPPED because level 2 < 5
+
+      const result = await (service as any).checkAndUnlockAchievements(
+        userId,
+        2, // currentLevel = 2, requiredLevel = 5 → must NOT unlock
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('should unlock reach_level achievement when currentLevel >= requiredLevel', async () => {
+      // 1. achievements query
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([level5Achievement]),
+        }),
+      });
+      // 2. userType query
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
+          }),
+        }),
+      });
+      // 3. check existing achievement → not earned
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+      // 4. insert userAchievements
+      mockDb.insert.mockReturnValueOnce({
+        values: jest.fn().mockResolvedValue(undefined),
+      });
+
+      const result = await (service as any).checkAndUnlockAchievements(
+        userId,
+        5, // currentLevel = 5 >= requiredLevel = 5 → MUST unlock
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('Mestre');
+    });
+
+    it('should NOT unlock reach_level achievement when user_type condition is not met', async () => {
+      const personalOnlyAchievement = {
+        ...level5Achievement,
+        id: 'ach-personal-level5',
+        name: 'Personal Expert',
+        requirements: { count: 5, conditions: { user_type: 'personal' } },
+      };
+
+      // 1. achievements query
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([personalOnlyAchievement]),
+        }),
+      });
+      // 2. userType query → student
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
+          }),
+        }),
+      });
+      // Step 3 skipped: conditions.user_type 'personal' !== 'student'
+
+      const result = await (service as any).checkAndUnlockAchievements(
+        userId,
+        5,
+      );
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  // ===== NOVOS TESTES: updateAchievementProgress - conditions.user_type =====
+
+  describe('updateAchievementProgress - conditions.user_type', () => {
+    const userId = 'user-1';
+    const studentAchievement = {
+      id: 'ach-student',
+      name: 'Aluno Dedicado',
+      action: 'attend_class',
+      requirements: { count: 1, conditions: { user_type: 'student' } },
+      xpReward: 50,
+      isActive: true,
+    };
+
+    it('should NOT unlock achievement when user_type condition is not met', async () => {
+      // 1. userType query → personal
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'personal' }]),
+          }),
+        }),
+      });
+      // 2. achievements query → [studentAchievement]
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([studentAchievement]),
+        }),
+      });
+      // Step 3 skipped: conditions.user_type 'student' !== 'personal'
+
+      const result = await service.updateAchievementProgress({
+        userId,
+        action: 'attend_class',
+        count: 1,
+      });
+
+      expect(result).toEqual([]);
+    });
+
+    it('should unlock achievement when user_type condition is met', async () => {
+      const mockUserAchievement = {
+        userId,
+        achievementId: 'ach-student',
+        earnedAt: new Date(),
+      };
+
+      // 1. userType query → student
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{ userType: 'student' }]),
+          }),
+        }),
+      });
+      // 2. achievements query → [studentAchievement]
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([studentAchievement]),
+        }),
+      });
+      // 3. check existing achievement → not earned
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+      // 4. getUserActionCount: xpHistory count (no .limit())
+      mockDb.select.mockReturnValueOnce({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ total: 1 }]),
+        }),
+      });
+      // 5. insert userAchievements
+      mockDb.insert.mockReturnValueOnce({
+        values: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([mockUserAchievement]),
+        }),
+      });
+      // 6. addXP called internally → spy to avoid cascade
+      jest.spyOn(service, 'addXP').mockResolvedValue(null);
+
+      const result = await service.updateAchievementProgress({
+        userId,
+        action: 'attend_class',
+        count: 1,
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].achievement.name).toBe('Aluno Dedicado');
     });
   });
 });

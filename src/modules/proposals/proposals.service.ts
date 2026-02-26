@@ -27,6 +27,7 @@ import {
   sql,
   or,
   lt,
+  inArray,
 } from 'drizzle-orm';
 import {
   CreateProposalDto,
@@ -45,12 +46,22 @@ import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsGateway } from './proposals.gateway';
 import { NonceService } from '../notifications/services/nonce.service';
 import { ConflictException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { LocationsService } from '../locations/locations.service';
 // Enum ClassStatus não exportado no schema, usando string diretamente
 
 @Injectable()
 export class ProposalsService {
+  private readonly paymentConfirmedStatuses = new Set([
+    'authorized',
+    'approved',
+    'captured',
+  ]);
+
+  private isPaymentConfirmedStatus(status?: string | null): boolean {
+    const normalized = String(status || '').toLowerCase();
+    return this.paymentConfirmedStatuses.has(normalized);
+  }
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
@@ -241,15 +252,19 @@ export class ProposalsService {
     let finalLocationId = createProposalDto.locationId;
 
     // Se não tem locationId, tentar criar/atualizar local com coordenadas
-    if (!finalLocationId && createProposalDto.locationName && createProposalDto.locationAddress) {
+    if (
+      !finalLocationId &&
+      createProposalDto.locationName &&
+      createProposalDto.locationAddress
+    ) {
       console.log(
         `📍 [PROPOSALS] Proposta sem locationId, tentando criar/atualizar local com coordenadas...`,
       );
-      
+
       // ✅ Usar coordenadas do DTO se disponíveis, senão fazer geocoding
       const locationLat = createProposalDto.locationLat;
       const locationLng = createProposalDto.locationLng;
-      
+
       if (locationLat && locationLng) {
         console.log(
           `✅ [PROPOSALS] Coordenadas recebidas do app: lat=${locationLat}, lng=${locationLng}`,
@@ -259,9 +274,11 @@ export class ProposalsService {
           `⚠️ [PROPOSALS] Coordenadas não fornecidas pelo app, será feito geocoding do endereço`,
         );
       }
-      
+
       try {
-        const locationsService = this.moduleRef.get(LocationsService, { strict: false });
+        const locationsService = this.moduleRef.get(LocationsService, {
+          strict: false,
+        });
         finalLocationId = await locationsService.createOrUpdateLocation(
           createProposalDto.locationName,
           createProposalDto.locationAddress,
@@ -279,10 +296,7 @@ export class ProposalsService {
           );
         }
       } catch (error) {
-        console.error(
-          `❌ [PROPOSALS] Erro ao criar/atualizar local:`,
-          error,
-        );
+        console.error(`❌ [PROPOSALS] Erro ao criar/atualizar local:`, error);
         // Continuar mesmo se falhar - FCM será bloqueado depois
       }
     }
@@ -327,11 +341,13 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar.
+      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
       // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
-      const statusOk = ['authorized', 'approved', 'captured'].includes(
-        String(paymentResult.status || '').toLowerCase(),
-      );
+      const paymentStatus = String(paymentResult.status || '').toLowerCase();
+      const isPix = createProposalDto.paymentMethod === 'pix';
+      const statusOk =
+        ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -431,6 +447,7 @@ export class ProposalsService {
               eq(users.userType, 'personal'),
               eq(users.status, 'active'),
               eq(users.isPersonalOnline, true), // ✅ Apenas personals online
+              eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
               sql`${users.fcmToken} IS NOT NULL`,
             ),
           );
@@ -468,7 +485,8 @@ export class ProposalsService {
             }
 
             // Verificar se proposta está dentro do raio de atendimento do personal
-            const proposalCoords = this.extractProposalCoordinates(proposalResponse);
+            const proposalCoords =
+              this.extractProposalCoordinates(proposalResponse);
 
             // ✅ CRÍTICO: Se proposta não tem coordenadas, NÃO enviar FCM
             if (!proposalCoords.lat || !proposalCoords.lng) {
@@ -492,7 +510,11 @@ export class ProposalsService {
               .where(eq(users.id, personalId))
               .limit(1);
 
-            if (personalData?.serviceLocationLat && personalData?.serviceLocationLng && personalData?.serviceRadiusKm) {
+            if (
+              personalData?.serviceLocationLat &&
+              personalData?.serviceLocationLng &&
+              personalData?.serviceRadiusKm
+            ) {
               const personalLat = parseFloat(personalData.serviceLocationLat);
               const personalLng = parseFloat(personalData.serviceLocationLng);
               const radiusKm = parseFloat(personalData.serviceRadiusKm);
@@ -610,7 +632,8 @@ export class ProposalsService {
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
+          expiresAt:
+            paymentResult.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000),
         },
       };
     } catch (error) {
@@ -647,7 +670,22 @@ export class ProposalsService {
       createRecontractDto.personalId,
     );
 
-    // Validar se o personal trainer existe
+    // Validar se o solicitante é aluno
+    const [studentUser] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, studentId))
+      .limit(1);
+
+    if (!studentUser) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    if (studentUser.userType !== 'student') {
+      throw new ForbiddenException('Apenas alunos podem criar recontratação');
+    }
+
+    // Validar se o personal trainer existe e está aprovado
     const [personal] = await this.db
       .select()
       .from(users)
@@ -656,12 +694,13 @@ export class ProposalsService {
           eq(users.id, createRecontractDto.personalId),
           eq(users.userType, 'personal'),
           eq(users.status, 'active'),
+          eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
         ),
       )
       .limit(1);
 
     if (!personal) {
-      throw new NotFoundException('Personal trainer não encontrado ou inativo');
+      throw new NotFoundException('Personal trainer não encontrado, inativo ou não aprovado');
     }
 
     console.log(
@@ -677,16 +716,7 @@ export class ProposalsService {
       throw new BadRequestException('A data do treino não pode ser no passado');
     }
 
-    // Buscar dados do aluno
-    const [user] = await this.db
-      .select()
-      .from(users)
-      .where(eq(users.id, studentId))
-      .limit(1);
-
-    if (!user) {
-      throw new NotFoundException('Usuário não encontrado');
-    }
+    const user = studentUser;
 
     // ===== CRIAR PROPOSTA DE RECONTRATAÇÃO PRIMEIRO =====
     const [proposal] = await this.db
@@ -724,11 +754,13 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar.
+      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
       // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
-      const statusOk = ['authorized', 'approved', 'captured'].includes(
-        String(paymentResult.status || '').toLowerCase(),
-      );
+      const paymentStatus = String(paymentResult.status || '').toLowerCase();
+      const isPix = createRecontractDto.paymentMethod === 'pix';
+      const statusOk =
+        ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -773,43 +805,10 @@ export class ProposalsService {
       // Retornar proposta com dados do pagamento e do usuário
       const proposalResponse = await this.mapToResponseDto(proposal, user);
 
-      // ===== NOTIFICAR PERSONAL ESPECÍFICO =====
-      try {
-        // Emitir evento específico para o personal da recontratação
-        this.chatGateway.server.emit('recontract_proposal', {
-          action: 'recontract_created',
-          proposal: proposalResponse,
-          student: {
-            id: user?.id,
-            name: `${user?.firstName} ${user?.lastName}`,
-            profileImageUrl: user?.profileImageUrl,
-          },
-          personalId: createRecontractDto.personalId,
-          timestamp: new Date(),
-        });
-
-        console.log(
-          '📡 [PROPOSALS SERVICE] Evento de recontratação emitido para personal:',
-          createRecontractDto.personalId,
-        );
-
-        // ✅ NOVO: Enviar FCM para o personal específico da recontratação
-        // Verificar se o personal está online antes de enviar FCM
-        const [personalForFCM] = await this.db
-          .select()
-          .from(users)
-          .where(
-            and(
-              eq(users.id, createRecontractDto.personalId),
-              eq(users.isPersonalOnline, true), // ✅ Apenas se estiver online
-            ),
-          )
-          .limit(1);
-
-        if (personalForFCM) {
-          console.log(
-            `🔥 [PROPOSALS SERVICE] Personal está online - enviando FCM para recontratação: ${createRecontractDto.personalId}`,
-          );
+      // ===== NOTIFICAR PERSONAL ESPECÍFICO (APENAS COM PAGAMENTO CONFIRMADO) =====
+      if (this.isPaymentConfirmedStatus(paymentResult.status)) {
+        try {
+          // Enviar push/app notification para o personal alvo (online ou offline)
           await this.proposalsGateway.sendProposalCreated({
             proposal: proposalResponse,
             student: {
@@ -819,19 +818,24 @@ export class ProposalsService {
               lastName: user?.lastName,
               profileImageUrl: user?.profileImageUrl,
             },
-            nearbyPersonals: [createRecontractDto.personalId], // Apenas o personal específico
+            nearbyPersonals: [createRecontractDto.personalId],
           });
-        } else {
+
           console.log(
-            `⚠️ [PROPOSALS SERVICE] Personal não está online - FCM não enviado para recontratação: ${createRecontractDto.personalId}`,
+            '📡 [PROPOSALS SERVICE] Notificação de recontratação enviada para personal:',
+            createRecontractDto.personalId,
           );
+        } catch (error) {
+          console.error(
+            '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',
+            error,
+          );
+          // Não falhar a operação por causa de problemas de WebSocket
         }
-      } catch (error) {
-        console.error(
-          '❌ [PROPOSALS SERVICE] Erro ao emitir evento de recontratação:',
-          error,
+      } else {
+        console.log(
+          `⏳ [PROPOSALS SERVICE] Recontratação ${proposal.id} criada sem envio ao personal (aguardando pagamento). paymentStatus=${paymentResult.status}`,
         );
-        // Não falhar a operação por causa de problemas de WebSocket
       }
 
       console.log(
@@ -855,7 +859,8 @@ export class ProposalsService {
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutos
+          expiresAt:
+            paymentResult.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000),
         },
       };
     } catch (error) {
@@ -902,6 +907,16 @@ export class ProposalsService {
     } else if (userType === 'personal') {
       // Personal trainers veem propostas pendentes (para aceitar)
       conditions.push(eq(proposals.status, ProposalStatus.PENDING));
+      // Recontratações diretas só aparecem para o personal alvo
+      conditions.push(
+        or(
+          and(
+            eq(proposals.targetPersonalId, userId),
+            inArray(proposals.paymentStatus, ['authorized', 'approved', 'captured']),
+          ),
+          sql`${proposals.targetPersonalId} IS NULL`,
+        ),
+      );
     }
 
     if (status) {
@@ -939,6 +954,7 @@ export class ProposalsService {
           additionalNotes: proposals.additionalNotes,
           status: proposals.status,
           paymentStatus: proposals.paymentStatus,
+          targetPersonalId: proposals.targetPersonalId,
           createdAt: proposals.createdAt,
           updatedAt: proposals.updatedAt,
           // Campos do estudante
@@ -1163,6 +1179,22 @@ export class ProposalsService {
         );
       }
 
+      if (proposal.targetPersonalId && proposal.targetPersonalId !== personalId) {
+        throw new ForbiddenException(
+          'Esta proposta é direcionada a outro personal trainer',
+        );
+      }
+
+      // Segurança extra: recontratação só pode ser aceita após pagamento confirmado.
+      if (
+        proposal.targetPersonalId &&
+        !this.isPaymentConfirmedStatus(proposal.paymentStatus)
+      ) {
+        throw new BadRequestException(
+          'Pagamento da recontratação ainda não foi confirmado.',
+        );
+      }
+
       // ✅ Validar nonce se fornecido
       if (nonce) {
         // Verificar se nonce já foi usado
@@ -1193,181 +1225,182 @@ export class ProposalsService {
         });
       }
 
-    // ===== VALIDAR CONFLITOS DE HORÁRIO =====
-    try {
-      // Montar intervalo do dia da proposta
-      const proposedTrainingDate = new Date(proposal.trainingDate);
-      const startOfDay = new Date(proposedTrainingDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(proposedTrainingDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      // ===== VALIDAR CONFLITOS DE HORÁRIO =====
+      try {
+        // Montar intervalo do dia da proposta
+        const proposedTrainingDate = new Date(proposal.trainingDate);
+        const startOfDay = new Date(proposedTrainingDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(proposedTrainingDate);
+        endOfDay.setHours(23, 59, 59, 999);
 
-      // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
-      // Buscar aulas do personal no mesmo dia com status relevantes
-      const existingClasses = await tx
-        .select()
-        .from(classes)
-        .where(
-          and(
-            eq(classes.personalId, personalId),
-            gte(classes.date, startOfDay),
-            lte(classes.date, endOfDay),
-            or(
-              eq(classes.status, 'scheduled'),
-              eq(classes.status, 'pending_confirmation'),
-              eq(classes.status, 'active'),
+        // 1. VALIDAR CONFLITOS DO PERSONAL TRAINER
+        // Buscar aulas do personal no mesmo dia com status relevantes
+        const existingClasses = await tx
+          .select()
+          .from(classes)
+          .where(
+            and(
+              eq(classes.personalId, personalId),
+              gte(classes.date, startOfDay),
+              lte(classes.date, endOfDay),
+              or(
+                eq(classes.status, 'scheduled'),
+                eq(classes.status, 'pending_confirmation'),
+                eq(classes.status, 'active'),
+              ),
             ),
-          ),
-        );
-
-      console.log(
-        `  - Aulas do personal encontradas: ${existingClasses.length}`,
-      );
-
-      // 2. VALIDAR CONFLITOS DO ALUNO
-      // Buscar propostas existentes do aluno para o mesmo dia
-      let existingProposals = await tx
-        .select()
-        .from(proposals)
-        .where(
-          and(
-            eq(proposals.studentId, proposal.studentId),
-            gte(proposals.trainingDate, startOfDay),
-            lte(proposals.trainingDate, endOfDay),
-            or(
-              eq(proposals.status, 'pending'),
-              eq(proposals.status, 'matched'),
-            ),
-            // Excluir a proposta atual
-            sql`${proposals.id} != ${id}`,
-          ),
-        );
-
-      console.log(
-        `  - Propostas do aluno encontradas: ${existingProposals.length}`,
-      );
-
-      // Ignorar propostas matched cujas aulas estão em disputa de no-show
-      const disputedClasses = await tx.query.classes.findMany({
-        where: and(
-          sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
-          eq(classes.studentId, proposal.studentId as any),
-          eq(classes.status, 'no_show_dispute'),
-        ),
-        columns: { proposalId: true },
-      });
-      const disputedProposalIds = new Set(
-        disputedClasses.map((c) => c.proposalId).filter(Boolean),
-      );
-      if (disputedProposalIds.size > 0) {
-        const beforeFilter = existingProposals.length;
-        existingProposals = existingProposals.filter(
-          (p) => !disputedProposalIds.has(p.id),
-        );
-        console.log(
-          `  - Propostas filtradas (aulas em disputa): ${beforeFilter} → ${existingProposals.length}`,
-        );
-      }
-
-      // Calcular janela de tempo da proposta aceita
-      // Combinar data com horário (formato HH:MM)
-      const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
-      const proposedStart = new Date(proposedTrainingDate);
-      proposedStart.setHours(hours, minutes, 0, 0);
-      const proposedEnd = new Date(
-        proposedStart.getTime() + (proposal.durationMinutes || 60) * 60 * 1000,
-      );
-
-      console.log(
-        `  - Proposta: ${proposal.trainingTime} (${proposedStart.toISOString()}) até ${proposedEnd.toISOString()}`,
-      );
-      console.log(`  - Duração: ${proposal.durationMinutes || 60} minutos`);
-
-      // Verificar conflitos com aulas do personal
-      const hasClassConflict = existingClasses.some((cls: any) => {
-        // Combinar data da aula com horário
-        const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
-        const classStart = new Date(cls.date);
-        classStart.setHours(clsHours, clsMinutes, 0, 0);
-        const classEnd = new Date(
-          classStart.getTime() + (cls.duration || 60) * 60 * 1000,
-        );
+          );
 
         console.log(
-          `    - Aula existente: ${cls.time} (${classStart.toISOString()}) até ${classEnd.toISOString()}, status: ${cls.status}`,
+          `  - Aulas do personal encontradas: ${existingClasses.length}`,
         );
 
-        // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
-        const now = new Date();
-        const isClassExpired = classEnd < now;
+        // 2. VALIDAR CONFLITOS DO ALUNO
+        // Buscar propostas existentes do aluno para o mesmo dia
+        let existingProposals = await tx
+          .select()
+          .from(proposals)
+          .where(
+            and(
+              eq(proposals.studentId, proposal.studentId),
+              gte(proposals.trainingDate, startOfDay),
+              lte(proposals.trainingDate, endOfDay),
+              or(
+                eq(proposals.status, 'pending'),
+                eq(proposals.status, 'matched'),
+              ),
+              // Excluir a proposta atual
+              sql`${proposals.id} != ${id}`,
+            ),
+          );
 
-        if (isClassExpired) {
-          console.log(`      ✓ Aula expirada, ignorando`);
-          return false; // Não há conflito com aulas expiradas
+        console.log(
+          `  - Propostas do aluno encontradas: ${existingProposals.length}`,
+        );
+
+        // Ignorar propostas matched cujas aulas estão em disputa de no-show
+        const disputedClasses = await tx.query.classes.findMany({
+          where: and(
+            sql`DATE(${classes.date}) = ${proposedTrainingDate.toISOString().split('T')[0]}`,
+            eq(classes.studentId, proposal.studentId as any),
+            eq(classes.status, 'no_show_dispute'),
+          ),
+          columns: { proposalId: true },
+        });
+        const disputedProposalIds = new Set(
+          disputedClasses.map((c) => c.proposalId).filter(Boolean),
+        );
+        if (disputedProposalIds.size > 0) {
+          const beforeFilter = existingProposals.length;
+          existingProposals = existingProposals.filter(
+            (p) => !disputedProposalIds.has(p.id),
+          );
+          console.log(
+            `  - Propostas filtradas (aulas em disputa): ${beforeFilter} → ${existingProposals.length}`,
+          );
         }
 
-        // Verificar sobreposição
-        const overlaps = !(
-          proposedEnd <= classStart || proposedStart >= classEnd
-        );
-        console.log(
-          `      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'} (proposta: ${proposedStart.toISOString()} - ${proposedEnd.toISOString()}, aula: ${classStart.toISOString()} - ${classEnd.toISOString()})`,
-        );
-        return overlaps;
-      });
-
-      // Verificar conflitos com propostas do aluno
-      const hasProposalConflict = existingProposals.some((prop: any) => {
-        const [propHours, propMinutes] = prop.trainingTime
-          .split(':')
-          .map(Number);
-        const propStart = new Date(prop.trainingDate);
-        propStart.setHours(propHours, propMinutes, 0, 0);
-        const propEnd = new Date(
-          propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000,
+        // Calcular janela de tempo da proposta aceita
+        // Combinar data com horário (formato HH:MM)
+        const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
+        const proposedStart = new Date(proposedTrainingDate);
+        proposedStart.setHours(hours, minutes, 0, 0);
+        const proposedEnd = new Date(
+          proposedStart.getTime() +
+            (proposal.durationMinutes || 60) * 60 * 1000,
         );
 
         console.log(
-          `    - Proposta existente: ${prop.trainingTime} (${propStart.toISOString()}) até ${propEnd.toISOString()}, status: ${prop.status}`,
+          `  - Proposta: ${proposal.trainingTime} (${proposedStart.toISOString()}) até ${proposedEnd.toISOString()}`,
+        );
+        console.log(`  - Duração: ${proposal.durationMinutes || 60} minutos`);
+
+        // Verificar conflitos com aulas do personal
+        const hasClassConflict = existingClasses.some((cls: any) => {
+          // Combinar data da aula com horário
+          const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
+          const classStart = new Date(cls.date);
+          classStart.setHours(clsHours, clsMinutes, 0, 0);
+          const classEnd = new Date(
+            classStart.getTime() + (cls.duration || 60) * 60 * 1000,
+          );
+
+          console.log(
+            `    - Aula existente: ${cls.time} (${classStart.toISOString()}) até ${classEnd.toISOString()}, status: ${cls.status}`,
+          );
+
+          // Verificar se a aula já deveria ter terminado (no-show ou esquecimento)
+          const now = new Date();
+          const isClassExpired = classEnd < now;
+
+          if (isClassExpired) {
+            console.log(`      ✓ Aula expirada, ignorando`);
+            return false; // Não há conflito com aulas expiradas
+          }
+
+          // Verificar sobreposição
+          const overlaps = !(
+            proposedEnd <= classStart || proposedStart >= classEnd
+          );
+          console.log(
+            `      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'} (proposta: ${proposedStart.toISOString()} - ${proposedEnd.toISOString()}, aula: ${classStart.toISOString()} - ${classEnd.toISOString()})`,
+          );
+          return overlaps;
+        });
+
+        // Verificar conflitos com propostas do aluno
+        const hasProposalConflict = existingProposals.some((prop: any) => {
+          const [propHours, propMinutes] = prop.trainingTime
+            .split(':')
+            .map(Number);
+          const propStart = new Date(prop.trainingDate);
+          propStart.setHours(propHours, propMinutes, 0, 0);
+          const propEnd = new Date(
+            propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000,
+          );
+
+          console.log(
+            `    - Proposta existente: ${prop.trainingTime} (${propStart.toISOString()}) até ${propEnd.toISOString()}, status: ${prop.status}`,
+          );
+
+          // Verificar sobreposição
+          const overlaps = !(
+            proposedEnd <= propStart || proposedStart >= propEnd
+          );
+          console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'}`);
+          return overlaps;
+        });
+
+        console.log(`  - Conflito com aulas do personal: ${hasClassConflict}`);
+        console.log(
+          `  - Conflito com propostas do aluno: ${hasProposalConflict}`,
         );
 
-        // Verificar sobreposição
-        const overlaps = !(
-          proposedEnd <= propStart || proposedStart >= propEnd
+        if (hasClassConflict) {
+          throw new BadRequestException(
+            'Conflito de horário: o personal trainer já possui uma aula agendada nesse período.',
+          );
+        }
+
+        if (hasProposalConflict) {
+          throw new BadRequestException(
+            'Conflito de horário: o aluno já possui uma proposta ou aula agendada nesse período.',
+          );
+        }
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        // Em caso de erro inesperado na verificação, não bloquear o fluxo com mensagem genérica
+        console.error(
+          '❌ [PROPOSALS] Erro ao validar conflito de horário:',
+          error,
         );
-        console.log(`      ${overlaps ? '❌ CONFLITO!' : '✓ Sem conflito'}`);
-        return overlaps;
-      });
-
-      console.log(`  - Conflito com aulas do personal: ${hasClassConflict}`);
-      console.log(
-        `  - Conflito com propostas do aluno: ${hasProposalConflict}`,
-      );
-
-      if (hasClassConflict) {
         throw new BadRequestException(
-          'Conflito de horário: o personal trainer já possui uma aula agendada nesse período.',
+          'Não foi possível validar conflitos de horário no momento. Tente novamente.',
         );
       }
-
-      if (hasProposalConflict) {
-        throw new BadRequestException(
-          'Conflito de horário: o aluno já possui uma proposta ou aula agendada nesse período.',
-        );
-      }
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      // Em caso de erro inesperado na verificação, não bloquear o fluxo com mensagem genérica
-      console.error(
-        '❌ [PROPOSALS] Erro ao validar conflito de horário:',
-        error,
-      );
-      throw new BadRequestException(
-        'Não foi possível validar conflitos de horário no momento. Tente novamente.',
-      );
-    }
 
       // Aceitar a proposta (mudar status para matched)
       const [acceptedProposal] = await tx
@@ -1437,7 +1470,10 @@ export class ProposalsService {
           console.log(
             '💰 [PROPOSALS] Capturando pagamento após criação da aula...',
           );
-          console.log('🔍 [PROPOSALS] Buscando pagamento para proposta ID:', id);
+          console.log(
+            '🔍 [PROPOSALS] Buscando pagamento para proposta ID:',
+            id,
+          );
 
           // Buscar pagamento da proposta
           const payment = await tx.query.payments.findFirst({
@@ -1453,7 +1489,7 @@ export class ProposalsService {
             personalAmount: payment?.personalAmount,
           });
 
-          if (payment && payment.status === 'authorized') {
+          if (payment) {
             // Atualizar pagamento com classId e personalId
             await tx
               .update(payments)
@@ -1464,50 +1500,58 @@ export class ProposalsService {
               })
               .where(eq(payments.id, payment.id));
 
-          // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
-          console.log(
-            'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
-          );
-        } else {
-          console.log(
-            '⚠️ [PROPOSALS] Pagamento não encontrado ou não autorizado:',
-            payment?.status,
-          );
-        }
-      } catch (error) {
-        console.error(
-          '❌ [PROPOSALS] Erro ao capturar pagamento após criação da aula:',
-          error,
-        );
-        // Não falhar a operação se a captura de pagamento falhar
-        // Mas logar o erro para investigação
-      }
-
-      // Buscar dados do usuário para incluir na resposta (dentro da transação)
-      const [student] = await tx
-        .select()
-        .from(users)
-        .where(eq(users.id, acceptedProposal.studentId))
-        .limit(1);
-
-      // Retornar resultado da transação
-      return await this.mapToResponseDto(acceptedProposal, student);
+            if (payment.status === 'authorized') {
+              // Não capturar pagamento aqui: captura/repasse só após conclusão da aula
+              console.log(
+                'ℹ️ [PROPOSALS] Pagamento em custódia mantido. Captura ocorrerá na conclusão da aula.',
+              );
+            } else {
+              console.log(
+                `ℹ️ [PROPOSALS] Pagamento vinculado à aula com status "${payment.status}". Captura/reasse seguirá regra na conclusão.`,
+              );
+            }
+          } else {
+            console.log(
+              '⚠️ [PROPOSALS] Pagamento não encontrado para proposta:',
+              payment?.status,
+            );
+          }
         } catch (error) {
-          console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
-          // Se falhar, reverter status da proposta dentro da transação
-          await tx
-            .update(proposals)
-            .set({
-              status: ProposalStatus.PENDING,
-              updatedAt: new Date(),
-            })
-            .where(eq(proposals.id, id));
+          console.error(
+            '❌ [PROPOSALS] Erro ao capturar pagamento após criação da aula:',
+            error,
+          );
+          // Não falhar a operação se a captura de pagamento falhar
+          // Mas logar o erro para investigação
+        }
 
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao criar aula';
-      throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
-    }
-      },
-    );
+        // Buscar dados do usuário para incluir na resposta (dentro da transação)
+        const [student] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.id, acceptedProposal.studentId))
+          .limit(1);
+
+        // Retornar resultado da transação
+        return await this.mapToResponseDto(acceptedProposal, student);
+      } catch (error) {
+        console.error('❌ [PROPOSALS] Erro ao criar aula:', error);
+        // Se falhar, reverter status da proposta dentro da transação
+        await tx
+          .update(proposals)
+          .set({
+            status: ProposalStatus.PENDING,
+            updatedAt: new Date(),
+          })
+          .where(eq(proposals.id, id));
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Erro desconhecido ao criar aula';
+        throw new BadRequestException(`Erro ao criar aula: ${errorMessage}`);
+      }
+    });
 
     // ===== EMITIR EVENTOS WEBSOCKET (fora da transação) =====
     // Buscar novamente os dados para eventos WebSocket após transação
@@ -1562,7 +1606,10 @@ export class ProposalsService {
       if (studentForEvents) {
         this.chatGateway.server.emit('proposal_update', {
           action: 'proposal_accepted',
-          proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+          proposal: await this.mapToResponseDto(
+            proposalForEvents,
+            studentForEvents,
+          ),
           personal: {
             id: personal?.id,
             name: personal?.name,
@@ -1578,10 +1625,14 @@ export class ProposalsService {
       if (studentForEvents && personal) {
         try {
           await this.proposalsGateway.sendProposalAccepted({
-            proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+            proposal: await this.mapToResponseDto(
+              proposalForEvents,
+              studentForEvents,
+            ),
             personal: {
               id: personal.id,
-              name: personal.name || `${personal.firstName} ${personal.lastName}`,
+              name:
+                personal.name || `${personal.firstName} ${personal.lastName}`,
               firstName: personal.firstName,
               lastName: personal.lastName,
               photo: personal.profileImageUrl,
@@ -1589,9 +1640,14 @@ export class ProposalsService {
             },
             studentId: studentForEvents.id,
           });
-          console.log('✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita');
+          console.log(
+            '✅ [PROPOSALS] Notificação push enviada para aluno quando proposta foi aceita',
+          );
         } catch (error) {
-          console.error('❌ [PROPOSALS] Erro ao enviar notificação push:', error);
+          console.error(
+            '❌ [PROPOSALS] Erro ao enviar notificação push:',
+            error,
+          );
           // Não falhar a operação por causa de problemas de notificação
         }
       }
@@ -1606,7 +1662,10 @@ export class ProposalsService {
       // Evento de match confirmado para ambos
       const matchData = {
         action: 'match_confirmed',
-        proposal: await this.mapToResponseDto(proposalForEvents, studentForEvents),
+        proposal: await this.mapToResponseDto(
+          proposalForEvents,
+          studentForEvents,
+        ),
         student: {
           id: studentForEvents?.id,
           name: studentForEvents?.name,
@@ -1692,7 +1751,6 @@ export class ProposalsService {
   async updatePaymentStatus(
     proposalId: string,
     paymentStatus: string,
-    mpPaymentId?: string,
   ): Promise<void> {
     // Validar parâmetros obrigatórios
     if (!proposalId || !paymentStatus) {
@@ -1700,6 +1758,20 @@ export class ProposalsService {
     }
 
     try {
+      const [currentProposal] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, proposalId))
+        .limit(1);
+
+      if (!currentProposal) {
+        throw new NotFoundException('Proposta não encontrada');
+      }
+
+      const wasConfirmed = this.isPaymentConfirmedStatus(
+        currentProposal.paymentStatus,
+      );
+
       await this.db
         .update(proposals)
         .set({
@@ -1708,8 +1780,41 @@ export class ProposalsService {
         })
         .where(eq(proposals.id, proposalId));
 
-      // Se pagamento foi aprovado, notificar que proposta está pronta
-      if (paymentStatus === 'approved' || paymentStatus === 'captured') {
+      // Recontratação: quando pagamento for confirmado, liberar envio ao personal alvo.
+      if (
+        currentProposal.targetPersonalId &&
+        !wasConfirmed &&
+        this.isPaymentConfirmedStatus(paymentStatus)
+      ) {
+        const [student] = await this.db
+          .select()
+          .from(users)
+          .where(eq(users.id, currentProposal.studentId))
+          .limit(1);
+
+        const proposalResponse = await this.mapToResponseDto(
+          {
+            ...currentProposal,
+            paymentStatus,
+          },
+          student,
+        );
+
+        await this.proposalsGateway.sendProposalCreated({
+          proposal: proposalResponse,
+          student: {
+            id: student?.id,
+            name: `${student?.firstName || ''} ${student?.lastName || ''}`.trim(),
+            firstName: student?.firstName,
+            lastName: student?.lastName,
+            profileImageUrl: student?.profileImageUrl,
+          },
+          nearbyPersonals: [currentProposal.targetPersonalId],
+        });
+
+        console.log(
+          `📡 [PROPOSALS] Recontratação ${proposalId} liberada para personal ${currentProposal.targetPersonalId} após confirmação de pagamento (${paymentStatus})`,
+        );
       }
 
       // Se pagamento falhou, cancelar proposta automaticamente
@@ -1763,23 +1868,19 @@ export class ProposalsService {
         return { cancelled: 0 };
       }
 
-      // Cancelar propostas expiradas
-      const cancelledCount = await this.db
+      const ids = expiredProposals.map((p) => p.id);
+
+      // 1. Cancelar todas as propostas expiradas no banco (status e paymentStatus)
+      await this.db
         .update(proposals)
         .set({
           status: ProposalStatus.CANCELLED,
           paymentStatus: 'expired',
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            eq(proposals.status, ProposalStatus.PENDING),
-            eq(proposals.paymentStatus, 'pending'),
-            lte(proposals.createdAt, thirtyMinutesAgo),
-          ),
-        );
+        .where(inArray(proposals.id, ids));
 
-      // Processar reembolsos automáticos
+      // 2. Tentar reembolso para as que já possuem pagamento registrado
       for (const proposal of expiredProposals) {
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
           try {
@@ -1794,7 +1895,7 @@ export class ProposalsService {
               error,
             );
 
-            // Marcar como erro para análise manual
+            // Marcar como erro para análise manual (status já é CANCELLED)
             await this.db
               .update(proposals)
               .set({
@@ -1900,6 +2001,10 @@ export class ProposalsService {
 
       return payment;
     } catch (error) {
+      console.error(
+        `❌ [PROPOSALS] Erro ao buscar pagamento por external reference ${externalReference}:`,
+        error,
+      );
       return null;
     }
   }
@@ -1984,6 +2089,17 @@ export class ProposalsService {
 
       console.log('🆔 [PROPOSALS] Proposal ID real:', proposalId);
 
+      const resolvedPayerEmail =
+        createProposalDto.payerEmail?.trim() || userData?.email?.trim();
+      const fallbackDocumentNumber = String(
+        userData?.documentNumber ?? '',
+      ).replace(/\D/g, '');
+      const resolvedPayerCpf =
+        createProposalDto.payerCpf?.trim() ||
+        (userData?.documentType === 'CPF' && fallbackDocumentNumber.length === 11
+          ? fallbackDocumentNumber
+          : undefined);
+
       // Calcular taxa da plataforma
       const platformFeePercentage =
         parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
@@ -2027,8 +2143,8 @@ export class ProposalsService {
             installments: createProposalDto.installments || '1',
             saveCard: createProposalDto.saveCard || false,
             cardNickname: createProposalDto.cardNickname,
-            payerEmail: createProposalDto.payerEmail, // ✅ Passar email do pagador
-            payerCpf: createProposalDto.payerCpf, // ✅ Passar CPF do pagador
+            payerEmail: resolvedPayerEmail, // ✅ Fallback para email do usuário autenticado
+            payerCpf: resolvedPayerCpf, // ✅ Fallback para CPF do documento do usuário
           };
 
           console.log(
@@ -2091,7 +2207,68 @@ export class ProposalsService {
         }
       }
 
-      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (PIX, Mercado Pago, ou cartão sem ID) =====
+      // ===== PIX: CRIAR PAGAMENTO PIX VIA API MP =====
+      if (createProposalDto.paymentMethod === 'pix') {
+        console.log('🔵 [PROPOSALS] Iniciando pagamento PIX real...');
+
+        // Proteção defensiva: PIX não deve carregar cardId
+        if (createProposalDto.cardId) {
+          console.warn('⚠️ [PROPOSALS] cardId ignorado pois paymentMethod=pix');
+          createProposalDto.cardId = undefined;
+        }
+
+        if (!resolvedPayerEmail) {
+          throw new BadRequestException(
+            'payerEmail é obrigatório para pagamento via PIX',
+          );
+        }
+
+        const apiUrl = process.env.API_URL;
+        const isPublicUrl =
+          !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
+        const notificationUrl = isPublicUrl
+          ? `${apiUrl}/webhooks/mercadopago`
+          : undefined;
+
+        const pixResult = await this.paymentsService.createPixPayment({
+          amount: createProposalDto.price,
+          description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
+          externalReference: proposalId,
+          payerEmail: resolvedPayerEmail,
+          payerCpf: resolvedPayerCpf,
+          notificationUrl,
+        });
+
+        console.log('✅ [PROPOSALS] Pagamento PIX criado:', {
+          paymentId: pixResult.paymentId,
+          status: pixResult.status,
+          hasQrCode: !!pixResult.qrCode,
+          hasQrCodeBase64: !!pixResult.qrCodeBase64,
+        });
+
+        const pixResponse = {
+          success: true,
+          paymentId: pixResult.paymentId,
+          status: pixResult.status,
+          method: 'pix',
+          amount: createProposalDto.price,
+          qrCode: pixResult.qrCode,
+          qrCodeBase64: pixResult.qrCodeBase64,
+          checkoutUrl: pixResult.ticketUrl,
+          platformFee,
+          personalAmount,
+          message:
+            'Proposta criada com sucesso. PIX gerado; conclua o pagamento para confirmar.',
+          expiresAt: pixResult.expiresAt
+            ? new Date(pixResult.expiresAt)
+            : new Date(Date.now() + 30 * 60 * 1000),
+        };
+
+        console.log('🏁 [PROPOSALS] ===== FIM DO PAGAMENTO PIX =====');
+        return pixResponse;
+      }
+
+      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (Mercado Pago checkout ou cartão sem ID) =====
       console.log('🔄 [PROPOSALS] Iniciando fallback para Mercado Pago...');
       console.log('🔄 [PROPOSALS] Motivo do fallback:', {
         hasCardId,
@@ -2117,9 +2294,7 @@ export class ProposalsService {
 
       // Criar preferência no Mercado Pago
       const mpPreference =
-        await this.paymentsService['mercadoPagoService'].createPreference(
-          preferenceData,
-        );
+        await this.paymentsService.createMpPreference(preferenceData);
 
       console.log('✅ [PROPOSALS] Preferência MP criada:', {
         id: mpPreference.id,
@@ -2157,20 +2332,6 @@ export class ProposalsService {
     }
   }
 
-  // ===== MÉTODO DE SIMULAÇÃO DESABILITADO =====
-  // Este método foi desabilitado para evitar criação de propostas sem pagamento real
-  // Em caso de erro de pagamento, a proposta não deve ser criada
-
-  private simulatePaymentForProposal(
-    createProposalDto: CreateProposalDto,
-    proposalId: string,
-  ): any {
-    // MÉTODO DESABILITADO - Não deve ser usado em produção
-    throw new BadRequestException(
-      'Simulação de pagamento desabilitada. Pagamento real é obrigatório.',
-    );
-  }
-
   async getProposalStats(userId: string, userType: string): Promise<any> {
     const conditions =
       userType === 'student'
@@ -2202,10 +2363,6 @@ export class ProposalsService {
     blockedTimeSlots: string[];
   }> {
     try {
-      console.log(
-        `🔍 [CONFLICTS] Buscando conflitos para data ${date} e aluno ${studentId}`,
-      );
-
       // Validar formato da data
       const targetDate = new Date(date);
       if (isNaN(targetDate.getTime())) {
@@ -2234,11 +2391,6 @@ export class ProposalsService {
         59,
         999,
       );
-
-      console.log(`🔍 [CONFLICTS] Data buscada: ${targetDate}`);
-      console.log(`🔍 [CONFLICTS] Start of day: ${startOfDay.toISOString()}`);
-      console.log(`🔍 [CONFLICTS] End of day: ${endOfDay.toISOString()}`);
-
       // 1. Buscar propostas existentes do aluno para o mesmo dia
       // Usar comparação de string para data (YYYY-MM-DD)
       const dateString = targetDate.toISOString().split('T')[0]; // 2025-09-25
@@ -2271,12 +2423,6 @@ export class ProposalsService {
       );
       const afterFilter = existingProposals.length;
 
-      if (beforeFilter !== afterFilter) {
-        console.log(
-          `🔍 [CONFLICTS] Filtro aplicado: ${beforeFilter} → ${afterFilter} propostas (removidas: ${beforeFilter - afterFilter})`,
-        );
-      }
-
       // Ignorar propostas vinculadas a aulas em disputa (no_show_dispute)
       const disputedClasses = await this.db.query.classes.findMany({
         where: and(
@@ -2295,10 +2441,6 @@ export class ProposalsService {
         );
       }
 
-      console.log(
-        `📋 [CONFLICTS] Propostas existentes encontradas: ${existingProposals.length}`,
-      );
-
       // 2. Buscar aulas em match do ALUNO ESPECÍFICO para o mesmo dia
       const matchedClasses = await this.db.query.classes.findMany({
         where: and(
@@ -2314,18 +2456,10 @@ export class ProposalsService {
         },
       });
 
-      console.log(
-        `🏃 [CONFLICTS] Aulas em match do aluno ${studentId} encontradas: ${matchedClasses.length}`,
-      );
-
       // 3. Calcular horários bloqueados baseado nos conflitos reais
       const blockedTimeSlots = this.calculateBlockedTimeSlots(
         existingProposals,
         matchedClasses,
-      );
-
-      console.log(
-        `🚫 [CONFLICTS] Horários bloqueados: ${blockedTimeSlots.join(', ')}`,
       );
 
       return {
@@ -2630,7 +2764,8 @@ export class ProposalsService {
             const original = new URL(file.url);
             const normalizedBase = new URL(baseUrl);
             studentProfilePicture = `${normalizedBase.origin}${original.pathname}`;
-          } catch (_) {
+          } catch (e) {
+            console.error('⚠️ Erro ao normalizar URL da imagem do aluno:', e);
             studentProfilePicture = file.url.replace(
               'https://api.treinopro.com',
               baseUrl,
@@ -2646,7 +2781,9 @@ export class ProposalsService {
     let locationLat: number | null = null;
     let locationLng: number | null = null;
     try {
-      const locId = (proposal.locationId || proposal.location_id) as string | undefined;
+      const locId = (proposal.locationId || proposal.location_id) as
+        | string
+        | undefined;
       if (locId) {
         const [loc] = await this.db
           .select({ lat: locations.lat, lng: locations.lng })
@@ -2659,6 +2796,7 @@ export class ProposalsService {
         }
       }
     } catch (e) {
+      console.error('⚠️ Falha ao buscar coordenadas do local:', e);
       // Silencioso: sem coordenadas
     }
 
@@ -2687,6 +2825,8 @@ export class ProposalsService {
       additionalNotes: proposal.additionalNotes,
       status: proposal.status,
       paymentStatus: proposal.paymentStatus,
+      isRecontract: !!proposal.targetPersonalId,
+      targetPersonalId: proposal.targetPersonalId || undefined,
       createdAt: proposal.createdAt,
       updatedAt: proposal.updatedAt,
     };
@@ -2884,7 +3024,11 @@ export class ProposalsService {
           }
 
           return isExpired;
-        } catch (_) {
+        } catch (e) {
+          console.error(
+            `⚠️ [PROPOSALS] Erro ao processar proposta ${p.id} para verificação de expiração:`,
+            e,
+          );
           return false;
         }
       });
@@ -3054,10 +3198,17 @@ export class ProposalsService {
   /**
    * Extrai coordenadas da proposta
    */
-  private extractProposalCoordinates(proposal: any): { lat?: number; lng?: number } {
+  private extractProposalCoordinates(proposal: any): {
+    lat?: number;
+    lng?: number;
+  } {
     // Tentar extrair de locationLat/locationLng
-    let lat = proposal.locationLat ? parseFloat(proposal.locationLat) : undefined;
-    let lng = proposal.locationLng ? parseFloat(proposal.locationLng) : undefined;
+    let lat = proposal.locationLat
+      ? parseFloat(proposal.locationLat)
+      : undefined;
+    let lng = proposal.locationLng
+      ? parseFloat(proposal.locationLng)
+      : undefined;
 
     // Se não encontrou, tentar do objeto location
     if ((!lat || !lng) && proposal.location) {

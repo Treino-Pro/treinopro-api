@@ -13,8 +13,32 @@ import {
   IsEmail,
   Length,
   Matches,
+  registerDecorator,
+  ValidationOptions,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { isValidCPF } from '../../../common/utils/document.utils';
+
+function IsCpfValid(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isCpfValid',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: 'CPF inválido',
+        ...validationOptions,
+      },
+      constraints: [],
+      validator: {
+        validate(value: any) {
+          if (!value) return true; // campo opcional, deixar @IsOptional lidar
+          return isValidCPF(String(value));
+        },
+      },
+    });
+  };
+}
 
 export enum ProposalStatus {
   PENDING = 'pending',
@@ -113,10 +137,10 @@ export class CreateProposalDto {
   @ApiProperty({
     description: 'Preço da proposta em reais',
     example: 80.0,
-    minimum: 20,
+    minimum: 35,
   })
   @IsNumber()
-  @Min(20)
+  @Min(35)
   price: number;
 
   @ApiProperty({
@@ -206,6 +230,7 @@ export class CreateProposalDto {
   @IsString()
   @Length(11, 11, { message: 'CPF deve ter 11 dígitos' })
   @Matches(/^\d+$/, { message: 'CPF deve conter apenas dígitos' })
+  @IsCpfValid()
   payerCpf?: string;
 }
 
@@ -332,6 +357,20 @@ export class ProposalResponseDto {
     required: false,
   })
   paymentStatus?: string;
+
+  @ApiProperty({
+    description: 'Indica se a proposta é uma recontratação direta',
+    example: true,
+    required: false,
+  })
+  isRecontract?: boolean;
+
+  @ApiProperty({
+    description: 'ID do personal alvo na recontratação direta',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
+  })
+  targetPersonalId?: string;
 
   @ApiProperty({
     description: 'Data de criação',

@@ -11,6 +11,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { ChatModule } from '../chat/chat.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LocationsModule } from '../locations/locations.module';
+import { PersonalApprovalGuard } from '../../common/guards/personal-approval.guard';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { LocationsModule } from '../locations/locations.module';
     ProposalCleanupService,
     ProposalBackgroundService,
     ProposalsGateway,
+    PersonalApprovalGuard,
   ],
   exports: [
     ProposalsService,

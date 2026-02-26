@@ -3,7 +3,7 @@ import { db } from '../../database/connection';
 import { payments } from '../../database/schema/payments';
 import { PaymentStatus } from './dto/payments.dto';
 import { classes } from '../../database/schema/classes';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -18,6 +18,14 @@ export class WebhooksService {
     headers: Record<string, string>,
   ): Promise<boolean> {
     try {
+      // Verificar se o secret está configurado antes de qualquer validação
+      if (!process.env.MP_WEBHOOK_SECRET) {
+        this.logger.error(
+          '❌ [WEBHOOK] MP_WEBHOOK_SECRET não configurado - rejeitando webhook',
+        );
+        return false;
+      }
+
       const signature = headers['x-signature'];
       const requestId = headers['x-request-id'];
 
@@ -42,7 +50,15 @@ export class WebhooksService {
   }
 
   private generateSignature(payload: any, requestId: string): string {
-    const webhookSecret = process.env.MP_WEBHOOK_SECRET || 'default_secret';
+    const webhookSecret = process.env.MP_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      this.logger.error(
+        '❌ [WEBHOOK] MP_WEBHOOK_SECRET não configurado - operação sensível bloqueada',
+      );
+      throw new Error(
+        'Configuracao do Mercado Pago incompleta: MP_ACCESS_TOKEN, MP_PUBLIC_KEY e MP_WEBHOOK_SECRET sao obrigatorios.',
+      );
+    }
     const data = JSON.stringify(payload) + requestId;
     return crypto
       .createHmac('sha256', webhookSecret)
@@ -316,10 +332,7 @@ export class WebhooksService {
 
   // ===== RETRY MECHANISM =====
 
-  async retryFailedWebhook(
-    webhookId: string,
-    maxRetries: number = 3,
-  ): Promise<void> {
+  async retryFailedWebhook(webhookId: string): Promise<void> {
     this.logger.log(`🔄 [WEBHOOK] Tentando reprocessar webhook: ${webhookId}`);
 
     // Implementar lógica de retry

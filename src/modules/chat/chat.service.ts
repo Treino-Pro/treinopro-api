@@ -1,11 +1,12 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { messages, users, classes } from '../../database/schema';
+import { messages, users, classes, files } from '../../database/schema';
 import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
 import {
   SendMessageDto,
@@ -19,6 +20,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly firebaseNotificationService: FirebaseNotificationService,
@@ -96,25 +99,27 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(messages)
       .leftJoin(users, eq(messages.senderId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(eq(messages.id, newMessage.id))
       .limit(1);
 
     const messageResponse = messageWithUsers[0] as MessageResponseDto;
 
     // Enviar notificação push e in-app para destinatário
-    try {
-      const senderName = (messageResponse.sender as any)?.name || 'Alguém';
-      const messagePreview =
-        messageText.length > 50
-          ? messageText.substring(0, 50) + '...'
-          : messageText;
+    const senderName = (messageResponse.sender as any)?.name || 'Alguém';
+    const messagePreview =
+      messageText.length > 50
+        ? messageText.substring(0, 50) + '...'
+        : messageText;
 
-      // Enviar push notification
+    // 1. Tentar enviar Push Notification (falhas não devem bloquear in-app)
+    try {
+      // Enviar push notification com dados da classe para navegação correta
       await this.firebaseNotificationService.sendToUser(receiverId, {
         title: `💬 ${senderName}`,
         body: messagePreview,
@@ -125,19 +130,34 @@ export class ChatService {
           senderName: senderName,
           messageId: newMessage.id,
           messagePreview,
+          location: classData.location || '',
+          date: classData.date ? String(classData.date) : '',
+          time: classData.time || '',
+          duration: classData.duration ? String(classData.duration) : '',
         },
       });
-
-      // Criar notificação in-app
-      await this.notificationsService.sendInAppNotification(receiverId, 'new-message', {
-        senderId: userId,
-        senderName: senderName,
-        classId: classId,
-        messagePreview: messagePreview,
-      });
     } catch (error) {
-      console.error('❌ Erro ao enviar notificação de mensagem:', error);
-      // Não bloquear o envio da mensagem se notificação falhar
+      this.logger.error(
+        `❌ Falha ao enviar push de mensagem para ${receiverId} (classId: ${classId}): ${error?.message || error}`,
+      );
+    }
+
+    // 2. Criar notificação in-app (independente do sucesso do push)
+    try {
+      await this.notificationsService.sendInAppNotification(
+        receiverId,
+        'new-message',
+        {
+          senderId: userId,
+          senderName: senderName,
+          classId: classId,
+          messagePreview: messagePreview,
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Falha ao criar notificação in-app para ${receiverId} (classId: ${classId}): ${error?.message || error}`,
+      );
     }
 
     return messageResponse;
@@ -192,11 +212,12 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(messages)
       .leftJoin(users, eq(messages.senderId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(eq(messages.classId, classId))
       .orderBy(asc(messages.sentAt))
       .limit(limit)
@@ -368,11 +389,12 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         },
       })
       .from(classes)
       .leftJoin(users, eq(classes.studentId, users.id))
+      .leftJoin(files, eq(users.profileImageId, files.id))
       .where(or(eq(classes.studentId, userId), eq(classes.personalId, userId)));
 
     const conversations = [];
@@ -390,9 +412,10 @@ export class ChatService {
           name: sql`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as(
             'name',
           ),
-          profilePicture: users.profileImageId,
+          profilePicture: files.url,
         })
         .from(users)
+        .leftJoin(files, eq(users.profileImageId, files.id))
         .where(eq(users.id, otherParticipantId))
         .limit(1);
 

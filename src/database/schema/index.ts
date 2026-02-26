@@ -24,3 +24,6 @@ export * from './financial';
 export * from './ratings';
 export * from './payments';
 export * from './gamification';
+
+// Re-export classPresenceSnapshots explicitly (already in ./classes)
+

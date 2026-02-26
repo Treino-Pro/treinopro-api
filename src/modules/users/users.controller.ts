@@ -35,7 +35,6 @@ import {
   UserListResponseDto,
 } from './dto/users.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Usuários')
 @Controller('users')
@@ -288,27 +287,8 @@ export class UsersController {
     description: 'Usuário não encontrado',
   })
   async getProfile(@Request() req: any): Promise<UserResponseDto> {
-    try {
-      console.log('👤 [USERS][Controller] HIT /users/profile/me');
-    } catch (_) {}
     const userId = req.user?.id ?? req.user?.sub;
-    try {
-      console.log('👤 [USERS][Controller] user payload:', req.user);
-      console.log('👤 [USERS][Controller] resolved userId:', userId);
-    } catch (_) {}
     const response = await this.usersService.getProfile(userId);
-    try {
-      console.log('👤 [USERS][Controller] Response:', {
-        id: response.id,
-        email: response.email,
-        firstName: response.firstName,
-        lastName: response.lastName,
-        documentType: response.documentType,
-        documentNumber: response.documentNumber,
-        profileImageId: response.profileImageId,
-        profileImageUrl: (response as any).profileImageUrl,
-      });
-    } catch (_) {}
     return response;
   }
 
@@ -341,7 +321,8 @@ export class UsersController {
   @Patch('profile/me/service-location')
   @ApiOperation({
     summary: 'Atualizar localização de atendimento do personal',
-    description: 'Atualiza a localização e raio de atendimento do personal trainer',
+    description:
+      'Atualiza a localização e raio de atendimento do personal trainer',
   })
   @ApiResponse({
     status: 200,
@@ -350,7 +331,8 @@ export class UsersController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Apenas personal trainers podem atualizar localização de atendimento',
+    description:
+      'Apenas personal trainers podem atualizar localização de atendimento',
   })
   async updateServiceLocation(
     @Request() req: any,
@@ -358,15 +340,18 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const userId = req.user.sub;
     const userType = req.user.userType;
-    
+
     // ✅ Apenas personals podem atualizar localização de atendimento
     if (userType !== 'personal') {
       throw new ForbiddenException(
         'Apenas personal trainers podem atualizar localização de atendimento',
       );
     }
-    
-    return this.usersService.updateServiceLocation(userId, updateServiceLocationDto);
+
+    return this.usersService.updateServiceLocation(
+      userId,
+      updateServiceLocationDto,
+    );
   }
 
   // ===== MÉTODOS AUXILIARES =====
@@ -470,7 +455,7 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async saveFcmToken(
     @Param('id') userId: string,
-    @Body() body: { token: string },
+    @Body() body: { token: string; platform?: string; deviceInfo?: string },
     @Request() req: any,
   ) {
     // ✅ Validar que usuário só pode atualizar seu próprio token
@@ -480,6 +465,6 @@ export class UsersController {
       );
     }
 
-    return this.usersService.saveFcmToken(userId, body.token);
+    return this.usersService.saveFcmToken(userId, body.token, body.platform, body.deviceInfo);
   }
 }

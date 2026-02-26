@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
+import { eq, and } from 'drizzle-orm';
+import { users, userPushTokens } from '../../../database/schema';
 
 @Injectable()
 export class PushNotificationService {
@@ -8,9 +10,56 @@ export class PushNotificationService {
   private readonly configService: ConfigService;
   private isFirebaseInitialized = false;
 
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
+  ) {
     this.configService = configService;
     this.initializeFirebase();
+  }
+
+  private isPushStrictModeEnabled(): boolean {
+    const rawValue = this.configService.get<string>(
+      'PUSH_FAIL_ON_MISSING_IOS_BUNDLE',
+    );
+
+    if (!rawValue) {
+      return true;
+    }
+
+    const normalized = rawValue.trim().toLowerCase();
+    const falseValues = ['false', '0', 'no', 'off', 'disabled'];
+
+    return !falseValues.includes(normalized);
+  }
+
+  private getApnsTopic(): string | null {
+    const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
+
+    if (!apnsTopic) {
+      const strictMode = this.isPushStrictModeEnabled();
+
+      if (strictMode) {
+        throw new Error(
+          'IOS_BUNDLE_ID ausente e PUSH_FAIL_ON_MISSING_IOS_BUNDLE está ativo',
+        );
+      }
+
+      this.logger.warn(
+        '⚠️ IOS_BUNDLE_ID ausente: payload APNS omitido por configuração não estrita',
+      );
+      return null;
+    }
+
+    return apnsTopic;
+  }
+
+  private chunkArray<T>(items: T[], chunkSize: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+      chunks.push(items.slice(i, i + chunkSize));
+    }
+    return chunks;
   }
 
   private initializeFirebase(): void {
@@ -73,6 +122,7 @@ export class PushNotificationService {
 
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
       const message = {
         token: token,
@@ -82,24 +132,52 @@ export class PushNotificationService {
         },
         data: {
           template: template,
+          title: notification.title,
+          body: notification.body,
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
           ...this.stringifyDataValues(data),
         },
         android: {
+          priority: 'high' as const,
+          ttl: 24 * 60 * 60 * 1000,
+          directBootOk: true,
           notification: {
             icon: 'ic_notification',
             color: '#4CAF50',
             sound: 'default',
+            channelId: 'high_importance_channel',
             priority: 'high' as const,
+            visibility: 'public' as const,
+            defaultSound: true,
+            defaultVibrateTimings: true,
           },
         },
-        apns: {
-          payload: {
-            aps: {
-              sound: 'default',
-              badge: 1,
-            },
-          },
-        },
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': 1,
+                    contentAvailable: true,
+                  },
+                },
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-topic': apnsTopic,
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  'apns-priority': '10',
+                },
+              },
+            }
+          : {}),
       };
 
       const response = await admin.messaging().send(message);
@@ -125,58 +203,188 @@ export class PushNotificationService {
       return;
     }
 
-    if (tokens.length === 0) {
+    // Filtrar tokens inválidos e deduplicar
+    const validTokens = [...new Set(
+      tokens.filter((t): t is string => typeof t === 'string' && t.length > 0),
+    )];
+
+    if (validTokens.length === 0) {
       this.logger.warn(
-        '⚠️ Nenhum token fornecido para envio de push notification',
+        '⚠️ Nenhum token válido fornecido para envio de push notification',
       );
       return;
     }
 
+    if (validTokens.length !== tokens.length) {
+      this.logger.warn(
+        `⚠️ ${tokens.length - validTokens.length} tokens inválidos/duplicados filtrados`,
+      );
+    }
+
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
-      const message = {
-        tokens: tokens,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        data: {
-          template: template,
-          ...this.stringifyDataValues(data),
-        },
-        android: {
+      const maxBatchSize = 500;
+      const maxChunkRetries = 2;
+      const tokenChunks = this.chunkArray(validTokens, maxBatchSize);
+      const invalidTokensToClean: string[] = [];
+      let totalSuccessCount = 0;
+      let totalFailureCount = 0;
+      let hadChunkTransportError = false;
+
+      for (let chunkIndex = 0; chunkIndex < tokenChunks.length; chunkIndex++) {
+        const chunk = tokenChunks[chunkIndex];
+
+        const message = {
+          tokens: chunk,
           notification: {
-            icon: 'ic_notification',
-            color: '#4CAF50',
-            sound: 'default',
-            priority: 'high' as const,
+            title: notification.title,
+            body: notification.body,
           },
-        },
-        apns: {
-          payload: {
-            aps: {
+          data: {
+            template: template,
+            title: notification.title,
+            body: notification.body,
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+            ...this.stringifyDataValues(data),
+          },
+          android: {
+            priority: 'high' as const,
+            ttl: 24 * 60 * 60 * 1000,
+            directBootOk: true,
+            notification: {
+              icon: 'ic_notification',
+              color: '#4CAF50',
               sound: 'default',
-              badge: 1,
+              channelId: 'high_importance_channel',
+              priority: 'high' as const,
+              visibility: 'public' as const,
+              defaultSound: true,
+              defaultVibrateTimings: true,
             },
           },
-        },
-      };
+          ...(apnsTopic
+            ? {
+                apns: {
+                  payload: {
+                    aps: {
+                      alert: {
+                        title: notification.title,
+                        body: notification.body,
+                      },
+                      sound: 'default',
+                      badge: 1,
+                      'mutable-content': 1,
+                      contentAvailable: true,
+                    },
+                  },
+                  headers: {
+                    'apns-push-type': 'alert',
+                    'apns-topic': apnsTopic,
+                    'apns-expiration': String(
+                      Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                    ),
+                    'apns-priority': '10',
+                  },
+                },
+              }
+            : {}),
+        };
 
-      const response = await admin.messaging().sendEachForMulticast(message);
+        let response: admin.messaging.BatchResponse | null = null;
+        for (let attempt = 1; attempt <= maxChunkRetries; attempt++) {
+          try {
+            response = await admin.messaging().sendEachForMulticast(message);
+            break;
+          } catch (error) {
+            const isLastAttempt = attempt === maxChunkRetries;
+            if (!isLastAttempt) {
+              this.logger.warn(
+                `⚠️ Chunk ${chunkIndex + 1}/${tokenChunks.length} falhou na tentativa ${attempt}/${maxChunkRetries}. Retentando...`,
+              );
+              await new Promise((resolve) =>
+                setTimeout(resolve, attempt * 1000),
+              );
+              continue;
+            }
 
-      this.logger.log(
-        `📱 Push notifications enviados: ${response.successCount}/${tokens.length} com sucesso`,
-      );
-
-      if (response.failureCount > 0) {
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
+            hadChunkTransportError = true;
+            totalFailureCount += chunk.length;
             this.logger.error(
-              `❌ Falha no token ${tokens[idx]}: ${resp.error?.message}`,
+              `❌ Falha de transporte no chunk ${chunkIndex + 1}/${tokenChunks.length} após ${maxChunkRetries} tentativas: ${error?.code || error?.message || error}`,
             );
           }
-        });
+        }
+
+        if (!response) {
+          this.logger.error(
+            `❌ Chunk ${chunkIndex + 1}/${tokenChunks.length} marcado para retry direcionado externo (${chunk.length} tokens)`,
+          );
+          continue;
+        }
+
+        totalSuccessCount += response.successCount;
+        totalFailureCount += response.failureCount;
+
+        this.logger.log(
+          `📦 Chunk ${chunkIndex + 1}/${tokenChunks.length}: ${response.successCount}/${chunk.length} enviados`,
+        );
+
+        if (response.failureCount > 0) {
+          response.responses.forEach((resp, idx) => {
+            if (!resp.success) {
+              const errorCode = (resp.error as any)?.code;
+              const isInvalidToken =
+                errorCode === 'messaging/invalid-registration-token' ||
+                errorCode === 'messaging/registration-token-not-registered';
+
+              if (isInvalidToken) {
+                this.logger.warn(
+                  `🗑️ Token inválido detectado (${errorCode}): ${chunk[idx].substring(0, 20)}...`,
+                );
+                invalidTokensToClean.push(chunk[idx]);
+              } else {
+                this.logger.error(
+                  `❌ Falha no token ${chunk[idx].substring(0, 20)}...: [${errorCode}] ${resp.error?.message}`,
+                );
+              }
+            }
+          });
+        }
+      }
+
+      // Limpar tokens inválidos do banco de dados
+      if (invalidTokensToClean.length > 0) {
+        await this.cleanupInvalidTokens(invalidTokensToClean);
+      }
+
+      this.logger.log(
+        `📱 Push notifications enviados: ${totalSuccessCount}/${validTokens.length} com sucesso`,
+      );
+
+      if (totalFailureCount > 0) {
+        this.logger.warn(
+          `⚠️ Total de falhas no envio em lote: ${totalFailureCount}/${validTokens.length}`,
+        );
+      }
+
+      if (hadChunkTransportError && totalSuccessCount > 0) {
+        this.logger.error(
+          '❌ Envio com sucesso parcial: alguns chunks falharam no transporte e exigem retry direcionado',
+        );
+      }
+
+      if (hadChunkTransportError) {
+        throw new Error(
+          'Falha parcial no envio de push: houve chunks com erro de transporte após retries',
+        );
+      }
+
+      if (totalSuccessCount === 0 && totalFailureCount > 0) {
+        throw new Error(
+          'Falha ao enviar push notifications para todos os tokens',
+        );
       }
     } catch (error) {
       this.logger.error(
@@ -201,6 +409,7 @@ export class PushNotificationService {
 
     try {
       const notification = this.getNotificationTemplate(template, data);
+      const apnsTopic = this.getApnsTopic();
 
       const message = {
         topic: topic,
@@ -212,6 +421,41 @@ export class PushNotificationService {
           template: template,
           ...this.stringifyDataValues(data),
         },
+        android: {
+          priority: 'high' as const,
+          notification: {
+            icon: 'ic_notification',
+            color: '#4CAF50',
+            sound: 'default',
+            channelId: 'high_importance_channel',
+          },
+        },
+        ...(apnsTopic
+          ? {
+              apns: {
+                payload: {
+                  aps: {
+                    alert: {
+                      title: notification.title,
+                      body: notification.body,
+                    },
+                    sound: 'default',
+                    badge: 1,
+                    'mutable-content': 1,
+                    contentAvailable: true,
+                  },
+                },
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-topic': apnsTopic,
+                  'apns-expiration': String(
+                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                  ),
+                  'apns-priority': '10',
+                },
+              },
+            }
+          : {}),
       };
 
       const response = await admin.messaging().send(message);
@@ -376,19 +620,67 @@ export class PushNotificationService {
     }
 
     try {
-      // Tentar enviar uma mensagem de teste (dry run)
-      // await admin.messaging().send({
-      //   token: token,
-      //   notification: {
-      //     title: 'Test',
-      //     body: 'Test',
-      //   },
-      // }, true); // dry run
+      // Dry run: envia mensagem de teste sem entregar ao dispositivo
+      await admin.messaging().send(
+        {
+          token: token,
+          notification: {
+            title: 'Validation',
+            body: 'Token validation test',
+          },
+        },
+        true, // dry run — não entrega, apenas valida
+      );
 
       return true;
     } catch (error) {
-      this.logger.warn(`⚠️ Token inválido: ${token} - ${error.message}`);
+      const errorCode = (error as any)?.code;
+      const isInvalid =
+        errorCode === 'messaging/invalid-registration-token' ||
+        errorCode === 'messaging/registration-token-not-registered';
+
+      if (isInvalid) {
+        this.logger.warn(
+          `⚠️ Token inválido (${errorCode}): ${token.substring(0, 20)}...`,
+        );
+        await this.cleanupInvalidTokens([token]);
+      } else {
+        this.logger.warn(
+          `⚠️ Erro ao validar token: ${token.substring(0, 20)}... - ${error.message}`,
+        );
+      }
       return false;
+    }
+  }
+
+  /**
+   * Remove tokens inválidos do banco de dados (user_push_tokens e users.fcmToken)
+   */
+  private async cleanupInvalidTokens(invalidTokens: string[]): Promise<void> {
+    if (invalidTokens.length === 0) return;
+
+    try {
+      for (const token of invalidTokens) {
+        // 1. Remover da tabela user_push_tokens
+        await this.db
+          .delete(userPushTokens)
+          .where(eq(userPushTokens.token, token));
+
+        // 2. Limpar users.fcmToken se for o mesmo token
+        await this.db
+          .update(users)
+          .set({ fcmToken: null })
+          .where(eq(users.fcmToken, token));
+      }
+
+      this.logger.log(
+        `🗑️ ${invalidTokens.length} tokens inválidos removidos do banco`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Erro ao limpar tokens inválidos do banco:`,
+        error,
+      );
     }
   }
 

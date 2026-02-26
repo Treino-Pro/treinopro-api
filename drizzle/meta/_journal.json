@@ -22,6 +22,90 @@
       "when": 1761398522746,
       "tag": "0002_acoustic_the_fallen",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1771525568277,
+      "tag": "0003_overrated_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1771611968277,
+      "tag": "0004_add_no_show_reason_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1771698368277,
+      "tag": "0005_add_email_case_insensitive_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1771784768277,
+      "tag": "0006_add_cpf_to_document_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1771871168277,
+      "tag": "0007_add_personal_approval_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1771560387880,
+      "tag": "0008_equal_betty_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1771646787880,
+      "tag": "0009_presence_snapshot_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1771567849515,
+      "tag": "0010_tan_shotgun",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1771618454737,
+      "tag": "0011_friendly_justice",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1771951620402,
+      "tag": "0012_hesitant_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1771953334854,
+      "tag": "0013_absent_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1771954909147,
+      "tag": "0014_slim_serpent_society",
+      "breakpoints": true
     }
   ]
 }

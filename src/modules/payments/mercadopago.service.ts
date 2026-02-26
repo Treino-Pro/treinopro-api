@@ -58,7 +58,7 @@ export class MercadoPagoService {
       this.logger.log(
         `✅ MercadoPago Service - Modo: ${isTestMode ? 'TESTE' : 'PRODUÇÃO'}`,
       );
-      
+
       // ✅ AVISO: Se estiver em produção, alertar sobre cartões de teste
       if (!isTestMode) {
         this.logger.warn(
@@ -86,11 +86,11 @@ export class MercadoPagoService {
     data: CreatePreferenceData,
   ): Promise<MPPreferenceResponse> {
     try {
-      const platformFeePercentage = parseFloat(
-        process.env.PLATFORM_FEE_PERCENTAGE || '10',
-      );
-
       // Configurar preferência com split
+      const prefApiUrl = process.env.API_URL;
+      const prefIsPublicUrl =
+        !!prefApiUrl && !/localhost|127\.0\.0\.1/.test(prefApiUrl);
+
       const preferenceData = {
         items: [
           {
@@ -118,8 +118,10 @@ export class MercadoPagoService {
           pending: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/pending`,
         },
 
-        // URL de notificação (webhook)
-        notification_url: `${process.env.API_URL || 'http://localhost:3000'}/payments/webhook`,
+        // URL de notificação (webhook) — omitida em desenvolvimento local
+        ...(prefIsPublicUrl
+          ? { notification_url: `${prefApiUrl}/webhooks/mercadopago` }
+          : {}),
 
         // Referência externa
         external_reference: data.externalReference,
@@ -321,7 +323,7 @@ export class MercadoPagoService {
   }
 
   // Mapear status do MP para status interno
-  mapPaymentStatus(mpStatus: string, mpStatusDetail?: string): string {
+  mapPaymentStatus(mpStatus: string): string {
     switch (mpStatus) {
       case 'pending':
         return 'authorized'; // Em custódia
@@ -358,6 +360,111 @@ export class MercadoPagoService {
     }
 
     return true;
+  }
+
+  // Criar pagamento via PIX (retorna QR Code)
+  async createPixPayment(pixData: {
+    amount: number;
+    description: string;
+    externalReference: string;
+    payerEmail: string;
+    payerFirstName?: string;
+    payerLastName?: string;
+    payerCpf?: string;
+    notificationUrl?: string;
+  }): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  }> {
+    const accessToken = process.env.MP_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new BadRequestException(
+        'Configuracao do Mercado Pago incompleta: MP_ACCESS_TOKEN, MP_PUBLIC_KEY e MP_WEBHOOK_SECRET sao obrigatorios.',
+      );
+    }
+
+    this.logger.log(
+      `🔵 [PIX] Criando pagamento PIX para referência: ${pixData.externalReference}`,
+    );
+
+    const body: any = {
+      transaction_amount: pixData.amount,
+      description: (pixData.description || 'Treino').slice(0, 60),
+      payment_method_id: 'pix',
+      external_reference: pixData.externalReference,
+      payer: {
+        email: pixData.payerEmail,
+        first_name: pixData.payerFirstName || 'Aluno',
+        last_name: pixData.payerLastName || 'TreinoPro',
+        ...(pixData.payerCpf
+          ? {
+              identification: {
+                type: 'CPF',
+                number: pixData.payerCpf.replace(/\D/g, ''),
+              },
+            }
+          : {}),
+      },
+    };
+
+    if (pixData.notificationUrl) {
+      body.notification_url = pixData.notificationUrl;
+    }
+
+    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': `pix_${pixData.externalReference}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { message: responseText };
+      }
+      this.logger.error(`❌ [PIX] Erro ao criar pagamento PIX:`, errorData);
+      throw new BadRequestException(
+        `Erro ao processar pagamento: ${errorData.message || 'Erro desconhecido'}`,
+      );
+    }
+
+    const data = JSON.parse(responseText);
+    const transactionData = data?.point_of_interaction?.transaction_data;
+
+    if (!transactionData?.qr_code) {
+      this.logger.error(
+        `❌ [PIX] Resposta sem QR Code. Status: ${data.status}`,
+        data,
+      );
+      throw new BadRequestException(
+        'Pagamento nao foi processado automaticamente. Por favor, escolha outro metodo de pagamento.',
+      );
+    }
+
+    this.logger.log(
+      `✅ [PIX] Pagamento PIX criado: ${data.id} | Status: ${data.status}`,
+    );
+
+    return {
+      paymentId: String(data.id),
+      status: data.status,
+      qrCode: transactionData.qr_code,
+      qrCodeBase64: transactionData.qr_code_base64 || '',
+      ticketUrl: transactionData.ticket_url,
+      expiresAt: data.date_of_expiration,
+    };
   }
 
   // Criar pagamento direto (autorização/captura)
@@ -683,13 +790,18 @@ export class MercadoPagoService {
           type: cardData.identificationType,
           number: cardData.identificationNumber.replace(/\D/g, ''), // Remove formatação (pontos, traços)
         };
-        
+
         this.logger.log(`🔍 [MP CARD TOKEN] Identification incluído:`, {
           type: cardData.identificationType,
-          number_masked: cardData.identificationNumber.replace(/\d(?=\d{4})/g, '*'),
+          number_masked: cardData.identificationNumber.replace(
+            /\d(?=\d{4})/g,
+            '*',
+          ),
         });
       } else {
-        this.logger.warn('⚠️ [MP CARD TOKEN] Identification não fornecido - pode causar erro 400');
+        this.logger.warn(
+          '⚠️ [MP CARD TOKEN] Identification não fornecido - pode causar erro 400',
+        );
       }
 
       this.logger.log(`🔍 [MP CARD TOKEN] Payload:`, {
@@ -709,30 +821,46 @@ export class MercadoPagoService {
       // O SDK pode usar credenciais diferentes internamente
       const accessToken = process.env.MP_ACCESS_TOKEN;
       if (!accessToken) {
-        throw new BadRequestException('Token de acesso do Mercado Pago não configurado');
+        throw new BadRequestException(
+          'Token de acesso do Mercado Pago não configurado',
+        );
       }
 
-      this.logger.log(`🌐 [MP CARD TOKEN] Criando token via API REST diretamente`);
-      this.logger.log(`🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`);
+      this.logger.log(
+        `🌐 [MP CARD TOKEN] Criando token via API REST diretamente`,
+      );
+      this.logger.log(
+        `🔑 [MP CARD TOKEN] Usando Access Token: ${accessToken.startsWith('TEST-') ? 'TEST-***' : 'PROD-***'}`,
+      );
 
       // ✅ ADICIONAR: Log do payload completo sendo enviado
-      this.logger.log(`📤 [MP CARD TOKEN] Payload completo enviado:`, JSON.stringify(cardTokenRequest, null, 2));
+      this.logger.log(
+        `📤 [MP CARD TOKEN] Payload completo enviado:`,
+        JSON.stringify(cardTokenRequest, null, 2),
+      );
 
-      const response = await fetch('https://api.mercadopago.com/v1/card_tokens', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+      const response = await fetch(
+        'https://api.mercadopago.com/v1/card_tokens',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(cardTokenRequest),
         },
-        body: JSON.stringify(cardTokenRequest),
-      });
+      );
 
       const responseText = await response.text();
-      
+
       // ✅ ADICIONAR: Log detalhado da resposta
-      this.logger.log(`📥 [MP CARD TOKEN] Response status: ${response.status} ${response.statusText}`);
-      this.logger.log(`📥 [MP CARD TOKEN] Response body (primeiros 500 chars): ${responseText.substring(0, 500)}`);
-      
+      this.logger.log(
+        `📥 [MP CARD TOKEN] Response status: ${response.status} ${response.statusText}`,
+      );
+      this.logger.log(
+        `📥 [MP CARD TOKEN] Response body (primeiros 500 chars): ${responseText.substring(0, 500)}`,
+      );
+
       if (!response.ok) {
         let errorData;
         try {
@@ -740,21 +868,21 @@ export class MercadoPagoService {
         } catch {
           errorData = { message: responseText, raw: true };
         }
-        
+
         this.logger.error(`❌ [MP CARD TOKEN] Erro ao criar token:`, {
           status: response.status,
           statusText: response.statusText,
           error: errorData,
           cause: errorData.cause || [],
         });
-        
+
         throw new BadRequestException(
           `Erro ao processar cartão: ${errorData.message || 'Erro desconhecido'}`,
         );
       }
 
       const tokenData = JSON.parse(responseText);
-      
+
       // ✅ ADICIONAR: Log completo dos dados retornados
       this.logger.log(`✅ [MP CARD TOKEN] Token criado com sucesso:`, {
         id: tokenData.id,
@@ -771,16 +899,16 @@ export class MercadoPagoService {
         luhn_validation: tokenData.luhn_validation,
         live_mode: tokenData.live_mode,
       });
-      
+
       return tokenData.id;
     } catch (error) {
       this.logger.error(`Erro ao criar token de cartão:`, error);
-      
+
       // Se já for BadRequestException, propagar
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       throw new BadRequestException(
         `Erro ao processar cartão: ${error.message}`,
       );
@@ -1017,7 +1145,10 @@ export class MercadoPagoService {
       });
       if (searchData?.results && searchData.results.length > 0) {
         const existingCustomer = searchData.results[0];
-        console.log('✅ [MP CUSTOMER] Customer encontrado:', existingCustomer.id);
+        console.log(
+          '✅ [MP CUSTOMER] Customer encontrado:',
+          existingCustomer.id,
+        );
         return { id: existingCustomer.id };
       }
 
@@ -1092,8 +1223,11 @@ export class MercadoPagoService {
         cardData.identificationNumber
       ) {
         // ✅ IMPORTANTE: Garantir que o número de identification está sem formatação
-        const cleanIdentificationNumber = cardData.identificationNumber.replace(/\D/g, '');
-        
+        const cleanIdentificationNumber = cardData.identificationNumber.replace(
+          /\D/g,
+          '',
+        );
+
         cardPayload.cardholder = {
           name: cardData.cardholderName,
           identification: {
@@ -1127,7 +1261,8 @@ export class MercadoPagoService {
         hasCardholder: !!cardPayload.cardholder,
         cardholderName: cardPayload.cardholder?.name,
         identificationType: cardPayload.cardholder?.identification?.type,
-        identificationNumberLength: cardPayload.cardholder?.identification?.number?.length || 0,
+        identificationNumberLength:
+          cardPayload.cardholder?.identification?.number?.length || 0,
       });
 
       const accessToken = process.env.MP_ACCESS_TOKEN;
@@ -1159,8 +1294,7 @@ export class MercadoPagoService {
           error?.response?.status ||
           error?.cause?.status ||
           error?.response?.data?.status;
-        const errorData =
-          error?.response?.data || error?.cause || error || {};
+        const errorData = error?.response?.data || error?.cause || error || {};
 
         console.error('❌ [MP CARD] Erro ao salvar cartão (SDK):', {
           status,

@@ -8,10 +8,14 @@ import { AuthModule } from '../../src/modules/auth/auth.module';
 import { DatabaseModule } from '../../src/database/database.module';
 import { HealthController } from '../../src/common/health/health.controller';
 import { UserType, DocumentType } from '../../src/modules/auth/dto/auth.dto';
+import { client } from '../../src/database/connection';
 
 describe('Auth Integration Tests', () => {
   let app: INestApplication;
   let moduleRef: TestingModule;
+
+  // Aumentar timeout para o setup inicial e para a suite
+  jest.setTimeout(60000);
 
   beforeAll(async () => {
     // Configurar módulo de teste com dependências reais
@@ -19,13 +23,21 @@ describe('Auth Integration Tests', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          envFilePath: '.env.test',
+          envFilePath: '.env', // Usar o .env real para os testes de integração conforme solicitado
         }),
         DatabaseModule,
         AuthModule,
       ],
       controllers: [HealthController],
-    }).compile();
+    })
+    .overrideProvider('CACHE_MANAGER')
+    .useValue({
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
+      reset: jest.fn(),
+    })
+    .compile();
 
     app = moduleRef.createNestApplication();
 
@@ -48,6 +60,16 @@ describe('Auth Integration Tests', () => {
   });
 
   afterAll(async () => {
+    // Garantir que a conexão com o banco seja fechada
+    try {
+      if (client) {
+        await client.end();
+        console.log('🔌 [AUTH TEST] Conexões com o banco encerradas');
+      }
+    } catch (e) {
+      console.log('ℹ️ [AUTH TEST] Erro ao fechar client:', e.message);
+    }
+    
     await app.close();
     await moduleRef.close();
   });
@@ -80,12 +102,11 @@ describe('Auth Integration Tests', () => {
         password: '123456',
         firstName: 'João',
         lastName: 'Silva',
-        phone: '11999999999',
         birthDate: '1990-01-01',
         userType: UserType.STUDENT,
         documentType: DocumentType.RG,
         documentNumber: '12345678901',
-        documentImageUrl: 'https://example.com/rg-joao.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: false,
         guardianConsent: false,
         termsAccepted: true,
@@ -110,14 +131,13 @@ describe('Auth Integration Tests', () => {
         password: '123456',
         firstName: 'Carlos',
         lastName: 'Personal',
-        phone: '11977777777',
         birthDate: '1985-03-20',
         userType: UserType.PERSONAL,
-        documentType: DocumentType.CNH,
+        documentType: DocumentType.RG,
         documentNumber: '12345678901',
-        documentImageUrl: 'https://example.com/cnh-carlos.jpg',
+        documentImageId: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
         cref: 'SP-106227',
-        crefImageUrl: 'https://example.com/cref-carlos.jpg',
+        crefImageId: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
         specialties: ['Musculação', 'Funcional'],
         isMinor: false,
         guardianConsent: false,
@@ -143,12 +163,11 @@ describe('Auth Integration Tests', () => {
         password: '123456',
         firstName: 'Maria',
         lastName: 'Santos',
-        phone: '11988888888',
         birthDate: '2010-05-15',
         userType: UserType.STUDENT,
         documentType: DocumentType.RG,
         documentNumber: '98765432109',
-        documentImageUrl: 'https://example.com/rg-maria.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: true,
         guardianName: 'Ana Santos',
         guardianEmail: 'ana@test.com',
@@ -196,7 +215,7 @@ describe('Auth Integration Tests', () => {
         userType: UserType.PERSONAL,
         documentType: DocumentType.RG,
         documentNumber: '12345678901',
-        documentImageUrl: 'https://example.com/rg.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: false,
         guardianConsent: false,
         termsAccepted: true,
@@ -210,6 +229,57 @@ describe('Auth Integration Tests', () => {
         .expect(400);
     });
 
+    it('deve retornar erro 400 para CPF inválido (999.999.999-99)', async () => {
+      const invalidCpfData = {
+        email: 'cpfinvalido@test.com',
+        password: '123456',
+        firstName: 'Teste',
+        lastName: 'CPF',
+        birthDate: '1990-01-01',
+        userType: UserType.STUDENT,
+        documentType: DocumentType.CPF,
+        documentNumber: '99999999999',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      };
+
+      const response = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send(invalidCpfData)
+        .expect(400);
+
+      expect(response.body).toHaveProperty('message');
+    });
+
+    it('deve aceitar CPF válido (111.444.777-35)', async () => {
+      const validCpfData = {
+        email: 'cpfvalido@test.com',
+        password: '123456',
+        firstName: 'Teste',
+        lastName: 'CPF',
+        birthDate: '1990-01-01',
+        userType: UserType.STUDENT,
+        documentType: DocumentType.CPF,
+        documentNumber: '11144477735',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        isMinor: false,
+        guardianConsent: false,
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      };
+
+      const response = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send(validCpfData)
+        .expect(201);
+
+      expect(response.body).toHaveProperty('user');
+      expect(response.body.user.email).toBe(validCpfData.email);
+    });
+
     it('deve retornar erro 409 para email duplicado', async () => {
       const userData = {
         email: 'duplicate@test.com',
@@ -220,7 +290,7 @@ describe('Auth Integration Tests', () => {
         userType: UserType.STUDENT,
         documentType: DocumentType.RG,
         documentNumber: '12345678901',
-        documentImageUrl: 'https://example.com/rg.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: false,
         guardianConsent: false,
         termsAccepted: true,
@@ -253,7 +323,7 @@ describe('Auth Integration Tests', () => {
         userType: UserType.STUDENT,
         documentType: DocumentType.RG,
         documentNumber: '12345678901',
-        documentImageUrl: 'https://example.com/rg.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: false,
         guardianConsent: false,
         termsAccepted: true,
@@ -293,7 +363,7 @@ describe('Auth Integration Tests', () => {
         userType: UserType.STUDENT,
         documentType: DocumentType.RG,
         documentNumber: '12345678902',
-        documentImageUrl: 'https://example.com/rg.jpg',
+        documentImageId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
         isMinor: false,
         guardianConsent: false,
         termsAccepted: true,

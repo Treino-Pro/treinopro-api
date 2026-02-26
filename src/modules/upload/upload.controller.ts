@@ -152,6 +152,19 @@ export class UploadController {
       throw new BadRequestException('Nenhum arquivo enviado');
     }
 
+    // Validar arquivo manualmente (guard de validação)
+    const fileValidationGuard = new FileValidationGuard();
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          file,
+          body: { ...uploadDto, category: FileCategory.DOCUMENT },
+        }),
+      }),
+    } as ExecutionContext;
+
+    await fileValidationGuard.canActivate(mockContext);
+
     // Para uploads públicos (cadastro), não há userId
     const result = await this.uploadService.uploadFile(
       file,

@@ -1,13 +1,48 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { users, proposals, classes, payments, paymentDisputes, files } from '../../database/schema';
-import { count, desc, eq, sql, sum, or, and, like, ilike, gte, lte, inArray } from 'drizzle-orm';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
+import {
+  users,
+  proposals,
+  classes,
+  payments,
+  paymentDisputes,
+  files,
+} from '../../database/schema';
+import { PaymentsService } from '../payments/payments.service';
+import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
+import {
+  count,
+  desc,
+  eq,
+  sql,
+  sum,
+  or,
+  and,
+  like,
+  ilike,
+  gte,
+  lte,
+  inArray,
+} from 'drizzle-orm';
 import { missions } from '../../database/schema/gamification';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
 @Injectable()
 export class AdminService {
-  constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
+    private readonly paymentsService: PaymentsService,
+    private readonly firebaseNotificationService: FirebaseNotificationService,
+  ) {}
 
   async getDashboardSummary() {
     const [userCount, proposalStats, classStats, paymentStats, disputesCount] =
@@ -61,7 +96,10 @@ export class AdminService {
               .from(payments)
               .innerJoin(users, eq(payments.personalId, users.id))
               .where(inArray(payments.id, paymentIds));
-            const personalsMap = new Map<string, { firstName: string; lastName: string; email: string }>();
+            const personalsMap = new Map<
+              string,
+              { firstName: string; lastName: string; email: string }
+            >();
             personalsRaw.forEach((r: any) => {
               personalsMap.set(r.paymentId, {
                 firstName: r.firstName ?? '',
@@ -73,17 +111,26 @@ export class AdminService {
               const studentName =
                 row.studentFirstName != null && row.studentLastName != null
                   ? `${row.studentFirstName} ${row.studentLastName}`.trim()
-                  : row.studentFirstName || row.studentLastName || row.studentEmail || null;
+                  : row.studentFirstName ||
+                    row.studentLastName ||
+                    row.studentEmail ||
+                    null;
               const personalData = personalsMap.get(row.id);
               const personalName =
-                personalData?.firstName != null && personalData?.lastName != null
+                personalData?.firstName != null &&
+                personalData?.lastName != null
                   ? `${personalData.firstName} ${personalData.lastName}`.trim()
-                  : personalData?.firstName || personalData?.lastName || personalData?.email || null;
+                  : personalData?.firstName ||
+                    personalData?.lastName ||
+                    personalData?.email ||
+                    null;
               return {
                 id: row.id,
                 totalAmount: row.totalAmount ? Number(row.totalAmount) : 0,
                 status: row.status || 'pending',
-                createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+                createdAt: row.createdAt
+                  ? new Date(row.createdAt).toISOString()
+                  : new Date().toISOString(),
                 studentName: studentName || null,
                 personalName: personalName || null,
                 mpPaymentId: row.mpPaymentId || null,
@@ -99,8 +146,8 @@ export class AdminService {
             .where(
               or(
                 eq(paymentDisputes.status, 'pending'),
-                eq(paymentDisputes.status, 'under_review')
-              )
+                eq(paymentDisputes.status, 'under_review'),
+              ),
             ),
           // Disputas de no-show em classes (status = 'no_show_dispute')
           this.db
@@ -133,6 +180,7 @@ export class AdminService {
     userType?: string;
     status?: string;
     isVerified?: boolean;
+    approvalStatus?: string;
   }) {
     const page = filters?.page ?? 1;
     const limit = filters?.limit ?? 20;
@@ -152,15 +200,25 @@ export class AdminService {
     }
 
     if (filters?.userType) {
-      conditions.push(eq(users.userType, filters.userType));
+      conditions.push(eq(users.userType, filters.userType as any));
     }
 
     if (filters?.status) {
-      conditions.push(eq(users.status, filters.status));
+      conditions.push(eq(users.status, filters.status as any));
     }
 
     if (filters?.isVerified !== undefined) {
       conditions.push(eq(users.isVerified, filters.isVerified));
+    }
+
+    const validApprovalStatuses = ['pending_review', 'approved', 'rejected'];
+    if (filters?.approvalStatus) {
+      if (!validApprovalStatuses.includes(filters.approvalStatus)) {
+        throw new BadRequestException(
+          `approvalStatus inválido: "${filters.approvalStatus}". Valores aceitos: ${validApprovalStatuses.join(', ')}`,
+        );
+      }
+      conditions.push(eq(users.approvalStatus, filters.approvalStatus as any));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -175,6 +233,7 @@ export class AdminService {
         userType: users.userType,
         status: users.status,
         isVerified: users.isVerified,
+        approvalStatus: users.approvalStatus,
         createdAt: users.createdAt,
         updatedAt: users.updatedAt,
       })
@@ -217,23 +276,29 @@ export class AdminService {
 
     // Processar URLs das imagens
     const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
-    
-    const normalizeUrl = (url: string | null | undefined, category?: string): string | null => {
+
+    const normalizeUrl = (
+      url: string | null | undefined,
+      category?: string,
+    ): string | null => {
       if (!url) return null;
-      
+
       // Se a URL já é completa e válida
       if (url.startsWith('http://') || url.startsWith('https://')) {
         try {
           const urlObj = new URL(url);
           const normalizedBase = new URL(baseUrl);
-          
+
           // Se o hostname é diferente, normalizar mantendo o pathname completo
-          if (urlObj.hostname !== normalizedBase.hostname || urlObj.port !== normalizedBase.port) {
+          if (
+            urlObj.hostname !== normalizedBase.hostname ||
+            urlObj.port !== normalizedBase.port
+          ) {
             const normalized = `${normalizedBase.origin}${urlObj.pathname}${urlObj.search}${urlObj.hash}`;
             console.log(`🔄 [ADMIN] URL normalizada: ${url} -> ${normalized}`);
             return normalized;
           }
-          
+
           // Se já está correto, retornar como está
           console.log(`✅ [ADMIN] URL já está correta: ${url}`);
           return url;
@@ -244,14 +309,16 @@ export class AdminService {
           return url.replace(urlPattern, baseUrl);
         }
       }
-      
+
       // Se é um caminho relativo que já começa com /static/, adicionar baseUrl
       if (url.startsWith('/static/')) {
         const normalized = `${baseUrl}${url}`;
-        console.log(`🔗 [ADMIN] URL relativa normalizada: ${url} -> ${normalized}`);
+        console.log(
+          `🔗 [ADMIN] URL relativa normalizada: ${url} -> ${normalized}`,
+        );
         return normalized;
       }
-      
+
       // Se é um caminho relativo sem /static/, adicionar
       if (url.startsWith('/')) {
         // Se não tem /static/ no caminho, adicionar baseado na categoria
@@ -263,27 +330,35 @@ export class AdminService {
             categoryPath = 'images/documents';
           }
           const normalized = `${baseUrl}/static/${categoryPath}${url}`;
-          console.log(`🔗 [ADMIN] URL relativa sem /static/ normalizada: ${url} -> ${normalized}`);
+          console.log(
+            `🔗 [ADMIN] URL relativa sem /static/ normalizada: ${url} -> ${normalized}`,
+          );
           return normalized;
         }
         return `${baseUrl}${url}`;
       }
-      
+
       // Se não começa com /, assumir que é apenas o nome do arquivo
       // Usar categoria para determinar o caminho
-      const categoryPath = category === 'profile' ? 'images/profiles' : 'images/documents';
+      const categoryPath =
+        category === 'profile' ? 'images/profiles' : 'images/documents';
       const normalized = `${baseUrl}/static/${categoryPath}/${url}`;
-      console.log(`🔗 [ADMIN] Nome de arquivo normalizado: ${url} -> ${normalized}`);
+      console.log(
+        `🔗 [ADMIN] Nome de arquivo normalizado: ${url} -> ${normalized}`,
+      );
       return normalized;
     };
-    
+
     const documentImageUrl = normalizeUrl(user.documentImage?.url, 'document');
     const crefImageUrl = normalizeUrl(user.crefImage?.url, 'document');
     const profileImageUrl = normalizeUrl(user.profileImage?.url, 'profile');
 
     // Log para debug
     if (documentImageUrl) {
-      console.log(`📄 [ADMIN] DocumentImageUrl para usuário ${id}:`, documentImageUrl);
+      console.log(
+        `📄 [ADMIN] DocumentImageUrl para usuário ${id}:`,
+        documentImageUrl,
+      );
     }
     if (crefImageUrl) {
       console.log(`📄 [ADMIN] CrefImageUrl para usuário ${id}:`, crefImageUrl);
@@ -297,6 +372,9 @@ export class AdminService {
       userType: user.userType,
       status: user.status,
       isVerified: user.isVerified,
+      approvalStatus: user.approvalStatus,
+      adminNotes: user.adminNotes,
+      approvalReviewedAt: user.approvalReviewedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       birthDate: user.birthDate,
@@ -323,7 +401,9 @@ export class AdminService {
    * Retorna o caminho absoluto e o mimeType de um arquivo para streaming.
    * Usado pelo endpoint GET /admin/files/:id para servir imagens/documentos com autenticação.
    */
-  async getFileForStream(fileId: string): Promise<{ absolutePath: string; mimeType: string }> {
+  async getFileForStream(
+    fileId: string,
+  ): Promise<{ absolutePath: string; mimeType: string }> {
     const fileRecord = await this.db.query.files.findFirst({
       where: eq(files.id, fileId),
     });
@@ -412,6 +492,106 @@ export class AdminService {
     return updated;
   }
 
+  // ===== APROVAÇÃO PROFISSIONAL DE PERSONALS =====
+
+  async listPendingPersonals(filters?: { page?: number; limit?: number }) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 20;
+    const offset = (page - 1) * limit;
+
+    const [pendingList, totalResult] = await Promise.all([
+      this.db
+        .select({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          cref: users.cref,
+          crefImageId: users.crefImageId,
+          approvalStatus: users.approvalStatus,
+          adminNotes: users.adminNotes,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(
+          and(
+            eq(users.userType, 'personal'),
+            eq(users.approvalStatus, 'pending_review'),
+          ),
+        )
+        .orderBy(desc(users.createdAt))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ total: count() })
+        .from(users)
+        .where(
+          and(
+            eq(users.userType, 'personal'),
+            eq(users.approvalStatus, 'pending_review'),
+          ),
+        ),
+    ]);
+
+    const total = totalResult[0]?.total ?? 0;
+
+    return {
+      items: pendingList,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  async reviewPersonalApproval(
+    personalId: string,
+    decision: { status: 'approved' | 'rejected'; notes?: string },
+    reviewerId: string,
+  ) {
+    const personal = await this.db.query.users.findFirst({
+      where: and(
+        eq(users.id, personalId),
+        eq(users.userType, 'personal'),
+      ),
+      columns: { id: true, approvalStatus: true, email: true },
+    });
+
+    if (!personal) {
+      throw new NotFoundException('Personal Trainer não encontrado');
+    }
+
+    const [updated] = await this.db
+      .update(users)
+      .set({
+        approvalStatus: decision.status,
+        adminNotes: decision.notes ?? null,
+        approvalReviewedAt: new Date(),
+        approvalReviewedBy: reviewerId,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, personalId))
+      .returning({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        approvalStatus: users.approvalStatus,
+        adminNotes: users.adminNotes,
+        approvalReviewedAt: users.approvalReviewedAt,
+      });
+
+    const event =
+      decision.status === 'approved'
+        ? 'personal_manual_approved'
+        : 'personal_manual_rejected';
+    this.logger.log(
+      `[ADMIN] ${event}: personalId=${personalId} reviewerId=${reviewerId} notes=${decision.notes ?? ''}`,
+    );
+
+    return updated;
+  }
+
   async getFinancialSummary(filters?: {
     startDate?: string;
     endDate?: string;
@@ -424,7 +604,9 @@ export class AdminService {
       const offset = (page - 1) * limit;
 
       const hasDateFilter =
-        filters?.startDate && filters?.endDate && filters.startDate <= filters.endDate;
+        filters?.startDate &&
+        filters?.endDate &&
+        filters.startDate <= filters.endDate;
       const startDateStr = hasDateFilter ? filters.startDate! : null;
       const endDateStr = hasDateFilter ? filters.endDate! : null;
 
@@ -437,7 +619,10 @@ export class AdminService {
 
       const baseWhere =
         hasDateFilter && startOfStart && endOfEnd
-          ? and(gte(payments.createdAt, startOfStart), lte(payments.createdAt, endOfEnd))
+          ? and(
+              gte(payments.createdAt, startOfStart),
+              lte(payments.createdAt, endOfEnd),
+            )
           : undefined;
 
       const [summary] = await this.db
@@ -475,7 +660,10 @@ export class AdminService {
 
       // Segunda query para personal (não dá para fazer dois joins na mesma tabela sem alias)
       const paymentIds = latestRaw.map((r: any) => r.id);
-      const personalsMap = new Map<string, { firstName: string; lastName: string; email: string }>();
+      const personalsMap = new Map<
+        string,
+        { firstName: string; lastName: string; email: string }
+      >();
       if (paymentIds.length > 0) {
         const personalsRaw = await this.db
           .select({
@@ -500,19 +688,27 @@ export class AdminService {
         const studentName =
           row.studentFirstName != null && row.studentLastName != null
             ? `${row.studentFirstName} ${row.studentLastName}`.trim()
-            : row.studentFirstName || row.studentLastName || row.studentEmail || null;
+            : row.studentFirstName ||
+              row.studentLastName ||
+              row.studentEmail ||
+              null;
         const personalData = personalsMap.get(row.id);
         const personalName =
           personalData?.firstName != null && personalData?.lastName != null
             ? `${personalData.firstName} ${personalData.lastName}`.trim()
-            : personalData?.firstName || personalData?.lastName || personalData?.email || null;
+            : personalData?.firstName ||
+              personalData?.lastName ||
+              personalData?.email ||
+              null;
         return {
           id: row.id,
           totalAmount: row.totalAmount ? Number(row.totalAmount) : 0,
           platformFee: row.platformFee ? Number(row.platformFee) : 0,
           personalAmount: row.personalAmount ? Number(row.personalAmount) : 0,
           status: row.status || 'pending',
-          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+          createdAt: row.createdAt
+            ? new Date(row.createdAt).toISOString()
+            : new Date().toISOString(),
           studentName: studentName || null,
           personalName: personalName || null,
           mpPaymentId: row.mpPaymentId || null,
@@ -590,11 +786,11 @@ export class AdminService {
       studentName:
         c.student?.firstName != null && c.student?.lastName != null
           ? `${c.student.firstName} ${c.student.lastName}`.trim()
-          : c.student?.email ?? null,
+          : (c.student?.email ?? null),
       personalName:
         c.personal?.firstName != null && c.personal?.lastName != null
           ? `${c.personal.firstName} ${c.personal.lastName}`.trim()
-          : c.personal?.email ?? null,
+          : (c.personal?.email ?? null),
       createdAt: c.createdAt,
     }));
     return { items, total, totalPages };
@@ -602,7 +798,10 @@ export class AdminService {
 
   async resolveClassDispute(
     classId: string,
-    body: { resolution: 'resolved_for_student' | 'resolved_for_personal'; adminNotes?: string },
+    body: {
+      resolution: 'resolved_for_student' | 'resolved_for_personal';
+      adminNotes?: string;
+    },
   ) {
     const [classRow] = await this.db
       .select()
@@ -621,14 +820,87 @@ export class AdminService {
     const resolution = body.resolution;
     const newDisputeStatus = resolution;
     const newClassStatus =
-      resolution === 'resolved_for_personal' ? 'completed' : 'custody';
+      resolution === 'resolved_for_personal' ? 'completed' : 'cancelled';
+
+    // ===== SETTLEMENT FINANCEIRO ANTES de atualizar status (Fix: ordering) =====
+    let settlementOk = false;
+    let settlementError: string | null = null;
+    try {
+      if (resolution === 'resolved_for_personal') {
+        // No-show do aluno: capturar pagamento e repassar ao personal
+        await this.paymentsService.capturePaymentAfterClass(
+          classId,
+          'Disputa resolvida a favor do personal - no-show do aluno',
+        );
+        this.logger.log(`✅ [ADMIN_DISPUTE] Repasse ao personal processado para aula ${classId}`);
+        settlementOk = true;
+      } else {
+        // No-show do personal: reembolsar integralmente ao aluno
+        const payment = await this.db.query.payments.findFirst({
+          where: eq(payments.classId, classId),
+        });
+        if (payment) {
+          await this.paymentsService.refundPayment(
+            payment.id,
+            'Disputa resolvida a favor do aluno - no-show do personal',
+          );
+          this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
+          settlementOk = true;
+        } else {
+          settlementError = `Pagamento não encontrado para a aula ${classId}, reembolso não pôde ser processado.`;
+          this.logger.error(`[ADMIN_DISPUTE] Falha de settlement: ${settlementError}`);
+        }
+
+        // Incrementar strike do personal e registrar aviso formal
+        await this.db
+          .update(users)
+          .set({
+            personalNoShowStrikes: sql`COALESCE(personal_no_show_strikes, 0) + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, classRow.personalId));
+
+        this.logger.warn(
+          `⚠️ [ADMIN_DISPUTE] Strike de no-show incrementado para personal ${classRow.personalId}`,
+        );
+
+        // Fix 7: Notificação formal ao personal sobre resolução da disputa
+        try {
+          await this.firebaseNotificationService.sendToUser(classRow.personalId, {
+            title: '⚠️ Disputa de no-show resolvida',
+            body: 'Uma disputa foi resolvida contra você. Seu histórico foi atualizado. Consulte o suporte para detalhes.',
+            data: {
+              type: 'dispute_resolved_against_personal',
+              classId,
+              resolution: 'resolved_for_student',
+            },
+          });
+        } catch (notifErr: any) {
+          this.logger.warn(`[ADMIN_DISPUTE] Falha ao enviar notificação ao personal ${classRow.personalId}: ${notifErr?.message}`);
+        }
+      }
+    } catch (err: any) {
+      // Logar prominentemente — requer intervenção manual
+      settlementError = err?.message;
+      this.logger.error(
+        `❌ [ADMIN_DISPUTE] ATENÇÃO: Settlement financeiro falhou para aula ${classId}. ` +
+        `Resolução: ${resolution}. Erro: ${err?.message}. INTERVENÇÃO MANUAL NECESSÁRIA.`,
+      );
+    }
+
+    // Atualizar status da aula — SEMPRE (decisão do admin é final)
+    // Registrar se o settlement foi processado para auditoria
+    // Construir nota de resolução (com flag de falha de settlement se houver)
+    const resolutionNote = settlementError
+      ? `[SETTLEMENT_FAILED: ${settlementError}] ${body.adminNotes ?? ''}`.trim()
+      : (body.adminNotes ?? null);
 
     await this.db
       .update(classes)
       .set({
         disputeStatus: newDisputeStatus,
         status: newClassStatus,
-        resolution: body.adminNotes ?? null,
+        resolution: resolutionNote,
         resolvedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -639,6 +911,8 @@ export class AdminService {
       disputeStatus: newDisputeStatus,
       status: newClassStatus,
       resolvedAt: new Date().toISOString(),
+      settlementProcessed: settlementOk,
+      ...(settlementError ? { settlementWarning: 'Pagamento não processado automaticamente. Intervenção manual necessária.' } : {}),
     };
   }
 
@@ -669,8 +943,18 @@ export class AdminService {
       xpReward: body.xpReward,
       type: body.type,
       isActive: body.isActive,
-      startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : undefined,
-      endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : undefined,
+      startDate:
+        body.startDate !== undefined
+          ? body.startDate
+            ? new Date(body.startDate)
+            : null
+          : undefined,
+      endDate:
+        body.endDate !== undefined
+          ? body.endDate
+            ? new Date(body.endDate)
+            : null
+          : undefined,
       requirements: body.requirements,
       updatedAt: new Date(),
     } as any;
@@ -876,6 +1160,57 @@ export class AdminService {
       revenue: revenueChart,
       classesActivity: classesActivityChart,
       registrations: registrationsChart,
+    };
+  }
+
+  async getClassesMonitoring(): Promise<{
+    confirmationErrorRate: number;
+    disputeRateLast30d: number;
+    avgDisputeResolutionMinutes: number | null;
+  }> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // 1. Taxa de erro de confirmação
+    const [codeStats] = await this.db
+      .select({
+        avgAttempts: sql<number>`AVG(COALESCE(${classes.startConfirmationAttempts}, 0))`,
+        confirmed: sql<number>`COUNT(CASE WHEN ${classes.status} IN ('active','completed') THEN 1 END)`,
+      })
+      .from(classes)
+      .where(gte(classes.createdAt, thirtyDaysAgo));
+
+    // 2. Taxa de disputa
+    const [disputeStats] = await this.db
+      .select({
+        total: count(),
+        disputes: sql<number>`COUNT(CASE WHEN ${classes.status} IN ('no_show_dispute','cancelled','completed') AND ${classes.noShowReportedAt} IS NOT NULL THEN 1 END)`,
+      })
+      .from(classes)
+      .where(gte(classes.createdAt, thirtyDaysAgo));
+
+    // 3. Tempo médio de resolução
+    const [resolutionStats] = await this.db
+      .select({
+        avgMinutes: sql<number>`AVG(EXTRACT(EPOCH FROM (${classes.resolvedAt} - ${classes.noShowReportedAt})) / 60)`,
+      })
+      .from(classes)
+      .where(
+        and(
+          sql`${classes.resolvedAt} IS NOT NULL`,
+          sql`${classes.noShowReportedAt} IS NOT NULL`,
+        ),
+      );
+
+    return {
+      confirmationErrorRate: Number(codeStats?.avgAttempts ?? 0),
+      disputeRateLast30d:
+        disputeStats?.total > 0
+          ? (Number(disputeStats.disputes) / Number(disputeStats.total)) * 100
+          : 0,
+      avgDisputeResolutionMinutes:
+        resolutionStats?.avgMinutes != null
+          ? Number(resolutionStats.avgMinutes)
+          : null,
     };
   }
 }
