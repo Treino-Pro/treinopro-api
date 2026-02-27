@@ -5,9 +5,16 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join, isAbsolute } from 'path';
+import * as express from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
+
+  // Aumentar limite do body parser para suportar uploads grandes (base64, etc.)
+  app.use(express.json({ limit: '35mb' }));
+  app.use(express.urlencoded({ limit: '35mb', extended: true }));
 
   // Configuração global de validação
   app.useGlobalPipes(
@@ -27,7 +34,7 @@ async function bootstrap() {
       // Permitir origins configurados (web)
       const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
         'http://localhost:3001',
-        'http://localhost:5173',
+        'http://localhost:5173'
       ];
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -53,11 +60,8 @@ async function bootstrap() {
   });
 
   // Configuração de arquivos estáticos (use STORAGE_PATH absoluto em produção)
-  const storagePath =
-    process.env.STORAGE_PATH || join(process.cwd(), 'storage');
-  const staticDir = isAbsolute(storagePath)
-    ? storagePath
-    : join(process.cwd(), storagePath);
+  const storagePath = process.env.STORAGE_PATH || join(process.cwd(), 'storage');
+  const staticDir = isAbsolute(storagePath) ? storagePath : join(process.cwd(), storagePath);
   app.useStaticAssets(staticDir, {
     prefix: '/static/',
   });
