@@ -62,6 +62,20 @@ export class ProposalsService {
     return this.paymentConfirmedStatuses.has(normalized);
   }
 
+  private normalizePaymentErrorMessage(error: any): string {
+    const rawMessage =
+      error?.response?.message ??
+      error?.message ??
+      (typeof error === 'string' ? error : 'Erro desconhecido');
+
+    return String(rawMessage)
+      .replace(/^BadRequestException:\s*/i, '')
+      .replace(/^(Erro no pagamento:\s*)+/i, '')
+      .replace(/^(Erro ao processar pagamento:\s*)+/i, '')
+      .replace(/^(Pagamento recusado:\s*)+/i, '')
+      .trim();
+  }
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
@@ -347,7 +361,9 @@ export class ProposalsService {
       const isPix = createProposalDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
+        (isPix &&
+          paymentStatus === 'pending' &&
+          (!!paymentResult.qrCode || !!paymentResult.checkoutUrl));
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -396,7 +412,7 @@ export class ProposalsService {
         });
 
         // Agendar lembretes de pagamento
-        await this.schedulePaymentReminders(proposal.id);
+        await this.schedulePaymentReminders(proposal.id, studentId);
       }
 
       // Buscar dados do usuário para incluir na resposta
@@ -414,9 +430,22 @@ export class ProposalsService {
         .limit(1);
 
       // Retornar proposta com dados do pagamento e do usuário
+      const responseProposal = updatedProposal ?? {
+        ...proposal,
+        paymentId: paymentResult.paymentId,
+        paymentStatus: paymentResult.status,
+        updatedAt: new Date(),
+      };
+
+      if (!updatedProposal) {
+        console.warn(
+          `⚠️ [PROPOSALS] Proposta ${proposal.id} não encontrada após update. Usando fallback em memória para resposta.`,
+        );
+      }
+
       const proposalResponse = await this.mapToResponseDto(
-        updatedProposal,
-        student,
+        responseProposal,
+        student || user[0],
       );
 
       // ===== NOTIFICAR PERSONALS (FCM INDEPENDENTE DE WEBSOCKET) =====
@@ -637,7 +666,11 @@ export class ProposalsService {
         },
       };
     } catch (error) {
-      console.error('❌ [PROPOSALS] Erro no pagamento:', error.message);
+      const normalizedPaymentError = this.normalizePaymentErrorMessage(error);
+      console.error(
+        '❌ [PROPOSALS] Erro no pagamento:',
+        normalizedPaymentError,
+      );
       // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
       try {
         // 'proposal' existe no escopo externo
@@ -655,7 +688,9 @@ export class ProposalsService {
         );
       }
       // Propagar erro amigável
-      throw new BadRequestException(`Erro no pagamento: ${error.message}`);
+      throw new BadRequestException(
+        `Erro no pagamento: ${normalizedPaymentError}`,
+      );
     }
   }
 
@@ -700,7 +735,9 @@ export class ProposalsService {
       .limit(1);
 
     if (!personal) {
-      throw new NotFoundException('Personal trainer não encontrado, inativo ou não aprovado');
+      throw new NotFoundException(
+        'Personal trainer não encontrado, inativo ou não aprovado',
+      );
     }
 
     console.log(
@@ -760,7 +797,9 @@ export class ProposalsService {
       const isPix = createRecontractDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
+        (isPix &&
+          paymentStatus === 'pending' &&
+          (!!paymentResult.qrCode || !!paymentResult.checkoutUrl));
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -799,7 +838,7 @@ export class ProposalsService {
         });
 
         // Agendar lembretes de pagamento
-        await this.schedulePaymentReminders(proposal.id);
+        await this.schedulePaymentReminders(proposal.id, studentId);
       }
 
       // Retornar proposta com dados do pagamento e do usuário
@@ -864,9 +903,10 @@ export class ProposalsService {
         },
       };
     } catch (error) {
+      const normalizedPaymentError = this.normalizePaymentErrorMessage(error);
       console.error(
         '❌ [PROPOSALS SERVICE] Erro no pagamento da recontratação:',
-        error.message,
+        normalizedPaymentError,
       );
       // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
       try {
@@ -884,7 +924,9 @@ export class ProposalsService {
         );
       }
       // Propagar erro amigável
-      throw new BadRequestException(`Erro no pagamento: ${error.message}`);
+      throw new BadRequestException(
+        `Erro no pagamento: ${normalizedPaymentError}`,
+      );
     }
   }
 
@@ -912,7 +954,11 @@ export class ProposalsService {
         or(
           and(
             eq(proposals.targetPersonalId, userId),
-            inArray(proposals.paymentStatus, ['authorized', 'approved', 'captured']),
+            inArray(proposals.paymentStatus, [
+              'authorized',
+              'approved',
+              'captured',
+            ]),
           ),
           sql`${proposals.targetPersonalId} IS NULL`,
         ),
@@ -1179,7 +1225,10 @@ export class ProposalsService {
         );
       }
 
-      if (proposal.targetPersonalId && proposal.targetPersonalId !== personalId) {
+      if (
+        proposal.targetPersonalId &&
+        proposal.targetPersonalId !== personalId
+      ) {
         throw new ForbiddenException(
           'Esta proposta é direcionada a outro personal trainer',
         );
@@ -1919,12 +1968,22 @@ export class ProposalsService {
 
   // ===== AGENDAMENTO DE LEMBRETES DE PAGAMENTO =====
 
-  private async schedulePaymentReminders(proposalId: string): Promise<void> {
+  private async schedulePaymentReminders(
+    proposalId: string,
+    studentId: string,
+  ): Promise<void> {
     try {
+      if (!studentId) {
+        console.warn(
+          `⚠️ [PROPOSALS] studentId ausente ao agendar lembretes da proposta ${proposalId}`,
+        );
+        return;
+      }
+
       // Lembrete aos 10 minutos (20 min restantes)
       await this.jobsService.scheduleNotification(
         {
-          userId: null, // Será preenchido no processor
+          userId: studentId,
           type: 'push',
           template: 'payment-reminder',
           data: { proposalId, reminderType: 'first' },
@@ -1936,7 +1995,7 @@ export class ProposalsService {
       // Lembrete final aos 25 minutos (5 min restantes)
       await this.jobsService.scheduleNotification(
         {
-          userId: null, // Será preenchido no processor
+          userId: studentId,
           type: 'push',
           template: 'payment-reminder',
           data: { proposalId, reminderType: 'final' },
@@ -2096,7 +2155,8 @@ export class ProposalsService {
       ).replace(/\D/g, '');
       const resolvedPayerCpf =
         createProposalDto.payerCpf?.trim() ||
-        (userData?.documentType === 'CPF' && fallbackDocumentNumber.length === 11
+        (userData?.documentType === 'CPF' &&
+        fallbackDocumentNumber.length === 11
           ? fallbackDocumentNumber
           : undefined);
 
@@ -2192,9 +2252,11 @@ export class ProposalsService {
 
           return response;
         } catch (paymentError) {
+          const normalizedPaymentError =
+            this.normalizePaymentErrorMessage(paymentError);
           console.error(
             '❌ [PROPOSALS] Erro no pagamento automático:',
-            paymentError.message,
+            normalizedPaymentError,
           );
           console.error('❌ [PROPOSALS] Stack trace:', paymentError.stack);
           console.log(
@@ -2202,7 +2264,7 @@ export class ProposalsService {
           );
           // Se o pagamento falhar, NÃO criar a proposta
           throw new BadRequestException(
-            `Pagamento recusado: ${paymentError.message}`,
+            `Pagamento recusado: ${normalizedPaymentError}`,
           );
         }
       }
@@ -2224,8 +2286,7 @@ export class ProposalsService {
         }
 
         const apiUrl = process.env.API_URL;
-        const isPublicUrl =
-          !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
+        const isPublicUrl = !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
         const notificationUrl = isPublicUrl
           ? `${apiUrl}/webhooks/mercadopago`
           : undefined;
@@ -2321,13 +2382,14 @@ export class ProposalsService {
 
       return response;
     } catch (error) {
+      const normalizedPaymentError = this.normalizePaymentErrorMessage(error);
       console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
       console.error('❌ [PROPOSALS] Stack trace:', error.stack);
       console.log('🚫 [PROPOSALS] Pagamento falhou - proposta não será criada');
 
       // CORREÇÃO: Se o pagamento falhar, NÃO criar a proposta
       throw new BadRequestException(
-        `Erro ao processar pagamento: ${error.message}`,
+        `Erro ao processar pagamento: ${normalizedPaymentError}`,
       );
     }
   }

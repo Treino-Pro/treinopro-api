@@ -386,6 +386,35 @@ export class MercadoPagoService {
         'Configuracao do Mercado Pago incompleta: MP_ACCESS_TOKEN, MP_PUBLIC_KEY e MP_WEBHOOK_SECRET sao obrigatorios.',
       );
     }
+    const isTestEnv = accessToken.startsWith('TEST-');
+    const normalizedPayerEmail = String(pixData.payerEmail || '')
+      .trim()
+      .toLowerCase();
+    if (!normalizedPayerEmail) {
+      throw new BadRequestException(
+        'payerEmail é obrigatório para pagamento via PIX',
+      );
+    }
+
+    const rawCpf = String(pixData.payerCpf || '').replace(/\D/g, '');
+    if (rawCpf && rawCpf.length !== 11) {
+      throw new BadRequestException(
+        'CPF do pagador inválido para pagamento PIX',
+      );
+    }
+
+    const resolvedPayerCpf = rawCpf || (isTestEnv ? '19119119100' : '');
+    if (!resolvedPayerCpf) {
+      throw new BadRequestException(
+        'CPF do pagador é obrigatório para pagamento PIX',
+      );
+    }
+
+    if (!rawCpf && isTestEnv) {
+      this.logger.warn(
+        '⚠️ [PIX] payerCpf ausente em TEST. Aplicando CPF padrão de sandbox (19119119100).',
+      );
+    }
 
     this.logger.log(
       `🔵 [PIX] Criando pagamento PIX para referência: ${pixData.externalReference}`,
@@ -396,18 +425,25 @@ export class MercadoPagoService {
       description: (pixData.description || 'Treino').slice(0, 60),
       payment_method_id: 'pix',
       external_reference: pixData.externalReference,
+      date_of_expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       payer: {
-        email: pixData.payerEmail,
+        email: normalizedPayerEmail,
         first_name: pixData.payerFirstName || 'Aluno',
         last_name: pixData.payerLastName || 'TreinoPro',
-        ...(pixData.payerCpf
-          ? {
-              identification: {
-                type: 'CPF',
-                number: pixData.payerCpf.replace(/\D/g, ''),
-              },
-            }
-          : {}),
+        identification: {
+          type: 'CPF',
+          number: resolvedPayerCpf,
+        },
+      },
+      additional_info: {
+        items: [
+          {
+            id: pixData.externalReference,
+            title: (pixData.description || 'Treino').slice(0, 60),
+            quantity: 1,
+            unit_price: pixData.amount,
+          },
+        ],
       },
     };
 
@@ -415,37 +451,257 @@ export class MercadoPagoService {
       body.notification_url = pixData.notificationUrl;
     }
 
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': `pix_${pixData.externalReference}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const maxAttempts = 3;
+    const idempotencyKey = `pix_${pixData.externalReference}`;
 
-    const responseText = await response.text();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let response;
+      let responseText = '';
+      try {
+        response = await fetch('https://api.mercadopago.com/v1/payments', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': idempotencyKey,
+          },
+          body: JSON.stringify(body),
+        });
+
+        responseText = await response.text();
+      } catch (error) {
+        this.logger.error(
+          `❌ [PIX] Falha de rede ao criar pagamento PIX (tentativa ${attempt}/${maxAttempts}):`,
+          error,
+        );
+        const recoveredAfterNetworkError =
+          await this.tryRecoverPixPaymentWithPolling(
+            pixData.externalReference,
+            [900, 1800, 3000],
+          );
+        if (recoveredAfterNetworkError) {
+          return recoveredAfterNetworkError;
+        }
+
+        if (attempt < maxAttempts) {
+          await this.delay(900 * attempt);
+          continue;
+        }
+
+        if (isTestEnv) {
+          return this.createPixCheckoutPreferenceFallback(
+            pixData,
+            accessToken,
+            'network_error',
+          );
+        }
+
+        throw new BadRequestException(
+          'Erro ao processar pagamento: serviço de pagamento indisponível no momento',
+        );
+      }
+
+      if (!response.ok) {
+        let errorData: any = {};
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = { message: responseText };
+        }
+
+        const mpRequestId = response.headers.get('x-request-id');
+        this.logger.error(`❌ [PIX] Erro ao criar pagamento PIX:`, errorData);
+        if (mpRequestId) {
+          this.logger.error(
+            `❌ [PIX] x-request-id Mercado Pago: ${mpRequestId} (tentativa ${attempt}/${maxAttempts})`,
+          );
+        }
+
+        const isRetryablePixError = this.isRetryablePixCreationError(
+          response.status,
+          errorData,
+        );
+
+        if (isRetryablePixError) {
+          const recoveredPayment = await this.tryRecoverPixPaymentWithPolling(
+            pixData.externalReference,
+            [1200, 2500, 4000],
+          );
+          if (recoveredPayment) {
+            return recoveredPayment;
+          }
+
+          if (attempt < maxAttempts) {
+            this.logger.warn(
+              `⚠️ [PIX] internal_error/5xx ao criar PIX. Tentando novamente (${attempt + 1}/${maxAttempts})...`,
+            );
+            await this.delay(900 * attempt);
+            continue;
+          }
+
+          const recoveredBeforeFail =
+            await this.tryRecoverPixPaymentWithPolling(
+              pixData.externalReference,
+              [3000, 5000],
+            );
+          if (recoveredBeforeFail) {
+            return recoveredBeforeFail;
+          }
+
+          if (isTestEnv) {
+            return this.createPixCheckoutPreferenceFallback(
+              pixData,
+              accessToken,
+              'mp_internal_error',
+            );
+          }
+
+          throw new BadRequestException(
+            'Erro ao processar pagamento: Mercado Pago temporariamente indisponível. Tente novamente em instantes.',
+          );
+        }
+
+        const errorMessage =
+          errorData?.message ||
+          errorData?.error ||
+          'Erro desconhecido no pagamento PIX';
+        throw new BadRequestException(
+          `Erro ao processar pagamento: ${errorMessage}`,
+        );
+      }
+
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new BadRequestException(
+          `Erro ao processar pagamento: resposta inválida do Mercado Pago (${response.status})`,
+        );
+      }
+      return this.mapPixPaymentResponse(data);
+    }
+
+    throw new BadRequestException(
+      'Erro ao processar pagamento: não foi possível criar PIX',
+    );
+  }
+
+  private async createPixCheckoutPreferenceFallback(
+    pixData: {
+      amount: number;
+      description: string;
+      externalReference: string;
+      payerEmail: string;
+      notificationUrl?: string;
+    },
+    accessToken: string,
+    reason: string,
+  ): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  }> {
+    this.logger.warn(
+      `⚠️ [PIX FALLBACK] Ativando fallback de sandbox para checkout/preferences. reason=${reason} reference=${pixData.externalReference}`,
+    );
+
+    const body: any = {
+      items: [
+        {
+          id: pixData.externalReference,
+          title: (pixData.description || 'Treino').slice(0, 120),
+          quantity: 1,
+          unit_price: pixData.amount,
+          currency_id: 'BRL',
+        },
+      ],
+      external_reference: pixData.externalReference,
+      payer: {
+        email: pixData.payerEmail,
+      },
+      payment_methods: {
+        default_payment_method_id: 'pix',
+        installments: 1,
+      },
+      expires: true,
+      expiration_date_from: new Date().toISOString(),
+      expiration_date_to: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    };
+
+    if (pixData.notificationUrl) {
+      body.notification_url = pixData.notificationUrl;
+    }
+
+    const response = await fetch(
+      'https://api.mercadopago.com/checkout/preferences',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': `pix_pref_${pixData.externalReference}`,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    const raw = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { message: raw };
+    }
 
     if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = JSON.parse(responseText);
-      } catch {
-        errorData = { message: responseText };
-      }
-      this.logger.error(`❌ [PIX] Erro ao criar pagamento PIX:`, errorData);
+      this.logger.error(
+        '❌ [PIX FALLBACK] Erro ao criar checkout preference fallback:',
+        data,
+      );
       throw new BadRequestException(
-        `Erro ao processar pagamento: ${errorData.message || 'Erro desconhecido'}`,
+        'Erro ao processar pagamento: Mercado Pago temporariamente indisponível. Tente novamente em instantes.',
       );
     }
 
-    const data = JSON.parse(responseText);
-    const transactionData = data?.point_of_interaction?.transaction_data;
+    const isTestEnv = accessToken.startsWith('TEST-');
+    const checkoutUrl = isTestEnv
+      ? data?.sandbox_init_point || data?.init_point
+      : data?.init_point || data?.sandbox_init_point;
 
-    if (!transactionData?.qr_code) {
+    this.logger.warn(
+      `✅ [PIX FALLBACK] Preference criada: ${data?.id} | checkoutUrl=${checkoutUrl ? 'ok' : 'missing'}`,
+    );
+
+    return {
+      paymentId: String(data?.id || pixData.externalReference),
+      status: 'pending',
+      qrCode: '',
+      qrCodeBase64: '',
+      ticketUrl: checkoutUrl,
+      expiresAt: data?.expiration_date_to,
+    };
+  }
+
+  private mapPixPaymentResponse(data: any): {
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  } {
+    const transactionData = data?.point_of_interaction?.transaction_data;
+    const qrCode = transactionData?.qr_code || '';
+    const status = String(data?.status || '').toLowerCase();
+
+    if (!qrCode && status === 'pending') {
       this.logger.error(
-        `❌ [PIX] Resposta sem QR Code. Status: ${data.status}`,
+        `❌ [PIX] Resposta pendente sem QR Code. Status: ${data?.status}`,
         data,
       );
       throw new BadRequestException(
@@ -454,17 +710,151 @@ export class MercadoPagoService {
     }
 
     this.logger.log(
-      `✅ [PIX] Pagamento PIX criado: ${data.id} | Status: ${data.status}`,
+      `✅ [PIX] Pagamento PIX criado/recuperado: ${data?.id} | Status: ${data?.status}`,
     );
 
     return {
-      paymentId: String(data.id),
-      status: data.status,
-      qrCode: transactionData.qr_code,
-      qrCodeBase64: transactionData.qr_code_base64 || '',
-      ticketUrl: transactionData.ticket_url,
-      expiresAt: data.date_of_expiration,
+      paymentId: String(data?.id || ''),
+      status: data?.status,
+      qrCode,
+      qrCodeBase64: transactionData?.qr_code_base64 || '',
+      ticketUrl: transactionData?.ticket_url,
+      expiresAt: data?.date_of_expiration,
     };
+  }
+
+  private isRetryablePixCreationError(status: number, errorData: any): boolean {
+    if (status >= 500) {
+      return true;
+    }
+
+    const message = String(errorData?.message || '').toLowerCase();
+    const error = String(errorData?.error || '').toLowerCase();
+    const causeCodes = Array.isArray(errorData?.cause)
+      ? errorData.cause
+          .map((c: any) => String(c?.code || '').toLowerCase())
+          .filter(Boolean)
+      : [];
+
+    if (message === 'internal_error' || error === 'internal_error') {
+      return true;
+    }
+
+    return causeCodes.some((code) =>
+      ['internal_error', 'service_unavailable', 'timeout'].includes(code),
+    );
+  }
+
+  private async tryRecoverPixPaymentByReference(
+    externalReference: string,
+  ): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  } | null> {
+    try {
+      const search = await this.searchPayments({
+        externalReference,
+        limit: 10,
+      });
+      const results: any[] = Array.isArray(search?.results)
+        ? search.results
+        : [];
+
+      const candidate = results
+        .filter((payment) => payment?.payment_method_id === 'pix')
+        .sort((a, b) => {
+          const aDate = new Date(a?.date_created || 0).getTime();
+          const bDate = new Date(b?.date_created || 0).getTime();
+          return bDate - aDate;
+        })
+        .find((payment) => {
+          const status = String(payment?.status || '').toLowerCase();
+          return ![
+            'cancelled',
+            'rejected',
+            'refunded',
+            'charged_back',
+          ].includes(status);
+        });
+
+      if (!candidate) {
+        this.logger.warn(
+          `⚠️ [PIX RECOVERY] Nenhum pagamento recuperável encontrado para external_reference=${externalReference}`,
+        );
+        return null;
+      }
+
+      this.logger.warn(
+        `♻️ [PIX RECOVERY] Pagamento recuperado por external_reference=${externalReference}: paymentId=${candidate.id}, status=${candidate.status}`,
+      );
+
+      let recoveredPayment: any = candidate;
+      if (candidate?.id) {
+        try {
+          recoveredPayment = await this.payment.get({
+            id: String(candidate.id),
+          });
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ [PIX RECOVERY] Falha ao hidratar paymentId=${candidate.id}. Usando payload da busca.`,
+            error,
+          );
+        }
+      }
+
+      try {
+        return this.mapPixPaymentResponse(recoveredPayment);
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ [PIX RECOVERY] Pagamento encontrado, mas QR ainda indisponível (external_reference=${externalReference}).`,
+          error,
+        );
+        return null;
+      }
+    } catch (error) {
+      this.logger.error(
+        `❌ [PIX RECOVERY] Erro ao buscar pagamento por external_reference=${externalReference}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private async tryRecoverPixPaymentWithPolling(
+    externalReference: string,
+    delaysMs: number[],
+  ): Promise<{
+    paymentId: string;
+    status: string;
+    qrCode: string;
+    qrCodeBase64: string;
+    ticketUrl?: string;
+    expiresAt?: string;
+  } | null> {
+    const pollingWindows = [0, ...delaysMs];
+
+    for (let index = 0; index < pollingWindows.length; index++) {
+      const delayMs = pollingWindows[index];
+      if (delayMs > 0) {
+        await this.delay(delayMs);
+      }
+
+      const recovered =
+        await this.tryRecoverPixPaymentByReference(externalReference);
+      if (recovered) {
+        return recovered;
+      }
+    }
+
+    return null;
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // Criar pagamento direto (autorização/captura)
