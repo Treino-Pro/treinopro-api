@@ -13,8 +13,8 @@ async function bootstrap() {
   });
 
   // Aumentar limite do body parser para suportar uploads grandes (base64, etc.)
-  app.use(express.json({ limit: '35mb' }));
-  app.use(express.urlencoded({ limit: '35mb', extended: true }));
+  app.use(express.json({ limit: '1gb' }));
+  app.use(express.urlencoded({ limit: '1gb', extended: true }));
 
   // Configuração global de validação
   app.useGlobalPipes(
