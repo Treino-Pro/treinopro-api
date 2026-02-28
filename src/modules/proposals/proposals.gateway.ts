@@ -137,7 +137,8 @@ export class ProposalsGateway
               : '';
 
         try {
-          await this.firebaseNotificationService.sendProposalNotification(
+          const pushMessageId =
+            await this.firebaseNotificationService.sendProposalNotification(
             personalId,
             {
               id: proposalData.proposal.id,
@@ -149,12 +150,18 @@ export class ProposalsGateway
               date: trainingDateStr,
               modality: proposalData.proposal.modalityName || '',
               price: proposalData.proposal.price || 0,
-              expiresIn: 30,
+              expiresIn: 30 * 60, // segundos (30min)
             },
           );
-          this.logger.log(
-            `Notificação push enviada para personal ${personalId}`,
-          );
+          if (pushMessageId) {
+            this.logger.log(
+              `Notificação push enviada para personal ${personalId} (messageId=${pushMessageId})`,
+            );
+          } else {
+            this.logger.warn(
+              `Push de proposta para personal ${personalId} não foi confirmado (messageId nulo)`,
+            );
+          }
         } catch (error) {
           this.logger.error(
             `Falha ao enviar notificação push para personal ${personalId}:`,
