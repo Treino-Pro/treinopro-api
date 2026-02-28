@@ -605,20 +605,14 @@ export class FirebaseNotificationService {
       const response = await this.sendEachWithChunking(messages);
       let firstSuccess: string | null = null;
 
-      for (let idx = 0; idx < response.responses.length; idx++) {
-        const resp = response.responses[idx];
-        if (resp.success) {
-          if (!firstSuccess) firstSuccess = resp.messageId ?? null;
-        } else {
-          const errorCode = (resp.error as any)?.code;
-          if (
-            errorCode === 'messaging/invalid-registration-token' ||
-            errorCode === 'messaging/registration-token-not-registered'
-          ) {
-            await this.clearInvalidTokenFromTable(tokens[idx]);
+        for (let idx = 0; idx < response.responses.length; idx++) {
+          const resp = response.responses[idx];
+          if (resp.success) {
+            if (!firstSuccess) firstSuccess = resp.messageId ?? null;
+          } else {
+            await this.handleSendError(resp.error, userId, tokens[idx]);
           }
         }
-      }
 
       this.logger.log(
         `📱 Multi-device: ${response.successCount}/${tokens.length} enviados para ${userId}`,
@@ -819,13 +813,7 @@ export class FirebaseNotificationService {
           if (resp.success) {
             if (!firstSuccess) firstSuccess = resp.messageId ?? null;
           } else {
-            const errorCode = (resp.error as any)?.code;
-            if (
-              errorCode === 'messaging/invalid-registration-token' ||
-              errorCode === 'messaging/registration-token-not-registered'
-            ) {
-              await this.clearInvalidTokenFromTable(allTokens[idx]);
-            }
+            await this.handleSendError(resp.error, personalId, allTokens[idx]);
           }
         }
 
