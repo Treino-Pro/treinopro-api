@@ -699,7 +699,46 @@ export class UsersService {
         });
     } catch (error) {
       // Não bloquear se a tabela nova ainda não existir (migration pendente)
-      console.warn('⚠️ [USERS] Erro ao salvar token na tabela user_push_tokens:', error.message);
+      // e tentar fallback manual quando faltar índice/constraint para ON CONFLICT.
+      const errorMessage = error?.message || String(error);
+      console.warn(
+        '⚠️ [USERS] Erro ao salvar token na tabela user_push_tokens:',
+        errorMessage,
+      );
+
+      try {
+        const detectedPlatform = platform || 'unknown';
+        const existingToken = await this.db.query.userPushTokens.findFirst({
+          where: eq(userPushTokens.token, fcmToken),
+          columns: { id: true },
+        });
+
+        if (existingToken?.id) {
+          await this.db
+            .update(userPushTokens)
+            .set({
+              userId,
+              platform: detectedPlatform,
+              deviceInfo: deviceInfo || null,
+              lastUsedAt: new Date(),
+            })
+            .where(eq(userPushTokens.token, fcmToken));
+        } else {
+          await this.db.insert(userPushTokens).values({
+            userId,
+            token: fcmToken,
+            platform: detectedPlatform,
+            deviceInfo: deviceInfo || null,
+            lastUsedAt: new Date(),
+          });
+        }
+      } catch (fallbackError) {
+        const fallbackMessage = fallbackError?.message || String(fallbackError);
+        console.warn(
+          '⚠️ [USERS] Fallback manual para user_push_tokens também falhou:',
+          fallbackMessage,
+        );
+      }
     }
 
     return {

@@ -976,7 +976,13 @@ export class FirebaseNotificationService {
         .where(eq(userPushTokens.userId, userId))
         .orderBy(desc(userPushTokens.lastUsedAt));
 
-      return tokens.map((t: { token: string }) => t.token).filter(Boolean);
+      return Array.from(
+        new Set(
+          tokens
+            .map((t: { token: string }) => t.token)
+            .filter((token): token is string => Boolean(token)),
+        ),
+      );
     } catch (error) {
       // Tabela pode não existir ainda (migration pendente)
       this.logger.warn(

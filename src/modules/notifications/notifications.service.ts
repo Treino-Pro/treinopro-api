@@ -207,11 +207,40 @@ export class NotificationsService {
     title: string,
     body: string,
     data: Record<string, any> = {},
-  ): Promise<{ delivered: boolean }> {
+  ): Promise<{ delivered: boolean; reason?: string }> {
     try {
       const user = await this.getUserById(userId);
       if (!user) {
         throw new Error(`Usuário não encontrado: ${userId}`);
+      }
+
+      if (!this.firebaseNotificationService.isConfigured()) {
+        const reason = 'Firebase Admin não configurado no backend';
+        await this.saveNotificationRecord(
+          userId,
+          'push',
+          'manual-test',
+          { title, body, ...data },
+          'skipped',
+          reason,
+        );
+        this.logger.warn(`⚠️ Push de teste não entregue para ${userId}: ${reason}`);
+        return { delivered: false, reason };
+      }
+
+      const tokens = await this.getUserPushTokens(userId);
+      if (tokens.length === 0) {
+        const reason = 'Usuário sem token FCM salvo (users.fcmToken/user_push_tokens)';
+        await this.saveNotificationRecord(
+          userId,
+          'push',
+          'manual-test',
+          { title, body, ...data },
+          'skipped',
+          reason,
+        );
+        this.logger.warn(`⚠️ Push de teste não entregue para ${userId}: ${reason}`);
+        return { delivered: false, reason };
       }
 
       const response = await this.firebaseNotificationService.sendToUser(userId, {
@@ -221,22 +250,25 @@ export class NotificationsService {
       });
 
       const delivered = Boolean(response);
+      const reason = delivered
+        ? undefined
+        : 'Envio FCM retornou sem messageId (verificar logs de erro do Firebase)';
       await this.saveNotificationRecord(
         userId,
         'push',
         'manual-test',
         { title, body, ...data },
         delivered ? 'sent' : 'skipped',
-        delivered ? undefined : 'No push token or Firebase unavailable',
+        reason,
       );
 
       if (!delivered) {
         this.logger.warn(
-          `⚠️ Push de teste não entregue para usuário ${userId} (sem token ou Firebase indisponível)`,
+          `⚠️ Push de teste não entregue para usuário ${userId}: ${reason}`,
         );
       }
 
-      return { delivered };
+      return { delivered, reason };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Erro inesperado';

@@ -462,7 +462,7 @@ export class NotificationsController {
   })
   async testPushNotificationToUser(
     @Body(ValidationPipe) body: SendTestPushToUserDto,
-  ): Promise<{ message: string; delivered: boolean }> {
+  ): Promise<{ message: string; delivered: boolean; reason?: string }> {
     const result = await this.notificationsService.sendDirectPushNotification(
       body.userId,
       body.title,
@@ -475,6 +475,7 @@ export class NotificationsController {
         message:
           'Push processado, mas não entregue (usuário sem token FCM ou Firebase indisponível)',
         delivered: false,
+        reason: result.reason,
       };
     }
 

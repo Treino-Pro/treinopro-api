@@ -23,6 +23,7 @@ Estas sao as migrations oficiais executadas pelo `drizzle-kit migrate`:
 | 12  | 0012_hesitant_jocasta             | 0012_hesitant_jocasta.sql        |
 | 13  | 0013_absent_legion                | 0013_absent_legion.sql           |
 | 14  | 0014_slim_serpent_society          | 0014_slim_serpent_society.sql     |
+| 15  | 0015_ensure_user_push_tokens_token_unique | 0015_ensure_user_push_tokens_token_unique.sql |
 
 ## Scripts manuais (aplicados fora do Drizzle, NAO reexecutar)
 
