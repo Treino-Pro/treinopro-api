@@ -41,6 +41,9 @@ import {
 } from './dto/classes.dto';
 import { FeatureFlags } from '../../config/feature-flags';
 
+const MINIMUM_COMPLETION_MINUTES = 1;
+const MINIMUM_COMPLETION_MS = MINIMUM_COMPLETION_MINUTES * 60 * 1000;
+
 @Injectable()
 export class ClassesService {
   private readonly logger = new Logger(ClassesService.name);
@@ -359,11 +362,11 @@ export class ClassesService {
       }
     }
 
-    // Verificar regra de 45 minutos mínimos (obrigatória por regra de domínio)
+    // Verificar regra de tempo mínimo para finalização
     // Kill switch: KILL_MIN_45_RULE=true desativa enforcement
     if (classData.startedAt && FeatureFlags.KILL_MIN_45_RULE) {
       console.warn(
-        '[CLASSES] KILL_SWITCH_ACTIVE: regra 45min desativada (KILL_MIN_45_RULE=true)',
+        `[CLASSES] KILL_SWITCH_ACTIVE: regra ${MINIMUM_COMPLETION_MINUTES}min desativada (KILL_MIN_45_RULE=true)`,
         { classId: id, personalId: userId },
       );
     }
@@ -375,13 +378,13 @@ export class ClassesService {
       });
       const minimumCompletionAt = rawClassData?.minimumCompletionAt
         ? new Date(rawClassData.minimumCompletionAt)
-        : new Date((classData.startedAt as Date).getTime() + 45 * 60 * 1000);
+        : new Date((classData.startedAt as Date).getTime() + MINIMUM_COMPLETION_MS);
 
       if (now < minimumCompletionAt) {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
-          `MIN_45_RULE: A aula deve durar pelo menos 45 minutos. Faltam ${remainingMin} minuto(s).`,
+          `MIN_45_RULE: A aula deve durar pelo menos ${MINIMUM_COMPLETION_MINUTES} minuto(s). Faltam ${remainingMin} minuto(s).`,
         );
       }
     }
@@ -1057,7 +1060,7 @@ export class ClassesService {
       (classData.status === ClassStatus.PENDING_CONFIRMATION ||
         classData.status === ClassStatus.SCHEDULED);
 
-    // Regra de 45 minutos
+    // Regra de tempo mínimo para finalização
     let minimumCompletionAt: Date | undefined;
     let remainingToCompleteSeconds: number | undefined;
     let canComplete = false;
@@ -1065,7 +1068,7 @@ export class ClassesService {
     if (classData.status === ClassStatus.ACTIVE && rawClass?.startedAt) {
       const minAt = rawClass.minimumCompletionAt
         ? new Date(rawClass.minimumCompletionAt)
-        : new Date(new Date(rawClass.startedAt).getTime() + 45 * 60 * 1000);
+        : new Date(new Date(rawClass.startedAt).getTime() + MINIMUM_COMPLETION_MS);
       minimumCompletionAt = minAt;
       const remainingMs = Math.max(0, minAt.getTime() - now.getTime());
       remainingToCompleteSeconds = Math.ceil(remainingMs / 1000);
@@ -1349,7 +1352,7 @@ export class ClassesService {
     }
 
     const startTime = new Date();
-    const minimumCompletionAt = new Date(startTime.getTime() + 45 * 60 * 1000); // T + 45min
+    const minimumCompletionAt = new Date(startTime.getTime() + MINIMUM_COMPLETION_MS); // T + 1min
     const durationMs = classData.duration * 60 * 1000;
 
     const [updatedClass] = await this.db
