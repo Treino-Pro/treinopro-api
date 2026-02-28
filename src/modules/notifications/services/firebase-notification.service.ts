@@ -315,6 +315,7 @@ export class FirebaseNotificationService {
     token?: string,
   ): Promise<void> {
     const errorCode = error?.code;
+    const errorMessage = error?.message || String(error);
 
     // Tokens inválidos ou não registrados devem ser removidos
     if (
@@ -327,11 +328,12 @@ export class FirebaseNotificationService {
       await this.clearInvalidToken(userId, token);
     } else if (errorCode === 'messaging/invalid-argument') {
       this.logger.error(
-        `❌ Argumento inválido ao enviar notificação para ${userId}:`,
-        error.message,
+        `❌ Argumento inválido ao enviar notificação para ${userId}: [${errorCode}] ${errorMessage}`,
       );
     } else {
-      this.logger.error(`❌ Erro ao enviar notificação para ${userId}:`, error);
+      this.logger.error(
+        `❌ Erro ao enviar notificação para ${userId}: [${errorCode || 'NO_CODE'}] ${errorMessage}`,
+      );
     }
   }
 
