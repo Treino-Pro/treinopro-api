@@ -10,6 +10,7 @@ import { NonceService } from './nonce.service';
 export class FirebaseNotificationService {
   private readonly logger = new Logger(FirebaseNotificationService.name);
   private app: admin.app.App;
+  private hasLoggedMissingApnsTopic = false;
 
   private createPartialTransportError(message: string): Error {
     const error = new Error(message);
@@ -80,39 +81,16 @@ export class FirebaseNotificationService {
     }
   }
 
-  /**
-   * Retorna o apns-topic (bundle ID) a partir do env
-   */
-  private isPushStrictModeEnabled(): boolean {
-    const rawValue = this.configService.get<string>(
-      'PUSH_FAIL_ON_MISSING_IOS_BUNDLE',
-    );
-
-    if (!rawValue) {
-      return true;
-    }
-
-    const normalized = rawValue.trim().toLowerCase();
-    const falseValues = ['false', '0', 'no', 'off', 'disabled'];
-
-    return !falseValues.includes(normalized);
-  }
-
   private getApnsTopic(): string | null {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
-      const strictMode = this.isPushStrictModeEnabled();
-
-      if (strictMode) {
-        throw new Error(
-          'IOS_BUNDLE_ID ausente e PUSH_FAIL_ON_MISSING_IOS_BUNDLE está ativo',
+      if (!this.hasLoggedMissingApnsTopic) {
+        this.hasLoggedMissingApnsTopic = true;
+        this.logger.warn(
+          '⚠️ IOS_BUNDLE_ID ausente: enviando APNS sem header apns-topic (FCM fará inferência quando possível)',
         );
       }
-
-      this.logger.warn(
-        '⚠️ IOS_BUNDLE_ID ausente: payload APNS omitido por configuração não estrita',
-      );
       return null;
     }
 
@@ -474,33 +452,29 @@ export class FirebaseNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        ...(apnsTopic
-          ? {
-              apns: {
-                payload: {
-                  aps: {
-                    alert: {
-                      title: notification.title,
-                      body: notification.body,
-                    },
-                    sound: 'default',
-                    badge: badgeCount,
-                    mutableContent: true,
-                    contentAvailable: true,
-                    ...(threadId ? { threadId } : {}),
-                  },
-                },
-                headers: {
-                  'apns-push-type': 'alert',
-                  'apns-topic': apnsTopic,
-                  'apns-expiration': String(
-                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                  ),
-                  'apns-priority': '10',
-                },
+        apns: {
+          payload: {
+            aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
               },
-            }
-          : {}),
+              sound: 'default',
+              badge: badgeCount,
+              mutableContent: true,
+              contentAvailable: true,
+              ...(threadId ? { threadId } : {}),
+            },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
+          },
+        },
       };
 
       // Enviar notificação com retry automático
@@ -574,33 +548,29 @@ export class FirebaseNotificationService {
           defaultVibrateTimings: true,
         },
       },
-      ...(apnsTopic
-        ? {
-            apns: {
-              payload: {
-                aps: {
-                  alert: {
-                    title: notification.title,
-                    body: notification.body,
-                  },
-                  sound: 'default',
-                  badge: badgeCount,
-                  mutableContent: true,
-                  contentAvailable: true,
-                  ...(threadId ? { threadId } : {}),
-                },
-              },
-              headers: {
-                'apns-push-type': 'alert',
-                'apns-topic': apnsTopic,
-                'apns-expiration': String(
-                  Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                ),
-                'apns-priority': '10',
-              },
+      apns: {
+        payload: {
+          aps: {
+            alert: {
+              title: notification.title,
+              body: notification.body,
             },
-          }
-        : {}),
+            sound: 'default',
+            badge: badgeCount,
+            mutableContent: true,
+            contentAvailable: true,
+            ...(threadId ? { threadId } : {}),
+          },
+        },
+        headers: {
+          'apns-push-type': 'alert',
+          ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+          'apns-expiration': String(
+            Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+          ),
+          'apns-priority': '10',
+        },
+      },
     }));
 
     try {
@@ -772,30 +742,26 @@ export class FirebaseNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        ...(apnsTopic
-          ? {
-              apns: {
-                payload: {
-                  aps: {
-                    alert: { title, body },
-                    sound: 'default',
-                    badge: badgeCount,
-                    mutableContent: true,
-                    contentAvailable: true,
-                    threadId: `proposta_${proposal.id}`,
-                  },
-                },
-                headers: {
-                  'apns-push-type': 'alert',
-                  'apns-topic': apnsTopic,
-                  'apns-expiration': String(
-                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                  ),
-                  'apns-priority': '10',
-                },
-              },
-            }
-          : {}),
+        apns: {
+          payload: {
+            aps: {
+              alert: { title, body },
+              sound: 'default',
+              badge: badgeCount,
+              mutableContent: true,
+              contentAvailable: true,
+              threadId: `proposta_${proposal.id}`,
+            },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
+          },
+        },
       };
 
       // Enviar para todos os tokens (multi-device)
@@ -1055,33 +1021,29 @@ export class FirebaseNotificationService {
               defaultVibrateTimings: true,
             },
           },
-          ...(apnsTopic
-            ? {
-                apns: {
-                  payload: {
-                    aps: {
-                      alert: {
-                        title: item.notification.title,
-                        body: item.notification.body,
-                      },
-                      sound: 'default',
-                      badge: badgeCount,
-                      mutableContent: true,
-                      contentAvailable: true,
-                      ...(threadId ? { threadId } : {}),
-                    },
-                  },
-                  headers: {
-                    'apns-push-type': 'alert',
-                    'apns-topic': apnsTopic,
-                    'apns-expiration': String(
-                      Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                    ),
-                    'apns-priority': '10',
-                  },
+          apns: {
+            payload: {
+              aps: {
+                alert: {
+                  title: item.notification.title,
+                  body: item.notification.body,
                 },
-              }
-            : {}),
+                sound: 'default',
+                badge: badgeCount,
+                mutableContent: true,
+                contentAvailable: true,
+                ...(threadId ? { threadId } : {}),
+              },
+            },
+            headers: {
+              'apns-push-type': 'alert',
+              ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+              'apns-expiration': String(
+                Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+              ),
+              'apns-priority': '10',
+            },
+          },
         };
 
         messages.push(message);

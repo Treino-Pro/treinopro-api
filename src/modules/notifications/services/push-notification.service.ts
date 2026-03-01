@@ -9,6 +9,7 @@ export class PushNotificationService {
   private readonly logger = new Logger(PushNotificationService.name);
   private readonly configService: ConfigService;
   private isFirebaseInitialized = false;
+  private hasLoggedMissingApnsTopic = false;
 
   constructor(
     configService: ConfigService,
@@ -18,36 +19,16 @@ export class PushNotificationService {
     this.initializeFirebase();
   }
 
-  private isPushStrictModeEnabled(): boolean {
-    const rawValue = this.configService.get<string>(
-      'PUSH_FAIL_ON_MISSING_IOS_BUNDLE',
-    );
-
-    if (!rawValue) {
-      return true;
-    }
-
-    const normalized = rawValue.trim().toLowerCase();
-    const falseValues = ['false', '0', 'no', 'off', 'disabled'];
-
-    return !falseValues.includes(normalized);
-  }
-
   private getApnsTopic(): string | null {
     const apnsTopic = this.configService.get<string>('IOS_BUNDLE_ID');
 
     if (!apnsTopic) {
-      const strictMode = this.isPushStrictModeEnabled();
-
-      if (strictMode) {
-        throw new Error(
-          'IOS_BUNDLE_ID ausente e PUSH_FAIL_ON_MISSING_IOS_BUNDLE está ativo',
+      if (!this.hasLoggedMissingApnsTopic) {
+        this.hasLoggedMissingApnsTopic = true;
+        this.logger.warn(
+          '⚠️ IOS_BUNDLE_ID ausente: enviando APNS sem header apns-topic (FCM fará inferência quando possível)',
         );
       }
-
-      this.logger.warn(
-        '⚠️ IOS_BUNDLE_ID ausente: payload APNS omitido por configuração não estrita',
-      );
       return null;
     }
 
@@ -152,32 +133,28 @@ export class PushNotificationService {
             defaultVibrateTimings: true,
           },
         },
-        ...(apnsTopic
-          ? {
-              apns: {
-                payload: {
-                  aps: {
-                    alert: {
-                      title: notification.title,
-                      body: notification.body,
-                    },
-                    sound: 'default',
-                    badge: 1,
-                    mutableContent: true,
-                    contentAvailable: true,
-                  },
-                },
-                headers: {
-                  'apns-push-type': 'alert',
-                  'apns-topic': apnsTopic,
-                  'apns-expiration': String(
-                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                  ),
-                  'apns-priority': '10',
-                },
+        apns: {
+          payload: {
+            aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
               },
-            }
-          : {}),
+              sound: 'default',
+              badge: 1,
+              mutableContent: true,
+              contentAvailable: true,
+            },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
+          },
+        },
       };
 
       const response = await admin.messaging().send(message);
@@ -264,32 +241,28 @@ export class PushNotificationService {
               defaultVibrateTimings: true,
             },
           },
-          ...(apnsTopic
-            ? {
-                apns: {
-                  payload: {
-                    aps: {
-                      alert: {
-                        title: notification.title,
-                        body: notification.body,
-                      },
-                      sound: 'default',
-                      badge: 1,
-                      mutableContent: true,
-                      contentAvailable: true,
-                    },
-                  },
-                  headers: {
-                    'apns-push-type': 'alert',
-                    'apns-topic': apnsTopic,
-                    'apns-expiration': String(
-                      Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                    ),
-                    'apns-priority': '10',
-                  },
+          apns: {
+            payload: {
+              aps: {
+                alert: {
+                  title: notification.title,
+                  body: notification.body,
                 },
-              }
-            : {}),
+                sound: 'default',
+                badge: 1,
+                mutableContent: true,
+                contentAvailable: true,
+              },
+            },
+            headers: {
+              'apns-push-type': 'alert',
+              ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+              'apns-expiration': String(
+                Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+              ),
+              'apns-priority': '10',
+            },
+          },
         };
 
         let response: admin.messaging.BatchResponse | null = null;
@@ -430,32 +403,28 @@ export class PushNotificationService {
             channelId: 'high_importance_channel',
           },
         },
-        ...(apnsTopic
-          ? {
-              apns: {
-                payload: {
-                  aps: {
-                    alert: {
-                      title: notification.title,
-                      body: notification.body,
-                    },
-                    sound: 'default',
-                    badge: 1,
-                    mutableContent: true,
-                    contentAvailable: true,
-                  },
-                },
-                headers: {
-                  'apns-push-type': 'alert',
-                  'apns-topic': apnsTopic,
-                  'apns-expiration': String(
-                    Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-                  ),
-                  'apns-priority': '10',
-                },
+        apns: {
+          payload: {
+            aps: {
+              alert: {
+                title: notification.title,
+                body: notification.body,
               },
-            }
-          : {}),
+              sound: 'default',
+              badge: 1,
+              mutableContent: true,
+              contentAvailable: true,
+            },
+          },
+          headers: {
+            'apns-push-type': 'alert',
+            ...(apnsTopic ? { 'apns-topic': apnsTopic } : {}),
+            'apns-expiration': String(
+              Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+            ),
+            'apns-priority': '10',
+          },
+        },
       };
 
       const response = await admin.messaging().send(message);
