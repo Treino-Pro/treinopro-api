@@ -1,4 +1,10 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  BadGatewayException,
+} from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import {
   MercadoPagoConfig,
   Preference,
@@ -387,27 +393,46 @@ export class MercadoPagoService {
       );
     }
 
+    const amount = Number(pixData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Valor do PIX invalido');
+    }
+
+    const payerEmail = String(pixData.payerEmail || '')
+      .trim()
+      .toLowerCase();
+    if (!payerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payerEmail)) {
+      throw new BadRequestException('payerEmail invalido para pagamento PIX');
+    }
+
+    const payerCpf = String(pixData.payerCpf || '').replace(/\D/g, '');
+    if (!payerCpf) {
+      throw new BadRequestException('payerCpf e obrigatorio para pagamento PIX');
+    }
+    if (!this.isValidCpf(payerCpf)) {
+      throw new BadRequestException('payerCpf invalido para pagamento PIX');
+    }
+
     this.logger.log(
       `🔵 [PIX] Criando pagamento PIX para referência: ${pixData.externalReference}`,
     );
 
     const body: any = {
-      transaction_amount: pixData.amount,
+      transaction_amount: Number(amount.toFixed(2)),
       description: (pixData.description || 'Treino').slice(0, 60),
       payment_method_id: 'pix',
       external_reference: pixData.externalReference,
+      date_of_expiration: new Date(
+        Date.now() + 30 * 60 * 1000,
+      ).toISOString(),
       payer: {
-        email: pixData.payerEmail,
+        email: payerEmail,
         first_name: pixData.payerFirstName || 'Aluno',
         last_name: pixData.payerLastName || 'TreinoPro',
-        ...(pixData.payerCpf
-          ? {
-              identification: {
-                type: 'CPF',
-                number: pixData.payerCpf.replace(/\D/g, ''),
-              },
-            }
-          : {}),
+        identification: {
+          type: 'CPF',
+          number: payerCpf,
+        },
       },
     };
 
@@ -415,56 +440,171 @@ export class MercadoPagoService {
       body.notification_url = pixData.notificationUrl;
     }
 
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': `pix_${pixData.externalReference}`,
+    this.logger.log('🔍 [PIX] Payload sanitizado:', {
+      transaction_amount: body.transaction_amount,
+      payment_method_id: body.payment_method_id,
+      external_reference: body.external_reference,
+      date_of_expiration: body.date_of_expiration,
+      notification_url: body.notification_url,
+      payer: {
+        email: this.maskEmail(payerEmail),
+        first_name: body.payer.first_name,
+        last_name: body.payer.last_name,
+        identification: {
+          type: 'CPF',
+          number: this.maskCpf(payerCpf),
+        },
       },
-      body: JSON.stringify(body),
     });
 
-    const responseText = await response.text();
+    const baseIdempotencyKey = `pix_${pixData.externalReference}`;
+    const attempts = [
+      baseIdempotencyKey,
+      `${baseIdempotencyKey}_retry_${randomUUID()}`,
+    ];
 
-    if (!response.ok) {
-      let errorData: any = {};
+    let lastError: {
+      status: number;
+      errorData: any;
+      requestId?: string;
+      idempotencyKey: string;
+    } | null = null;
+
+    for (let index = 0; index < attempts.length; index++) {
+      const idempotencyKey = attempts[index];
+      const response = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const responseText = await response.text();
+      const requestId = response.headers.get('x-request-id') || undefined;
+
+      let parsedData: any = {};
       try {
-        errorData = JSON.parse(responseText);
+        parsedData = JSON.parse(responseText);
       } catch {
-        errorData = { message: responseText };
+        parsedData = { message: responseText };
       }
-      this.logger.error(`❌ [PIX] Erro ao criar pagamento PIX:`, errorData);
+
+      if (response.ok) {
+        this.logger.log(
+          `✅ [PIX] Pagamento PIX criado: ${parsedData.id} | Status: ${parsedData.status} | requestId=${requestId || 'n/a'}`,
+        );
+
+        const transactionData =
+          parsedData?.point_of_interaction?.transaction_data;
+        if (!transactionData?.qr_code) {
+          this.logger.error(
+            `❌ [PIX] Resposta sem QR Code. Status: ${parsedData.status} | requestId=${requestId || 'n/a'}`,
+            parsedData,
+          );
+          throw new BadGatewayException(
+            'Pagamento PIX criado sem QR Code. Tente novamente em instantes.',
+          );
+        }
+
+        return {
+          paymentId: String(parsedData.id),
+          status: parsedData.status,
+          qrCode: transactionData.qr_code,
+          qrCodeBase64: transactionData.qr_code_base64 || '',
+          ticketUrl: transactionData.ticket_url,
+          expiresAt: parsedData.date_of_expiration,
+        };
+      }
+
+      const mpMessage = String(parsedData?.message || '').toLowerCase();
+      const isRetryable =
+        response.status >= 500 || mpMessage === 'internal_error';
+
+      this.logger.error('❌ [PIX] Erro ao criar pagamento PIX:', {
+        status: response.status,
+        requestId,
+        idempotencyKey,
+        message: parsedData?.message,
+        cause: parsedData?.cause || [],
+        response: parsedData,
+      });
+
+      lastError = {
+        status: response.status,
+        errorData: parsedData,
+        requestId,
+        idempotencyKey,
+      };
+
+      if (isRetryable && index < attempts.length - 1) {
+        this.logger.warn(
+          `⚠️ [PIX] Falha transitória (${parsedData?.message || response.status}). Tentando novamente...`,
+        );
+        await this.sleep(400);
+        continue;
+      }
+
+      break;
+    }
+
+    if (lastError) {
+      const rawMessage =
+        lastError.errorData?.message || lastError.errorData?.error;
+      const finalMessage = rawMessage || 'Erro desconhecido do provedor';
+
+      if (lastError.status >= 500 || finalMessage === 'internal_error') {
+        throw new BadGatewayException(
+          `Erro temporario no provedor de pagamento (requestId=${lastError.requestId || 'n/a'}). Tente novamente em instantes.`,
+        );
+      }
+
       throw new BadRequestException(
-        `Erro ao processar pagamento: ${errorData.message || 'Erro desconhecido'}`,
+        `Erro ao processar pagamento PIX: ${finalMessage}`,
       );
     }
 
-    const data = JSON.parse(responseText);
-    const transactionData = data?.point_of_interaction?.transaction_data;
+    throw new BadGatewayException('Falha inesperada ao criar pagamento PIX');
+  }
 
-    if (!transactionData?.qr_code) {
-      this.logger.error(
-        `❌ [PIX] Resposta sem QR Code. Status: ${data.status}`,
-        data,
-      );
-      throw new BadRequestException(
-        'Pagamento nao foi processado automaticamente. Por favor, escolha outro metodo de pagamento.',
-      );
+  private maskEmail(email: string): string {
+    const [user, domain] = email.split('@');
+    if (!user || !domain) return '***';
+    if (user.length <= 2) return `${user[0] || '*'}***@${domain}`;
+    return `${user[0]}***${user[user.length - 1]}@${domain}`;
+  }
+
+  private maskCpf(cpf: string): string {
+    if (!cpf || cpf.length < 11) return '***';
+    return `${cpf.slice(0, 3)}***${cpf.slice(-2)}`;
+  }
+
+  private isValidCpf(cpf: string): boolean {
+    if (!cpf || cpf.length !== 11) return false;
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
+
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+      sum += Number(cpf[i]) * (10 - i);
     }
+    let firstDigit = (sum * 10) % 11;
+    if (firstDigit === 10) firstDigit = 0;
+    if (firstDigit !== Number(cpf[9])) return false;
 
-    this.logger.log(
-      `✅ [PIX] Pagamento PIX criado: ${data.id} | Status: ${data.status}`,
-    );
+    sum = 0;
+    for (let i = 0; i < 10; i++) {
+      sum += Number(cpf[i]) * (11 - i);
+    }
+    let secondDigit = (sum * 10) % 11;
+    if (secondDigit === 10) secondDigit = 0;
 
-    return {
-      paymentId: String(data.id),
-      status: data.status,
-      qrCode: transactionData.qr_code,
-      qrCodeBase64: transactionData.qr_code_base64 || '',
-      ticketUrl: transactionData.ticket_url,
-      expiresAt: data.date_of_expiration,
-    };
+    return secondDigit === Number(cpf[10]);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // Criar pagamento direto (autorização/captura)
