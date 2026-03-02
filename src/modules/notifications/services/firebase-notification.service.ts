@@ -716,8 +716,11 @@ export class FirebaseNotificationService {
       const badgeCount = await this.getUnreadBadgeCount(personalId);
 
       // Construir payload base (sem token — será adicionado por device)
+      // Estratégia:
+      // - Android: data-only para garantir execução do background handler no app,
+      //   que cria notificação local full-screen e pode abrir o modal de proposta.
+      // - iOS: manter alerta APNs (lockscreen) com prioridade alta e time-sensitive.
       const basePayload = {
-        notification: { title, body },
         data: {
           ...sanitizedData,
           title,
@@ -729,18 +732,6 @@ export class FirebaseNotificationService {
           ttl: 24 * 60 * 60 * 1000,
           collapseKey: `proposta_${proposal.id}`,
           directBootOk: true,
-          notification: {
-            title,
-            body,
-            icon: 'ic_notification',
-            color: '#FF6A00',
-            sound: 'default',
-            channelId: 'proposal_channel',
-            priority: 'high' as const,
-            visibility: 'public' as const,
-            defaultSound: true,
-            defaultVibrateTimings: true,
-          },
         },
         apns: {
           payload: {
@@ -751,6 +742,9 @@ export class FirebaseNotificationService {
               mutableContent: true,
               contentAvailable: true,
               threadId: `proposta_${proposal.id}`,
+              // iOS 15+: tenta furar resumo agendado e priorizar lockscreen
+              'interruption-level': 'time-sensitive',
+              'relevance-score': 1.0,
             },
           },
           headers: {
