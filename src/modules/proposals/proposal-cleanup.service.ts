@@ -4,6 +4,7 @@ import { eq, and, lt } from 'drizzle-orm';
 import { isProposalExpired } from './proposals.utils';
 import { ProposalStatus } from './dto/proposals.dto';
 import { ChatGateway } from '../chat/chat.gateway';
+import { LiveActivityNotificationService } from '../notifications/services/live-activity-notification.service';
 
 @Injectable()
 export class ProposalCleanupService {
@@ -12,6 +13,7 @@ export class ProposalCleanupService {
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
+    private readonly liveActivityNotificationService: LiveActivityNotificationService,
   ) {}
 
   /**
@@ -64,6 +66,17 @@ export class ProposalCleanupService {
 
         // Notificar o aluno sobre a expiração via WebSocket
         await this.notifyStudentProposalExpired(proposal);
+
+        // ✅ Encerrar Live Activities associadas a esta proposta
+        try {
+          await this.liveActivityNotificationService.endProposalActivities(
+            proposal.id,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ [CLEANUP] Erro ao encerrar Live Activity para proposta ${proposal.id}: ${error?.message || error}`,
+          );
+        }
       }
 
       this.logger.log(

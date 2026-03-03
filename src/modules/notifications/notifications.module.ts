@@ -5,6 +5,7 @@ import { EmailService } from './services/email.service';
 import { InAppNotificationService } from './services/in-app-notification.service';
 import { PushNotificationService } from './services/push-notification.service';
 import { FirebaseNotificationService } from './services/firebase-notification.service';
+import { LiveActivityNotificationService } from './services/live-activity-notification.service';
 import { NonceService } from './services/nonce.service';
 import { DatabaseModule } from '../../database/database.module';
 import { AuthModule } from '../auth/auth.module';
@@ -19,6 +20,7 @@ import { ConfigModule } from '@nestjs/config';
     InAppNotificationService,
     PushNotificationService,
     FirebaseNotificationService,
+    LiveActivityNotificationService,
     NonceService,
   ],
   exports: [
@@ -27,6 +29,7 @@ import { ConfigModule } from '@nestjs/config';
     InAppNotificationService,
     PushNotificationService,
     FirebaseNotificationService,
+    LiveActivityNotificationService,
     NonceService,
   ],
 })

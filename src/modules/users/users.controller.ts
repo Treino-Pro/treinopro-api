@@ -467,4 +467,35 @@ export class UsersController {
 
     return this.usersService.saveFcmToken(userId, body.token, body.platform, body.deviceInfo);
   }
+
+  // ===== ENDPOINT PARA TOKEN DE LIVE ACTIVITY =====
+
+  @Put(':id/live-activity-token')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Salvar token de Live Activity do usuário',
+    description:
+      'Salva o token APNs da Live Activity para receber push-to-update de propostas (iOS only).',
+  })
+  @ApiParam({ name: 'id', description: 'ID do usuário' })
+  @ApiResponse({ status: 200, description: 'Token salvo com sucesso' })
+  @ApiResponse({ status: 403, description: 'Não autorizado' })
+  @HttpCode(HttpStatus.OK)
+  async saveLiveActivityToken(
+    @Param('id') userId: string,
+    @Body() body: { token: string; proposalId?: string },
+    @Request() req: any,
+  ) {
+    if (req.user.sub !== userId) {
+      throw new ForbiddenException(
+        'Você só pode atualizar seu próprio token de Live Activity',
+      );
+    }
+
+    return this.usersService.saveLiveActivityToken(
+      userId,
+      body.token,
+      body.proposalId,
+    );
+  }
 }

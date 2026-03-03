@@ -9,7 +9,12 @@ import {
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { eq, and, or, like, desc, count, sql } from 'drizzle-orm';
-import { users, files, userPushTokens } from '../../database/schema';
+import {
+  users,
+  files,
+  userPushTokens,
+  liveActivityTokens,
+} from '../../database/schema';
 import {
   CreateUserDto,
   UpdateUserDto,
@@ -744,6 +749,59 @@ export class UsersService {
     return {
       success: true,
       message: 'Token FCM salvo com sucesso',
+    };
+  }
+
+  /**
+   * Salvar token de Live Activity (iOS) para push-to-update
+   */
+  async saveLiveActivityToken(
+    userId: string,
+    token: string,
+    proposalId?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    try {
+      await this.db
+        .insert(liveActivityTokens)
+        .values({
+          userId,
+          token,
+          proposalId: proposalId || null,
+          platform: 'ios',
+          isActive: true,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: liveActivityTokens.token,
+          set: {
+            userId,
+            proposalId: proposalId || null,
+            isActive: true,
+            updatedAt: new Date(),
+          },
+        });
+
+      console.log(
+        `✅ [USERS] Live Activity token salvo para user ${userId}, proposal ${proposalId || 'N/A'}`,
+      );
+    } catch (error) {
+      console.warn(
+        '⚠️ [USERS] Erro ao salvar Live Activity token:',
+        error?.message || String(error),
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Token de Live Activity salvo com sucesso',
     };
   }
 }

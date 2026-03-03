@@ -12,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { Logger, UseGuards } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
+import { LiveActivityNotificationService } from '../notifications/services/live-activity-notification.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -46,6 +47,7 @@ export class ProposalsGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly firebaseNotificationService: FirebaseNotificationService,
+    private readonly liveActivityNotificationService: LiveActivityNotificationService,
   ) {}
 
   afterInit(server: Server) {
@@ -216,6 +218,25 @@ export class ProposalsGateway
       this.logger.log(
         `Notificação push enviada para aluno ${proposalData.studentId}`,
       );
+    }
+
+    // ✅ Atualizar Live Activity via APNs push-to-update
+    if (this.liveActivityNotificationService.isConfigured()) {
+      try {
+        await this.liveActivityNotificationService.updateProposalActivity(
+          proposalData.proposal.id,
+          {
+            proposalStatus: 'accepted',
+          },
+        );
+        this.logger.log(
+          `Live Activity atualizada para proposta ${proposalData.proposal.id}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Erro ao atualizar Live Activity: ${error?.message || error}`,
+        );
+      }
     }
   }
 
