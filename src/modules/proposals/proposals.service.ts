@@ -802,8 +802,18 @@ export class ProposalsService {
         await this.schedulePaymentReminders(proposal.id);
       }
 
+      // Buscar proposta atualizada para retornar paymentStatus/paymentId corretos.
+      const [updatedProposal] = await this.db
+        .select()
+        .from(proposals)
+        .where(eq(proposals.id, proposal.id))
+        .limit(1);
+
       // Retornar proposta com dados do pagamento e do usuário
-      const proposalResponse = await this.mapToResponseDto(proposal, user);
+      const proposalResponse = await this.mapToResponseDto(
+        updatedProposal ?? proposal,
+        user,
+      );
 
       // ===== NOTIFICAR PERSONAL ESPECÍFICO (APENAS COM PAGAMENTO CONFIRMADO) =====
       if (this.isPaymentConfirmedStatus(paymentResult.status)) {
