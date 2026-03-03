@@ -62,6 +62,23 @@ export class ProposalsService {
     return this.paymentConfirmedStatuses.has(normalized);
   }
 
+  private extractErrorMessage(
+    error: any,
+    fallback = 'Erro ao processar pagamento',
+  ): string {
+    const responseMessage = error?.response?.message;
+    if (Array.isArray(responseMessage)) {
+      return responseMessage.join('; ');
+    }
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage;
+    }
+    if (typeof error?.message === 'string' && error.message.trim()) {
+      return error.message;
+    }
+    return fallback;
+  }
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
@@ -655,7 +672,11 @@ export class ProposalsService {
         );
       }
       // Propagar erro amigável
-      throw new BadRequestException(`Erro no pagamento: ${error.message}`);
+      const friendlyMessage = this.extractErrorMessage(
+        error,
+        'Erro no pagamento',
+      );
+      throw new BadRequestException(friendlyMessage);
     }
   }
 
@@ -894,7 +915,11 @@ export class ProposalsService {
         );
       }
       // Propagar erro amigável
-      throw new BadRequestException(`Erro no pagamento: ${error.message}`);
+      const friendlyMessage = this.extractErrorMessage(
+        error,
+        'Erro no pagamento',
+      );
+      throw new BadRequestException(friendlyMessage);
     }
   }
 
@@ -2336,9 +2361,11 @@ export class ProposalsService {
       console.log('🚫 [PROPOSALS] Pagamento falhou - proposta não será criada');
 
       // CORREÇÃO: Se o pagamento falhar, NÃO criar a proposta
-      throw new BadRequestException(
-        `Erro ao processar pagamento: ${error.message}`,
+      const friendlyMessage = this.extractErrorMessage(
+        error,
+        'Erro ao processar pagamento',
       );
+      throw new BadRequestException(friendlyMessage);
     }
   }
 

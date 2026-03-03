@@ -457,6 +457,33 @@ export class MercadoPagoService {
       },
     });
 
+    const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
+    const useMockPixInTest = process.env.MP_MOCK_PIX_IN_TEST !== 'false';
+
+    // Em homologação, permite fluxo de PIX mockado para não depender da API do MP
+    // e já seguir com pagamento confirmado automaticamente.
+    if (isTestEnv && useMockPixInTest) {
+      const simulatedPaymentId = `sim_pix_${randomUUID()}`;
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const mockQrCode = this.buildMockPixCode(
+        body.external_reference,
+        body.transaction_amount,
+      );
+
+      this.logger.warn(
+        `🧪 [PIX MOCK] TEST- detectado. Criando PIX mockado com aprovação automática (paymentId=${simulatedPaymentId})`,
+      );
+
+      return {
+        paymentId: simulatedPaymentId,
+        status: 'approved',
+        qrCode: mockQrCode,
+        qrCodeBase64: this.getMockQrCodeBase64(),
+        ticketUrl: `https://sandbox.treinopro.local/pix/${body.external_reference}`,
+        expiresAt,
+      };
+    }
+
     const baseIdempotencyKey = `pix_${pixData.externalReference}`;
     const attempts = [
       baseIdempotencyKey,
@@ -554,10 +581,26 @@ export class MercadoPagoService {
       const rawMessage =
         lastError.errorData?.message || lastError.errorData?.error;
       const finalMessage = rawMessage || 'Erro desconhecido do provedor';
+      const normalizedMessage = String(finalMessage || '').toLowerCase();
 
       if (lastError.status >= 500 || finalMessage === 'internal_error') {
         throw new BadGatewayException(
           `Erro temporario no provedor de pagamento (requestId=${lastError.requestId || 'n/a'}). Tente novamente em instantes.`,
+        );
+      }
+
+      // Erro clássico de credencial/ambiente no MP: token de produção usado em contexto não autorizado.
+      if (
+        lastError.status === 401 &&
+        normalizedMessage.includes('unauthorized use of live credentials')
+      ) {
+        const isTestToken = (process.env.MP_ACCESS_TOKEN || '').startsWith(
+          'TEST-',
+        );
+        const tokenMode = isTestToken ? 'TESTE' : 'PRODUCAO';
+
+        throw new BadRequestException(
+          `Mercado Pago recusou credenciais de ${tokenMode}. Verifique se MP_ACCESS_TOKEN corresponde ao ambiente correto (TEST- para homologacao ou APP_USR para producao) e se a conta do MP esta habilitada para receber PIX. requestId=${lastError.requestId || 'n/a'}`,
         );
       }
 
@@ -605,6 +648,16 @@ export class MercadoPagoService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private buildMockPixCode(reference: string, amount: number): string {
+    const normalizedAmount = Number(amount || 0).toFixed(2);
+    return `MOCKPIX|ref:${reference}|amount:${normalizedAmount}|ts:${Date.now()}`;
+  }
+
+  private getMockQrCodeBase64(): string {
+    // PNG 1x1 transparente (válido) para o app renderizar sem erro.
+    return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlNnRsAAAAASUVORK5CYII=';
   }
 
   // Criar pagamento direto (autorização/captura)
