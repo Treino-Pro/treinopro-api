@@ -374,14 +374,9 @@ export class FirebaseNotificationService {
       // Buscar todos os tokens FCM do usuário (multi-device)
       const allTokens = await this.getUserAllFcmTokens(userId);
 
-      // Fallback para token legacy
       if (allTokens.length === 0) {
-        const user = await this.getUserFcmToken(userId);
-        if (!user?.fcmToken) {
-          this.logger.log(`Usuário ${userId} não tem token FCM`);
-          return null;
-        }
-        allTokens.push(user.fcmToken);
+        this.logger.log(`Usuário ${userId} não tem tokens FCM ativos`);
+        return null;
       }
 
       // Se há mais de 1 token, enviar para todos (multi-device)
@@ -650,13 +645,8 @@ export class FirebaseNotificationService {
     // Buscar todos os tokens do usuário (multi-device)
     const allTokens = await this.getUserAllFcmTokens(personalId);
     if (allTokens.length === 0) {
-      // Fallback legacy
-      const user = await this.getUserFcmToken(personalId);
-      if (!user?.fcmToken) {
-        this.logger.log(`Usuário ${personalId} não tem token FCM`);
-        return null;
-      }
-      allTokens.push(user.fcmToken);
+      this.logger.log(`Usuário ${personalId} não tem tokens FCM ativos`);
+      return null;
     }
 
     // Sanitizar dados
@@ -879,7 +869,7 @@ export class FirebaseNotificationService {
 
   /**
    * Buscar token FCM do usuário no banco de dados
-   * Tenta primeiro a tabela user_push_tokens (multi-device), fallback para users.fcmToken (legacy)
+   * @deprecated Não mais utilizado — todos os envios usam getUserAllFcmTokens diretamente
    */
   private async getUserFcmToken(
     userId: string,
@@ -966,12 +956,8 @@ export class FirebaseNotificationService {
 
     // Preparar mensagens — buscar todos os tokens de cada usuário (multi-device)
     for (const item of notifications) {
-      let tokens = await this.getUserAllFcmTokens(item.userId);
-      if (tokens.length === 0) {
-        const user = await this.getUserFcmToken(item.userId);
-        if (!user?.fcmToken) continue;
-        tokens = [user.fcmToken];
-      }
+      const tokens = await this.getUserAllFcmTokens(item.userId);
+      if (tokens.length === 0) continue;
 
       const sanitizedData: Record<string, string> = {};
       if (item.notification.data) {

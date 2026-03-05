@@ -14,6 +14,7 @@ import {
   HttpStatus,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -466,6 +467,32 @@ export class UsersController {
     }
 
     return this.usersService.saveFcmToken(userId, body.token, body.platform, body.deviceInfo);
+  }
+
+  @Delete(':id/fcm-token')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Remover token FCM do usuário (logout)',
+    description: 'Remove o token FCM do dispositivo ao fazer logout, evitando notificações para usuários deslogados.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do usuário' })
+  @ApiQuery({ name: 'token', description: 'Token FCM a remover' })
+  @ApiResponse({ status: 200, description: 'Token FCM removido com sucesso' })
+  @ApiResponse({ status: 400, description: 'Token não informado' })
+  @ApiResponse({ status: 403, description: 'Não autorizado' })
+  @HttpCode(HttpStatus.OK)
+  async removeFcmToken(
+    @Param('id') userId: string,
+    @Query('token') token: string,
+    @Request() req: any,
+  ) {
+    if (req.user.sub !== userId) {
+      throw new ForbiddenException('Você só pode remover seu próprio token FCM');
+    }
+    if (!token) {
+      throw new BadRequestException('Token FCM não informado');
+    }
+    return this.usersService.removeFcmToken(userId, token);
   }
 
   // ===== ENDPOINT PARA TOKEN DE LIVE ACTIVITY =====

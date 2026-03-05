@@ -157,6 +157,9 @@ export class PushNotificationService {
         },
       };
 
+      // Inject interruption-level into APS for iOS 15+ lock screen prominence
+      (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
+
       const response = await admin.messaging().send(message);
       this.logger.log(`📱 Push notification enviado com sucesso: ${response}`);
     } catch (error) {
@@ -264,6 +267,9 @@ export class PushNotificationService {
             },
           },
         };
+
+        // Inject interruption-level into APS for iOS 15+ lock screen prominence
+        (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
 
         let response: admin.messaging.BatchResponse | null = null;
         for (let attempt = 1; attempt <= maxChunkRetries; attempt++) {
@@ -426,6 +432,9 @@ export class PushNotificationService {
           },
         },
       };
+
+      // Inject interruption-level into APS for iOS 15+ lock screen prominence
+      (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
 
       const response = await admin.messaging().send(message);
       this.logger.log(

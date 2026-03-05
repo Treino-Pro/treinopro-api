@@ -24,6 +24,7 @@ Estas sao as migrations oficiais executadas pelo `drizzle-kit migrate`:
 | 13  | 0013_absent_legion                | 0013_absent_legion.sql           |
 | 14  | 0014_slim_serpent_society          | 0014_slim_serpent_society.sql     |
 | 15  | 0015_ensure_user_push_tokens_token_unique | 0015_ensure_user_push_tokens_token_unique.sql |
+| 16  | 0016_backfill_user_push_tokens            | 0016_backfill_user_push_tokens.sql            |
 
 ## Scripts manuais (aplicados fora do Drizzle, NAO reexecutar)
 

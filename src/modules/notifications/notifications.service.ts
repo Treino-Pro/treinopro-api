@@ -660,35 +660,19 @@ export class NotificationsService {
         .from(userPushTokens)
         .where(eq(userPushTokens.userId, userId));
 
-      if (multiTokens.length > 0) {
-        const tokens = multiTokens
-          .map((t) => t.token)
-          .filter((token): token is string => Boolean(token));
+      const tokens = multiTokens
+        .map((t) => t.token)
+        .filter((token): token is string => Boolean(token));
 
-        if (tokens.length > 0) {
-          this.logger.debug(
-            `📱 Encontrados ${tokens.length} tokens multi-device para usuário ${userId}`,
-          );
-          return Array.from(new Set<string>(tokens));
-        }
-      }
-
-      // 2. Fallback: token legado na tabela users
-      const [user] = await this.db
-        .select({ fcmToken: users.fcmToken })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      if (user?.fcmToken) {
+      if (tokens.length > 0) {
         this.logger.debug(
-          `📱 Usando token legado (users.fcmToken) para usuário ${userId}`,
+          `📱 Encontrados ${tokens.length} tokens multi-device para usuário ${userId}`,
         );
-        return [user.fcmToken];
+        return Array.from(new Set<string>(tokens));
       }
 
       this.logger.warn(
-        `⚠️ Usuário ${userId} não possui token FCM no banco de dados`,
+        `⚠️ Usuário ${userId} não possui token FCM ativo`,
       );
       return [];
     } catch (error) {
@@ -720,40 +704,11 @@ export class NotificationsService {
         .map((t) => t.token)
         .filter((token): token is string => Boolean(token));
 
-      // IDs de usuários que já têm tokens na tabela multi-device
-      const usersWithMultiTokenIds = new Set<string>(
-        multiTokenRows.map((t) => t.userId as string),
-      );
-
-      // 2. Buscar tokens legados APENAS de usuários SEM tokens multi-device
-      const usersNeedingLegacy = userIds.filter(
-        (id) => !usersWithMultiTokenIds.has(id),
-      );
-
-      let tokensFromLegacy: string[] = [];
-      if (usersNeedingLegacy.length > 0) {
-        const legacyRows = await this.db
-          .select({ fcmToken: users.fcmToken })
-          .from(users)
-          .where(
-            and(
-              inArray(users.id, usersNeedingLegacy),
-              sql`${users.fcmToken} IS NOT NULL`,
-            ),
-          );
-
-        tokensFromLegacy = legacyRows
-          .map((user) => user.fcmToken)
-          .filter((token): token is string => Boolean(token));
-      }
-
-      // Combinar e deduplicar
-      const allTokens = Array.from(
-        new Set<string>([...tokensFromMulti, ...tokensFromLegacy]),
-      );
+      // Deduplicar
+      const allTokens = Array.from(new Set<string>(tokensFromMulti));
 
       this.logger.log(
-        `📱 Encontrados ${allTokens.length} tokens FCM de ${userIds.length} usuários (${tokensFromMulti.length} multi-device, ${tokensFromLegacy.length} legado)`,
+        `📱 Encontrados ${allTokens.length} tokens FCM de ${userIds.length} usuários (${tokensFromMulti.length} multi-device)`,
       );
 
       return allTokens;

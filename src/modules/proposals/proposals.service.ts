@@ -15,6 +15,7 @@ import {
   files,
   locations,
   usedNonces,
+  userPushTokens,
 } from '../../database/schema';
 import {
   eq,
@@ -448,24 +449,23 @@ export class ProposalsService {
           `📢 [PROPOSALS] ${connectedPersonals.length} personals conectados via WebSocket`,
         );
 
-        // 2. CRÍTICO: Buscar TODOS os personals ativos, online e que têm fcmToken do BANCO DE DADOS
+        // 2. CRÍTICO: Buscar TODOS os personals ativos, online e com token em user_push_tokens
         // Isso permite que FCM funcione mesmo quando app está em background (WebSocket desconectado)
-        // ✅ FILTRO: Apenas personals que estão ONLINE receberão FCM
+        // ✅ FILTRO: Apenas personals que estão ONLINE e têm token ativo receberão FCM
         const allPersonalsWithFcm = await this.db
-          .select({
+          .selectDistinct({
             id: users.id,
             firstName: users.firstName,
             lastName: users.lastName,
-            fcmToken: users.fcmToken,
           })
           .from(users)
+          .innerJoin(userPushTokens, eq(userPushTokens.userId, users.id))
           .where(
             and(
               eq(users.userType, 'personal'),
               eq(users.status, 'active'),
               eq(users.isPersonalOnline, true), // ✅ Apenas personals online
               eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
-              sql`${users.fcmToken} IS NOT NULL`,
             ),
           );
 

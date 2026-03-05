@@ -753,6 +753,33 @@ export class UsersService {
   }
 
   /**
+   * Remover token FCM do usuário (chamado no logout)
+   * Remove da tabela user_push_tokens e limpa users.fcmToken se for o mesmo token
+   */
+  async removeFcmToken(
+    userId: string,
+    token: string,
+  ): Promise<{ success: boolean; message: string }> {
+    await this.db
+      .delete(userPushTokens)
+      .where(
+        and(eq(userPushTokens.userId, userId), eq(userPushTokens.token, token)),
+      );
+
+    // Limpar também o campo legacy se for o mesmo token
+    await this.db
+      .update(users)
+      .set({ fcmToken: null, updatedAt: new Date() })
+      .where(and(eq(users.id, userId), eq(users.fcmToken, token)));
+
+    this.logger.log(
+      `🗑️ [USERS] Token FCM removido no logout: user=${userId}`,
+    );
+
+    return { success: true, message: 'Token FCM removido com sucesso' };
+  }
+
+  /**
    * Salvar token de Live Activity (iOS) para push-to-update
    */
   async saveLiveActivityToken(
