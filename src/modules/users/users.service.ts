@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -31,6 +32,7 @@ import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   private readonly USER_CACHE_PREFIX = 'user:';
   private readonly USER_EMAIL_CACHE_PREFIX = 'user:email:';
 
