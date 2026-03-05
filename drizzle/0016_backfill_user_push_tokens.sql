@@ -1,6 +1,9 @@
 -- Backfill: copia users.fcmToken para user_push_tokens para usuários legados.
 -- Após este migration, user_push_tokens é a única fonte de verdade para push routing.
--- Idempotente: ON CONFLICT DO NOTHING garante que tokens já migrados não são duplicados.
+-- Idempotente:
+--   1. NOT EXISTS evita inserir token já presente (funciona mesmo sem índice único)
+--   2. ON CONFLICT (token) DO NOTHING é segunda camada (requer índice único da 0015)
+-- IMPORTANTE: executar após 0015_ensure_user_push_tokens_token_unique.
 
 DO $$
 BEGIN
@@ -15,8 +18,8 @@ BEGIN
       gen_random_uuid(),
       u.id,
       u.fcm_token,
-      'unknown',  -- plataforma não conhecida para tokens legados
-      NULL,
+      'legacy',   -- marcador de origem para rastreabilidade
+      'backfill', -- device_info indica que veio da migration
       NOW(),
       NOW()
     FROM users u
@@ -25,7 +28,8 @@ BEGIN
         SELECT 1
         FROM user_push_tokens t
         WHERE t.token = u.fcm_token
-      );
+      )
+    ON CONFLICT (token) DO NOTHING;
 
     RAISE NOTICE 'Backfill de user_push_tokens concluido';
   END IF;
