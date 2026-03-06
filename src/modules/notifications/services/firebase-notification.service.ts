@@ -458,6 +458,8 @@ export class FirebaseNotificationService {
               badge: badgeCount,
               mutableContent: true,
               contentAvailable: true,
+              // iOS 15+: fura Focus modes e prioriza a notificação na lock screen
+              'interruption-level': 'time-sensitive',
               ...(threadId ? { threadId } : {}),
             },
           },
@@ -554,6 +556,8 @@ export class FirebaseNotificationService {
             badge: badgeCount,
             mutableContent: true,
             contentAvailable: true,
+            // iOS 15+: fura Focus modes em todos os dispositivos do usuário
+            'interruption-level': 'time-sensitive',
             ...(threadId ? { threadId } : {}),
           },
         },
@@ -906,19 +910,23 @@ export class FirebaseNotificationService {
   }
 
   /**
-   * Buscar todos os tokens FCM de um usuário (multi-device)
+   * Buscar todos os tokens FCM de um usuário (multi-device).
+   * Prioriza user_push_tokens; faz fallback para users.fcmToken (coluna legada)
+   * para garantir que usuários antigos continuem recebendo notificações.
    */
   private async getUserAllFcmTokens(userId: string): Promise<string[]> {
+    let multiTokens: string[] = [];
+
     try {
-      const tokens = await this.db
+      const rows = await this.db
         .select({ token: userPushTokens.token })
         .from(userPushTokens)
         .where(eq(userPushTokens.userId, userId))
         .orderBy(desc(userPushTokens.lastUsedAt));
 
-      return Array.from(
+      multiTokens = Array.from(
         new Set(
-          tokens
+          rows
             .map((t: { token: string }) => t.token)
             .filter((token): token is string => Boolean(token)),
         ),
@@ -928,8 +936,29 @@ export class FirebaseNotificationService {
       this.logger.warn(
         `⚠️ Erro ao buscar tokens multi-device para ${userId}: ${error.message}`,
       );
-      return [];
     }
+
+    if (multiTokens.length > 0) return multiTokens;
+
+    // Fallback: coluna legada users.fcmToken (usuários que ainda não rotacionaram token)
+    try {
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { fcmToken: true },
+      });
+      if (user?.fcmToken) {
+        this.logger.warn(
+          `⚠️ Usando token FCM legado para ${userId} — user_push_tokens vazio`,
+        );
+        return [user.fcmToken];
+      }
+    } catch (legacyError) {
+      this.logger.warn(
+        `⚠️ Erro ao buscar token FCM legado para ${userId}: ${legacyError.message}`,
+      );
+    }
+
+    return [];
   }
 
   /**
@@ -1012,6 +1041,7 @@ export class FirebaseNotificationService {
                 badge: badgeCount,
                 mutableContent: true,
                 contentAvailable: true,
+                'interruption-level': 'time-sensitive',
                 ...(threadId ? { threadId } : {}),
               },
             },

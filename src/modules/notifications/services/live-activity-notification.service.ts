@@ -85,7 +85,8 @@ export class LiveActivityNotificationService {
   }
 
   /**
-   * Send a Live Activity update via APNs HTTP/2
+   * Send a Live Activity update via APNs HTTP/2.
+   * Cada chamada abre uma conexão HTTP/2 dedicada — aceitável para o volume atual.
    */
   async sendLiveActivityUpdate(
     token: string,
@@ -104,11 +105,20 @@ export class LiveActivityNotificationService {
         : 'api.sandbox.push.apple.com';
 
       const client = http2.connect(`https://${host}`);
+      let resolved = false;
+
+      const finish = (value: boolean) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(value);
+        }
+        // Fechar conexão de forma segura (ignorar erro se já fechada)
+        try { client.close(); } catch (_) {}
+      };
 
       client.on('error', (err) => {
         this.logger.error(`APNs connection error: ${err.message}`);
-        client.close();
-        resolve(false);
+        finish(false);
       });
 
       const jwtToken = this.getJwtToken();
@@ -119,11 +129,11 @@ export class LiveActivityNotificationService {
           event: 'update',
           'content-state': contentState,
           alert: {
-            title: 'Atualização da Proposta',
+            title: 'Nova Proposta de Treino',
             body:
               contentState.proposalStatus === 'accepted'
-                ? 'Sua proposta foi aceita!'
-                : 'Status da proposta atualizado',
+                ? 'Proposta aceita!'
+                : `${contentState.studentName ?? 'Aluno'} — R$ ${contentState.price ?? ''}`,
           },
         },
       });
@@ -145,11 +155,12 @@ export class LiveActivityNotificationService {
         const status = headers[':status'];
         if (status === 200) {
           this.logger.log(
-            `Live Activity update sent successfully to token: ${token.substring(0, 8)}...`,
+            `Live Activity update sent to token: ${token.substring(0, 8)}...`,
           );
-          resolve(true);
+          finish(true);
         } else {
-          this.logger.warn(`APNs response status: ${status}`);
+          this.logger.warn(`APNs response status: ${status} for token ${token.substring(0, 8)}...`);
+          // finish(false) will be called in req.on('end')
         }
       });
 
@@ -161,15 +172,12 @@ export class LiveActivityNotificationService {
         if (responseData) {
           this.logger.warn(`APNs response body: ${responseData}`);
         }
-        client.close();
-        // resolve only if not already resolved by status 200
-        resolve(false);
+        finish(false);
       });
 
       req.on('error', (err) => {
         this.logger.error(`APNs request error: ${err.message}`);
-        client.close();
-        resolve(false);
+        finish(false);
       });
 
       req.write(payload);
@@ -178,7 +186,7 @@ export class LiveActivityNotificationService {
   }
 
   /**
-   * End a Live Activity via APNs push
+   * End a Live Activity via APNs push.
    */
   async endLiveActivity(
     token: string,
@@ -194,11 +202,19 @@ export class LiveActivityNotificationService {
         : 'api.sandbox.push.apple.com';
 
       const client = http2.connect(`https://${host}`);
+      let resolved = false;
+
+      const finish = (value: boolean) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(value);
+        }
+        try { client.close(); } catch (_) {}
+      };
 
       client.on('error', (err) => {
         this.logger.error(`APNs connection error: ${err.message}`);
-        client.close();
-        resolve(false);
+        finish(false);
       });
 
       const jwtToken = this.getJwtToken();
@@ -217,7 +233,7 @@ export class LiveActivityNotificationService {
         aps: {
           timestamp: Math.floor(Date.now() / 1000),
           event: 'end',
-          'dismissal-date': Math.floor(Date.now() / 1000),
+          'dismissal-date': Math.floor(Date.now() / 1000) + 5,
           'content-state': state,
         },
       });
@@ -239,23 +255,22 @@ export class LiveActivityNotificationService {
           this.logger.log(
             `Live Activity ended for token: ${token.substring(0, 8)}...`,
           );
-          resolve(true);
+          finish(true);
         } else {
           this.logger.warn(`APNs end response status: ${status}`);
-          resolve(false);
+          finish(false);
         }
       });
 
       req.on('data', () => {});
 
       req.on('end', () => {
-        client.close();
+        finish(false); // no-op se já resolvido
       });
 
       req.on('error', (err) => {
         this.logger.error(`APNs end request error: ${err.message}`);
-        client.close();
-        resolve(false);
+        finish(false);
       });
 
       req.write(payload);
