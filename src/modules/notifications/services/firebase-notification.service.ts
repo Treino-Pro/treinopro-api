@@ -731,7 +731,10 @@ export class FirebaseNotificationService {
           payload: {
             aps: {
               alert: { title, body },
-              sound: 'default',
+              // Som customizado: arquivo .caf no bundle do app iOS.
+              // iOS suporta apenas .caf/.aiff/.wav para notificações.
+              // Fallback automático para 'default' se o arquivo não existir no bundle.
+              sound: 'alert_proposal.caf',
               badge: badgeCount,
               mutableContent: true,
               contentAvailable: true,
