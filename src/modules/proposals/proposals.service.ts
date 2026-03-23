@@ -80,6 +80,46 @@ export class ProposalsService {
     return fallback;
   }
 
+  private async ensureRecontractWindowIsOpen(
+    studentId: string,
+    personalId: string,
+  ): Promise<void> {
+    const [latestCompletedClass] = await this.db
+      .select({
+        id: classes.id,
+        completedAt: classes.completedAt,
+        date: classes.date,
+      })
+      .from(classes)
+      .where(
+        and(
+          eq(classes.studentId, studentId),
+          eq(classes.personalId, personalId),
+          eq(classes.status, 'completed'),
+        ),
+      )
+      .orderBy(desc(classes.completedAt), desc(classes.date))
+      .limit(1);
+
+    if (!latestCompletedClass) {
+      throw new BadRequestException(
+        'Recontratação só está disponível até 24 horas após uma aula concluída com este profissional.',
+      );
+    }
+
+    const referenceTime =
+      latestCompletedClass.completedAt != null
+        ? new Date(latestCompletedClass.completedAt)
+        : new Date(latestCompletedClass.date);
+    const deadline = new Date(referenceTime.getTime() + 24 * 60 * 60 * 1000);
+
+    if (new Date() > deadline) {
+      throw new BadRequestException(
+        'O prazo para recontratar este profissional expirou. A recontratação fica disponível por até 24 horas após a aula.',
+      );
+    }
+  }
+
   constructor(
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
@@ -721,8 +761,15 @@ export class ProposalsService {
       .limit(1);
 
     if (!personal) {
-      throw new NotFoundException('Personal trainer não encontrado, inativo ou não aprovado');
+      throw new NotFoundException(
+        'Personal trainer não encontrado, inativo ou não aprovado',
+      );
     }
+
+    await this.ensureRecontractWindowIsOpen(
+      studentId,
+      createRecontractDto.personalId,
+    );
 
     console.log(
       '✅ [PROPOSALS SERVICE] Personal trainer encontrado:',
@@ -947,7 +994,11 @@ export class ProposalsService {
         or(
           and(
             eq(proposals.targetPersonalId, userId),
-            inArray(proposals.paymentStatus, ['authorized', 'approved', 'captured']),
+            inArray(proposals.paymentStatus, [
+              'authorized',
+              'approved',
+              'captured',
+            ]),
           ),
           sql`${proposals.targetPersonalId} IS NULL`,
         ),
@@ -1214,7 +1265,10 @@ export class ProposalsService {
         );
       }
 
-      if (proposal.targetPersonalId && proposal.targetPersonalId !== personalId) {
+      if (
+        proposal.targetPersonalId &&
+        proposal.targetPersonalId !== personalId
+      ) {
         throw new ForbiddenException(
           'Esta proposta é direcionada a outro personal trainer',
         );
@@ -2131,7 +2185,8 @@ export class ProposalsService {
       ).replace(/\D/g, '');
       const resolvedPayerCpf =
         createProposalDto.payerCpf?.trim() ||
-        (userData?.documentType === 'CPF' && fallbackDocumentNumber.length === 11
+        (userData?.documentType === 'CPF' &&
+        fallbackDocumentNumber.length === 11
           ? fallbackDocumentNumber
           : undefined);
 
@@ -2259,8 +2314,7 @@ export class ProposalsService {
         }
 
         const apiUrl = process.env.API_URL;
-        const isPublicUrl =
-          !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
+        const isPublicUrl = !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
         const notificationUrl = isPublicUrl
           ? `${apiUrl}/webhooks/mercadopago`
           : undefined;
