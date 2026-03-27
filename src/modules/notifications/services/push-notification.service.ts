@@ -43,6 +43,10 @@ export class PushNotificationService {
     return chunks;
   }
 
+  private getIosSound(template: string): string {
+    return template === 'proposal-match' ? 'alert_proposal.caf' : 'default';
+  }
+
   private initializeFirebase(): void {
     try {
       if (admin.apps.length === 0) {
@@ -104,6 +108,7 @@ export class PushNotificationService {
     try {
       const notification = this.getNotificationTemplate(template, data);
       const apnsTopic = this.getApnsTopic();
+      const iosSound = this.getIosSound(template);
 
       const message = {
         token: token,
@@ -140,7 +145,7 @@ export class PushNotificationService {
                 title: notification.title,
                 body: notification.body,
               },
-              sound: 'default',
+              sound: iosSound,
               badge: 1,
               mutableContent: true,
               contentAvailable: true,
@@ -158,7 +163,8 @@ export class PushNotificationService {
       };
 
       // Inject interruption-level into APS for iOS 15+ lock screen prominence
-      (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
+      (message.apns!.payload!.aps as any)['interruption-level'] =
+        'time-sensitive';
 
       const response = await admin.messaging().send(message);
       this.logger.log(`📱 Push notification enviado com sucesso: ${response}`);
@@ -184,9 +190,13 @@ export class PushNotificationService {
     }
 
     // Filtrar tokens inválidos e deduplicar
-    const validTokens = [...new Set(
-      tokens.filter((t): t is string => typeof t === 'string' && t.length > 0),
-    )];
+    const validTokens = [
+      ...new Set(
+        tokens.filter(
+          (t): t is string => typeof t === 'string' && t.length > 0,
+        ),
+      ),
+    ];
 
     if (validTokens.length === 0) {
       this.logger.warn(
@@ -204,6 +214,7 @@ export class PushNotificationService {
     try {
       const notification = this.getNotificationTemplate(template, data);
       const apnsTopic = this.getApnsTopic();
+      const iosSound = this.getIosSound(template);
 
       const maxBatchSize = 500;
       const maxChunkRetries = 2;
@@ -251,7 +262,7 @@ export class PushNotificationService {
                   title: notification.title,
                   body: notification.body,
                 },
-                sound: 'default',
+                sound: iosSound,
                 badge: 1,
                 mutableContent: true,
                 contentAvailable: true,
@@ -269,7 +280,8 @@ export class PushNotificationService {
         };
 
         // Inject interruption-level into APS for iOS 15+ lock screen prominence
-        (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
+        (message.apns!.payload!.aps as any)['interruption-level'] =
+          'time-sensitive';
 
         let response: admin.messaging.BatchResponse | null = null;
         for (let attempt = 1; attempt <= maxChunkRetries; attempt++) {
@@ -389,6 +401,7 @@ export class PushNotificationService {
     try {
       const notification = this.getNotificationTemplate(template, data);
       const apnsTopic = this.getApnsTopic();
+      const iosSound = this.getIosSound(template);
 
       const message = {
         topic: topic,
@@ -416,7 +429,7 @@ export class PushNotificationService {
                 title: notification.title,
                 body: notification.body,
               },
-              sound: 'default',
+              sound: iosSound,
               badge: 1,
               mutableContent: true,
               contentAvailable: true,
@@ -434,7 +447,8 @@ export class PushNotificationService {
       };
 
       // Inject interruption-level into APS for iOS 15+ lock screen prominence
-      (message.apns!.payload!.aps as any)['interruption-level'] = 'time-sensitive';
+      (message.apns!.payload!.aps as any)['interruption-level'] =
+        'time-sensitive';
 
       const response = await admin.messaging().send(message);
       this.logger.log(
@@ -655,10 +669,7 @@ export class PushNotificationService {
         `🗑️ ${invalidTokens.length} tokens inválidos removidos do banco`,
       );
     } catch (error) {
-      this.logger.error(
-        `❌ Erro ao limpar tokens inválidos do banco:`,
-        error,
-      );
+      this.logger.error(`❌ Erro ao limpar tokens inválidos do banco:`, error);
     }
   }
 

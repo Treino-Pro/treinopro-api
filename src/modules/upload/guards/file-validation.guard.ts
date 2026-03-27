@@ -34,6 +34,12 @@ export class FileValidationGuard implements CanActivate {
       maxDimensions: { width: 2048, height: 2048 },
       category: FileCategory.TEMP,
     },
+    [FileCategory.DISPUTE_EVIDENCE]: {
+      maxSize: 10 * 1024 * 1024, // 10MB
+      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+      maxDimensions: { width: 4096, height: 4096 },
+      category: FileCategory.DISPUTE_EVIDENCE,
+    },
   };
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

@@ -62,6 +62,27 @@ describe('FileValidationGuard', () => {
       expect(result).toBe(true);
     });
 
+    it('should return true for valid dispute evidence file', async () => {
+      const mockGetRequest = jest.fn().mockReturnValue({
+        file: {
+          originalname: 'evidence.jpg',
+          mimetype: 'image/jpeg',
+          size: 2 * 1024 * 1024,
+          buffer: Buffer.from('test image'),
+        },
+        body: { category: FileCategory.DISPUTE_EVIDENCE },
+      });
+      mockExecutionContext.switchToHttp.mockReturnValue({
+        getRequest: mockGetRequest,
+        getResponse: jest.fn(),
+        getNext: jest.fn(),
+      });
+
+      const result = await guard.canActivate(mockExecutionContext);
+
+      expect(result).toBe(true);
+    });
+
     it('should throw error when no file is provided', async () => {
       const mockGetRequest = jest.fn().mockReturnValue({
         file: null,

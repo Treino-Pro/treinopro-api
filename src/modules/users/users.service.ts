@@ -768,15 +768,15 @@ export class UsersService {
         and(eq(userPushTokens.userId, userId), eq(userPushTokens.token, token)),
       );
 
-    // Limpar também o campo legacy se for o mesmo token
+    // Limpar também o campo legacy do usuário.
+    // Mesmo que o valor legacy esteja stale/diferente, não queremos fallback
+    // para um token antigo após logout do dispositivo.
     await this.db
       .update(users)
       .set({ fcmToken: null, updatedAt: new Date() })
-      .where(and(eq(users.id, userId), eq(users.fcmToken, token)));
+      .where(eq(users.id, userId));
 
-    this.logger.log(
-      `🗑️ [USERS] Token FCM removido no logout: user=${userId}`,
-    );
+    this.logger.log(`🗑️ [USERS] Token FCM removido no logout: user=${userId}`);
 
     return { success: true, message: 'Token FCM removido com sucesso' };
   }

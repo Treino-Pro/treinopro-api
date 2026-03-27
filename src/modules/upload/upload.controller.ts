@@ -178,7 +178,6 @@ export class UploadController {
   @Post('temp')
   @Public()
   @UseInterceptors(FileInterceptor('file'))
-  @UseGuards(FileValidationGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Upload temporário de arquivo - Público para cadastro',
@@ -208,6 +207,22 @@ export class UploadController {
     @UploadedFile() file: Express.Multer.File,
     @Body() uploadDto: UploadFileDto,
   ): Promise<FileResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
+
+    const fileValidationGuard = new FileValidationGuard();
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          file,
+          body: { ...uploadDto, category: FileCategory.TEMP },
+        }),
+      }),
+    } as ExecutionContext;
+
+    await fileValidationGuard.canActivate(mockContext);
+
     // Para uploads públicos (cadastro), não há userId
     return this.uploadService.uploadFile(
       file,
@@ -218,7 +233,6 @@ export class UploadController {
 
   @Post('dispute-evidence')
   @UseInterceptors(FileInterceptor('file'))
-  @UseGuards(FileValidationGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Upload de evidência de disputa (ausência)' })
   @ApiConsumes('multipart/form-data')
@@ -262,6 +276,18 @@ export class UploadController {
     if (!file) {
       throw new BadRequestException('Nenhum arquivo enviado');
     }
+
+    const fileValidationGuard = new FileValidationGuard();
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          file,
+          body: { ...uploadDto, category: FileCategory.DISPUTE_EVIDENCE },
+        }),
+      }),
+    } as ExecutionContext;
+
+    await fileValidationGuard.canActivate(mockContext);
 
     const userId = req.user?.id;
     return this.uploadService.uploadFile(
