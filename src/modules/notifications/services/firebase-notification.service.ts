@@ -248,6 +248,18 @@ export class FirebaseNotificationService {
     return undefined;
   }
 
+  private getIosSound(data?: Record<string, string>): string {
+    if (data?.type === 'new_proposal') {
+      return 'alert_proposal.caf';
+    }
+
+    if (data?.type === 'new_message') {
+      return 'alert_proposal.caf';
+    }
+
+    return 'default';
+  }
+
   /**
    * Remove token FCM inválido do banco de dados
    * Chamado pelo fluxo single-token (sendWithRetry → handleSendError).
@@ -409,6 +421,7 @@ export class FirebaseNotificationService {
       const apnsTopic = this.getApnsTopic();
       const badgeCount = await this.getUnreadBadgeCount(userId);
       const threadId = this.getThreadId(sanitizedData);
+      const iosSound = this.getIosSound(sanitizedData);
 
       const message: admin.messaging.Message = {
         // ✅ notification: Android mostra imediatamente (fallback se handler falhar)
@@ -454,7 +467,7 @@ export class FirebaseNotificationService {
                 title: notification.title,
                 body: notification.body,
               },
-              sound: 'default',
+              sound: iosSound,
               badge: badgeCount,
               mutableContent: true,
               contentAvailable: true,
@@ -515,6 +528,7 @@ export class FirebaseNotificationService {
     const apnsTopic = this.getApnsTopic();
     const badgeCount = await this.getUnreadBadgeCount(userId);
     const threadId = this.getThreadId(sanitizedData);
+    const iosSound = this.getIosSound(sanitizedData);
 
     const messages: admin.messaging.Message[] = tokens.map((token) => ({
       notification: {
@@ -552,7 +566,7 @@ export class FirebaseNotificationService {
               title: notification.title,
               body: notification.body,
             },
-            sound: 'default',
+            sound: iosSound,
             badge: badgeCount,
             mutableContent: true,
             contentAvailable: true,
