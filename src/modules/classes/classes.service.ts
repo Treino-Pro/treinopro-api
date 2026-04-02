@@ -2239,6 +2239,10 @@ export class ClassesService {
     // Filtro por status
     if (getClassesDto.status) {
       conditions.push(eq(classes.status, getClassesDto.status));
+
+      if (getClassesDto.status === ClassStatus.CANCELLED) {
+        conditions.push(lte(classes.date, new Date()));
+      }
     }
 
     // Filtro por data
