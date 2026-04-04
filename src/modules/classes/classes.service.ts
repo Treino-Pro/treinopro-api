@@ -918,6 +918,16 @@ export class ClassesService {
     // ===== ETAPA 4: EMITIR EVENTOS WEBSOCKET =====
     try {
       const classResponse = await this.formatClassResponse(updatedClass);
+      const cancellerIsStudent = classData.studentId === userId;
+      const actorName = cancellerIsStudent
+        ? `${classResponse.student?.firstName ?? ''} ${classResponse.student?.lastName ?? ''}`.trim() ||
+          'O aluno'
+        : `${classResponse.personal?.firstName ?? ''} ${classResponse.personal?.lastName ?? ''}`.trim() ||
+          'O personal';
+      const recipientId = cancellerIsStudent
+        ? classData.personalId
+        : classData.studentId;
+      const notificationId = `class_cancelled_${updatedClass.id}_${userId}`;
 
       // Evento para ambos os usuários (aluno e personal)
       this.chatGateway.server.emit('class_update', {
@@ -926,12 +936,31 @@ export class ClassesService {
         personalId: classData.personalId,
         studentId: classData.studentId,
         cancelledBy: userId,
+        actorName,
+        notificationId,
         timestamp: new Date(),
       });
 
       this.logger.log(
         '[CANCEL_CLASS] Evento WebSocket emitido: class_cancelled',
       );
+
+      if (recipientId) {
+        await this.notificationsService.sendClassCancellationNotification(
+          recipientId,
+          {
+            ...classResponse,
+            classId: classResponse.id,
+            actorName,
+            notificationId,
+            type: 'class_cancelled',
+          },
+          'cancelled_by_counterpart',
+        );
+        this.logger.log(
+          `[CANCEL_CLASS] Notificação de cancelamento enviada para contraparte ${recipientId}`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         '[CANCEL_CLASS] Erro ao emitir evento WebSocket:',

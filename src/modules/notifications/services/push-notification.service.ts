@@ -505,9 +505,10 @@ export class PushNotificationService {
         };
 
       case 'class-cancellation':
+        const actorName = data.actorName || data.partnerName || 'Alguém';
         return {
-          title: '❌ Aula Cancelada',
-          body: `Sua aula de ${data.date} foi cancelada. ${data.refundInfo ? 'Reembolso processado.' : ''}`,
+          title: 'Informe',
+          body: `${actorName} cancelou a aula.${data.refundInfo ? ' Reembolso processado.' : ''}`,
         };
 
       case 'refund-processed':

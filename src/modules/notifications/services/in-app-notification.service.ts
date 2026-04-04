@@ -269,20 +269,24 @@ export class InAppNotificationService {
     userId: string,
     classData: any,
   ): Promise<InAppNotification> {
+    const actorName =
+      classData.actorName || classData.partnerName || 'Alguém';
     const refundMessage = classData.refundInfo ? ' Reembolso processado.' : '';
 
     return this.createNotification(
       userId,
-      '❌ Aula Cancelada',
-      `Sua aula de ${classData.date} foi cancelada.${refundMessage}`,
-      'error',
+      'Informe',
+      `${actorName} cancelou a aula.${refundMessage}`,
+      'warning',
       {
-        type: 'class_cancellation',
+        type: classData.type || 'class_cancelled',
         classId: classData.classId,
         date: classData.date,
         reason: classData.reason,
         refundInfo: classData.refundInfo,
-        action: 'view_details',
+        actorName: actorName,
+        notificationId: classData.notificationId,
+        action: 'view_class',
       },
     );
   }
