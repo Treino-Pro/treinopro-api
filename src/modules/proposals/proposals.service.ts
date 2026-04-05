@@ -3172,27 +3172,28 @@ export class ProposalsService {
       );
 
       const dateObj = new Date(proposalDate);
-      const startOfDay = new Date(dateObj);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(dateObj);
-      endOfDay.setHours(23, 59, 59, 999);
+      const dateString = dateObj.toISOString().split('T')[0];
 
-      // Buscar aulas do personal no mesmo dia
-      const existingClasses = await this.db
-        .select()
-        .from(classes)
-        .where(
-          and(
-            eq(classes.personalId, personalId),
-            gte(classes.date, startOfDay),
-            lte(classes.date, endOfDay),
-            or(
-              eq(classes.status, 'scheduled'),
-              eq(classes.status, 'pending_confirmation'),
-              eq(classes.status, 'active'),
-            ),
+      // Buscar aulas do personal no mesmo dia usando DATE() para evitar
+      // falso negativo por timezone entre trainingDate e classes.date.
+      const existingClasses = await this.db.query.classes.findMany({
+        where: and(
+          eq(classes.personalId, personalId),
+          sql`DATE(${classes.date}) = ${dateString}`,
+          or(
+            eq(classes.status, 'scheduled'),
+            eq(classes.status, 'pending_confirmation'),
+            eq(classes.status, 'active'),
           ),
-        );
+        ),
+        columns: {
+          id: true,
+          date: true,
+          time: true,
+          duration: true,
+          status: true,
+        },
+      });
 
       console.log(
         `  📚 [CONFLICT_CHECK] Personal ${personalId}: ${existingClasses.length} aulas encontradas`,
