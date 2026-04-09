@@ -341,6 +341,21 @@ export class NotificationsController {
     return { message: 'Notificação deletada com sucesso' };
   }
 
+  @Delete('in-app')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Limpar todas as notificações',
+    description: 'Remove todas as notificações in-app do usuário autenticado',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Todas as notificações removidas com sucesso',
+  })
+  async clearAllNotifications(@Request() req: any): Promise<{ message: string }> {
+    await this.notificationsService.clearAllNotifications(req.user.sub);
+    return { message: 'Todas as notificações removidas com sucesso' };
+  }
+
   // ===== PREFERÊNCIAS DO USUÁRIO =====
 
   @Get('preferences')

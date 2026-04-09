@@ -186,6 +186,24 @@ export class InAppNotificationService {
     }
   }
 
+  async clearAll(userId: string): Promise<void> {
+    try {
+      await this.db
+        .delete(inAppNotifications)
+        .where(eq(inAppNotifications.userId, userId));
+
+      this.logger.log(
+        `🗑️ Todas as notificações deletadas para o usuário ${userId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Erro ao limpar todas as notificações do usuário ${userId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   // ===== TEMPLATES ESPECÍFICOS =====
 
   async createProposalMatchNotification(

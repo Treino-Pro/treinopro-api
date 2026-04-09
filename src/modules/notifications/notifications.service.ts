@@ -756,6 +756,10 @@ export class NotificationsService {
     return this.inAppService.deleteNotification(notificationId, userId);
   }
 
+  async clearAllNotifications(userId: string): Promise<void> {
+    return this.inAppService.clearAll(userId);
+  }
+
   private async saveNotificationRecord(
     userId: string,
     type: string,
