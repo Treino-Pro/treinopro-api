@@ -1669,6 +1669,32 @@ export class ProposalsService {
         .where(eq(users.id, personalId))
         .limit(1);
 
+      // ✅ RESOLVER URL DA FOTO DO PERSONAL
+      let personalProfileImageUrl = personal?.profileImageUrl || null;
+      if (personal?.profileImageId) {
+        try {
+          const file = await this.db.query.files.findFirst({
+            where: eq(files.id, personal.profileImageId),
+          });
+
+          if (file?.url) {
+            const baseUrl = process.env.BASE_URL || 'https://api.treinopro.com';
+            try {
+              const original = new URL(file.url);
+              const normalizedBase = new URL(baseUrl);
+              personalProfileImageUrl = `${normalizedBase.origin}${original.pathname}`;
+            } catch (e) {
+              personalProfileImageUrl = file.url.replace(
+                'https://api.treinopro.com',
+                baseUrl,
+              );
+            }
+          }
+        } catch (e) {
+          console.error('⚠️ Falha ao buscar URL da imagem do personal:', e);
+        }
+      }
+
       // Calcular rating médio do personal
       let personalRating = 0.0;
       if (personal) {
@@ -1701,8 +1727,12 @@ export class ProposalsService {
           ),
           personal: {
             id: personal?.id,
-            name: personal?.name,
-            profileImageUrl: personal?.profileImageUrl,
+            name:
+              personal?.name ||
+              `${personal?.firstName || ''} ${personal?.lastName || ''}`.trim(),
+            firstName: personal?.firstName,
+            lastName: personal?.lastName,
+            profileImageUrl: personalProfileImageUrl,
             rating: personalRating,
           },
           userId: studentForEvents.id,
@@ -1721,11 +1751,12 @@ export class ProposalsService {
             personal: {
               id: personal.id,
               name:
-                personal.name || `${personal.firstName} ${personal.lastName}`,
+                personal.name ||
+                `${personal.firstName || ''} ${personal.lastName || ''}`.trim(),
               firstName: personal.firstName,
               lastName: personal.lastName,
-              photo: personal.profileImageUrl,
-              profileImageUrl: personal.profileImageUrl,
+              photo: personalProfileImageUrl,
+              profileImageUrl: personalProfileImageUrl,
             },
             studentId: studentForEvents.id,
           });
@@ -1762,8 +1793,12 @@ export class ProposalsService {
         },
         personal: {
           id: personal?.id,
-          name: personal?.name,
-          profileImageUrl: personal?.profileImageUrl,
+          name:
+            personal?.name ||
+            `${personal?.firstName || ''} ${personal?.lastName || ''}`.trim(),
+          firstName: personal?.firstName,
+          lastName: personal?.lastName,
+          profileImageUrl: personalProfileImageUrl,
           rating: personalRating,
         },
         timestamp: new Date(),
