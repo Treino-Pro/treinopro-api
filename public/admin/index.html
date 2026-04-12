@@ -756,9 +756,11 @@
         <div class="info-item"><div class="info-label">Valor</div><div class="info-value">${d.price ? `R$ ${Number(d.price).toFixed(2)}` : '—'}</div></div>
       </div>
 
-      ${d.disputeReason ? `<div class="evidence-box"><h4>Motivo do Dispute</h4><p>${d.disputeReason}</p></div>` : ''}
-      ${d.studentDisputeNote ? `<div class="evidence-box"><h4>Relato do Aluno</h4><p>${d.studentDisputeNote}</p></div>` : ''}
-      ${d.personalDisputeNote ? `<div class="evidence-box"><h4>Relato do Personal</h4><p>${d.personalDisputeNote}</p></div>` : ''}
+      ${d.noShowReportedBy ? `<div class="evidence-box"><h4>Reportado por</h4><p>${d.noShowReportedBy === 'student' ? 'Aluno' : 'Personal'}</p></div>` : ''}
+      ${d.noShowReason ? `<div class="evidence-box"><h4>Motivo da Disputa</h4><p>${d.noShowReason}</p></div>` : ''}
+      ${d.noShowNotes ? `<div class="evidence-box"><h4>Observações</h4><p>${d.noShowNotes}</p></div>` : ''}
+      <div class="evidence-box"><h4>Evidência do Aluno</h4><p>${d.studentEvidence || '<em style="color:var(--text-muted)">Nenhuma evidência enviada</em>'}</p></div>
+      <div class="evidence-box"><h4>Evidência do Personal</h4><p>${d.personalEvidence || '<em style="color:var(--text-muted)">Nenhuma evidência enviada</em>'}</p></div>
 
       <div style="margin-top:16px">
         <label class="form-label">Notas administrativas</label>
