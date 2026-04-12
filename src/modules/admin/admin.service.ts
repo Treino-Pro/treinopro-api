@@ -499,6 +499,8 @@ export class AdminService {
     const limit = filters?.limit ?? 20;
     const offset = (page - 1) * limit;
 
+    // Retorna TODOS os personals — o admin revisa cada cadastro manualmente,
+    // independente do status de aprovação automática.
     const [pendingList, totalResult] = await Promise.all([
       this.db
         .select({
@@ -508,29 +510,21 @@ export class AdminService {
           lastName: users.lastName,
           cref: users.cref,
           crefImageId: users.crefImageId,
+          crefValidated: users.crefValidated,
           approvalStatus: users.approvalStatus,
+          status: users.status,
           adminNotes: users.adminNotes,
           createdAt: users.createdAt,
         })
         .from(users)
-        .where(
-          and(
-            eq(users.userType, 'personal'),
-            eq(users.approvalStatus, 'pending_review'),
-          ),
-        )
+        .where(eq(users.userType, 'personal'))
         .orderBy(desc(users.createdAt))
         .limit(limit)
         .offset(offset),
       this.db
         .select({ total: count() })
         .from(users)
-        .where(
-          and(
-            eq(users.userType, 'personal'),
-            eq(users.approvalStatus, 'pending_review'),
-          ),
-        ),
+        .where(eq(users.userType, 'personal')),
     ]);
 
     const total = totalResult[0]?.total ?? 0;
@@ -565,6 +559,9 @@ export class AdminService {
       .update(users)
       .set({
         approvalStatus: decision.status,
+        // Rejeição suspende o acesso às funcionalidades da plataforma.
+        // Aprovação (re)ativa o usuário.
+        status: decision.status === 'rejected' ? 'suspended' : 'active',
         adminNotes: decision.notes ?? null,
         approvalReviewedAt: new Date(),
         approvalReviewedBy: reviewerId,
@@ -577,6 +574,7 @@ export class AdminService {
         firstName: users.firstName,
         lastName: users.lastName,
         approvalStatus: users.approvalStatus,
+        status: users.status,
         adminNotes: users.adminNotes,
         approvalReviewedAt: users.approvalReviewedAt,
       });

@@ -220,7 +220,7 @@
 
   <div class="nav">
     <button class="nav-btn active" onclick="switchTab('dashboard')">Dashboard</button>
-    <button class="nav-btn" onclick="switchTab('personals')">Cadastros Pendentes</button>
+    <button class="nav-btn" onclick="switchTab('personals')">Cadastros</button>
     <button class="nav-btn" onclick="switchTab('disputes')">Disputas</button>
   </div>
 
@@ -235,8 +235,8 @@
 
     <!-- ===== PERSONALS PENDENTES ===== -->
     <div class="section" id="sec-personals">
-      <div class="section-title">Cadastros Pendentes</div>
-      <div class="section-sub">Personal trainers aguardando análise de documentos e CREF</div>
+      <div class="section-title">Cadastros de Personal Trainers</div>
+      <div class="section-sub">Todos os personals cadastrados — revise documentos e CREF. Rejeitar suspende o acesso às funcionalidades.</div>
       <div id="personals-content"><div class="loading">Carregando...</div></div>
     </div>
 
@@ -428,14 +428,14 @@
     const s = data.summary || data;
     document.getElementById('dashboard-content').innerHTML = `
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Total usuários</div><div class="stat-value">${s.totalUsers ?? s.users?.total ?? '—'}</div></div>
-        <div class="stat-card"><div class="stat-label">Alunos</div><div class="stat-value">${s.totalStudents ?? s.users?.students ?? '—'}</div></div>
-        <div class="stat-card"><div class="stat-label">Personals</div><div class="stat-value">${s.totalPersonals ?? s.users?.personals ?? '—'}</div></div>
-        <div class="stat-card"><div class="stat-label">Cadastros pendentes</div><div class="stat-value" style="color:var(--warning)">${s.pendingApprovals ?? s.pendingPersonals ?? '—'}</div></div>
-        <div class="stat-card"><div class="stat-label">Disputas abertas</div><div class="stat-value" style="color:var(--danger)">${s.openDisputes ?? s.disputes?.pending ?? '—'}</div></div>
-        <div class="stat-card"><div class="stat-label">Aulas hoje</div><div class="stat-value">${s.classesToday ?? s.classes?.today ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Total usuários</div><div class="stat-value">${s.users ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Propostas</div><div class="stat-value">${s.proposals?.total ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Aulas totais</div><div class="stat-value">${s.classes?.total ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Aulas concluídas</div><div class="stat-value" style="color:var(--success)">${s.classes?.completed ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Disputas abertas</div><div class="stat-value" style="color:var(--danger)">${s.unresolvedDisputes ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Propostas pendentes</div><div class="stat-value" style="color:var(--warning)">${s.proposals?.pending ?? '—'}</div></div>
       </div>
-      <div class="alert alert-info">Para gerenciar cadastros pendentes vá em <strong>Cadastros Pendentes</strong>. Para disputas vá em <strong>Disputas</strong>.</div>
+      <div class="alert alert-info">Para revisar cadastros de personals vá em <strong>Cadastros</strong>. Para disputas vá em <strong>Disputas</strong>.</div>
     `;
   }
 
@@ -446,29 +446,40 @@
     if (!ok) { document.getElementById('personals-content').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
 
     const items = data.items || data;
-    if (!items.length) { document.getElementById('personals-content').innerHTML = '<div class="card"><div class="empty">Nenhum cadastro pendente 🎉</div></div>'; return; }
+    if (!items.length) { document.getElementById('personals-content').innerHTML = '<div class="card"><div class="empty">Nenhum personal cadastrado ainda.</div></div>'; return; }
 
-    const rows = items.map(p => `
+    const rows = items.map(p => {
+      const accountStatus = p.status === 'suspended' ? 'suspended' : (p.approvalStatus === 'rejected' ? 'rejected' : (p.approvalStatus === 'approved' ? 'approved' : 'pending'));
+      const accountLabel = p.status === 'suspended' ? 'Suspenso' : (p.approvalStatus === 'rejected' ? 'Rejeitado' : (p.approvalStatus === 'approved' ? 'Aprovado' : 'Pendente'));
+      return `
       <tr>
         <td>
           <div style="font-weight:600">${p.firstName} ${p.lastName}</div>
           <div style="font-size:12px;color:var(--text-muted)">${p.email}</div>
         </td>
         <td>${p.cref || '—'}</td>
-        <td><span class="badge badge-${p.crefValidated ? 'approved' : 'pending'}">${p.crefValidated ? 'Validado' : 'Pendente'}</span></td>
+        <td><span class="badge badge-${p.crefValidated ? 'approved' : 'pending'}">${p.crefValidated ? 'Válido' : 'Inválido'}</span></td>
+        <td><span class="badge badge-${accountStatus === 'suspended' || accountStatus === 'rejected' ? 'rejected' : accountStatus}">${accountLabel}</span></td>
         <td>${fmtDate(p.createdAt)}</td>
-        <td><div class="actions"><button class="btn btn-ghost" onclick="openPersonal('${p.id}')">Analisar →</button></div></td>
+        <td><div class="actions"><button class="btn btn-ghost" onclick="openPersonal('${p.id}')">Revisar →</button></div></td>
       </tr>
-    `).join('');
+    `}).join('');
+
+    const suspended = items.filter(p => p.status === 'suspended').length;
+    const pending = items.filter(p => p.approvalStatus === 'pending_review' && p.status !== 'suspended').length;
 
     document.getElementById('personals-content').innerHTML = `
       <div class="card">
         <div class="card-header">
-          <span class="card-title">Personals aguardando aprovação</span>
-          <span class="badge badge-pending">${items.length} pendente${items.length !== 1 ? 's' : ''}</span>
+          <span class="card-title">Todos os personal trainers cadastrados</span>
+          <div style="display:flex;gap:8px">
+            ${pending > 0 ? `<span class="badge badge-pending">${pending} sem revisão</span>` : ''}
+            ${suspended > 0 ? `<span class="badge badge-rejected">${suspended} suspenso${suspended !== 1 ? 's' : ''}</span>` : ''}
+            <span class="badge badge-review">${items.length} total</span>
+          </div>
         </div>
         <table>
-          <thead><tr><th>Nome</th><th>CREF</th><th>CREF API</th><th>Cadastro</th><th>Ação</th></tr></thead>
+          <thead><tr><th>Nome</th><th>CREF</th><th>CREF API</th><th>Status admin</th><th>Cadastro</th><th>Ação</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -544,7 +555,7 @@
 
     const { ok, data } = await api(`/admin/personals/${currentPersonalId}/approval`, {
       method: 'PATCH',
-      body: JSON.stringify({ decision, adminNotes: notes }),
+      body: JSON.stringify({ status: decision, notes }),
     });
 
     btns.forEach(b => b.disabled = false);
