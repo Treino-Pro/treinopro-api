@@ -63,6 +63,7 @@ services:
       PORT: ${PORT}
       TZ: America/Sao_Paulo
     volumes:
+      - /var/opt/treinopro/treinopro-api/storage:/var/opt/treinopro/treinopro-api/storage
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     ports:
