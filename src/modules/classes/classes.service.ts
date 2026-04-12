@@ -41,7 +41,7 @@ import {
 } from './dto/classes.dto';
 import { FeatureFlags } from '../../config/feature-flags';
 
-const MINIMUM_COMPLETION_MINUTES = 1;
+const MINIMUM_COMPLETION_MINUTES = 45;
 const MINIMUM_COMPLETION_MS = MINIMUM_COMPLETION_MINUTES * 60 * 1000;
 
 @Injectable()
@@ -386,7 +386,7 @@ export class ClassesService {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
-          `MIN_45_RULE: A aula deve durar pelo menos ${MINIMUM_COMPLETION_MINUTES} minuto(s). Faltam ${remainingMin} minuto(s).`,
+          `MIN_45_RULE: A aula deve durar pelo menos ${MINIMUM_COMPLETION_MINUTES} minutos. Faltam ${remainingMin} minuto(s).`,
         );
       }
     }

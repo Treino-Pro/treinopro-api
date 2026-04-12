@@ -753,8 +753,8 @@ export class ClassTimelineDto {
   noShowReportDeadline: Date;
 
   @ApiPropertyOptional({
-    description: 'Horário mínimo para finalizar aula (startedAt + 1min)',
-    example: '2024-01-15T14:01:00.000Z',
+    description: 'Horário mínimo para finalizar aula (startedAt + 45min)',
+    example: '2024-01-15T14:45:00.000Z',
   })
   minimumCompletionAt?: Date;
 
