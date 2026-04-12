@@ -375,18 +375,6 @@
   }
 
   // Carrega imagem protegida via auth header e retorna blob URL
-  async function loadProtectedImage(fileId) {
-    if (!fileId) return null;
-    try {
-      const res = await fetch(`${API}/admin/files/${fileId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      return URL.createObjectURL(blob);
-    } catch { return null; }
-  }
-
   // ===== TABS =====
   function switchTab(tab) {
     currentTab = tab;
@@ -486,6 +474,43 @@
     `;
   }
 
+  // Resolve a URL da imagem: tenta a URL estática primeiro (mais simples),
+  // depois o endpoint protegido por auth como fallback.
+  async function resolveImageUrl(staticUrl, fileId) {
+    // Se a API retornou uma URL estática, tenta usá-la diretamente
+    if (staticUrl) {
+      try {
+        const res = await fetch(staticUrl, { method: 'HEAD' });
+        if (res.ok) return staticUrl;
+      } catch {}
+    }
+
+    // Fallback: endpoint /admin/files/:id com auth (retorna blob)
+    if (fileId) {
+      try {
+        const res = await fetch(`${API}/admin/files/${fileId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          return URL.createObjectURL(blob);
+        }
+        console.warn(`[admin/files/${fileId}] HTTP ${res.status}`);
+      } catch (e) {
+        console.warn(`[admin/files/${fileId}] fetch error:`, e);
+      }
+    }
+
+    return null;
+  }
+
+  function imgBlock(url, alt, label) {
+    if (url) {
+      return `<div class="doc-image"><img src="${url}" alt="${alt}" onerror="this.parentElement.innerHTML='<span style=\\'padding:12px;color:var(--text-muted)\\'>Falha ao carregar imagem</span>'" /></div>`;
+    }
+    return `<div class="doc-image" style="height:80px;font-size:12px">Sem ${label} cadastrado</div>`;
+  }
+
   async function openPersonal(id) {
     currentPersonalId = id;
     document.getElementById('modal-personal-body').innerHTML = '<div class="loading">Carregando dados...</div>';
@@ -497,19 +522,14 @@
 
     const u = data.user || data;
 
-    // Carrega imagens em paralelo
-    const [docBlobUrl, crefBlobUrl] = await Promise.all([
-      loadProtectedImage(u.documentImageId),
-      loadProtectedImage(u.crefImageId),
+    // Carrega imagens: tenta URL estática primeiro, depois endpoint protegido
+    const [docUrl, crefUrl] = await Promise.all([
+      resolveImageUrl(u.documentImageUrl, u.documentImageId),
+      resolveImageUrl(u.crefImageUrl, u.crefImageId),
     ]);
 
-    const docImg = docBlobUrl
-      ? `<div class="doc-image"><img src="${docBlobUrl}" alt="Documento" /></div>`
-      : `<div class="doc-image" style="height:80px">Imagem não disponível</div>`;
-
-    const crefImg = crefBlobUrl
-      ? `<div class="doc-image"><img src="${crefBlobUrl}" alt="CREF" /></div>`
-      : `<div class="doc-image" style="height:80px">Imagem não disponível</div>`;
+    const docImg  = imgBlock(docUrl,  'Documento', 'documento');
+    const crefImg = imgBlock(crefUrl, 'CREF',      'CREF');
 
     document.getElementById('modal-personal-body').innerHTML = `
       <div class="info-grid">
