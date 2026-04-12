@@ -13,31 +13,57 @@ export class WebhooksService {
   constructor() {}
 
   // Validar assinatura do webhook
+  // Formato do Mercado Pago: x-signature = "ts=<timestamp>,v1=<hmac_hex>"
+  // Manifest assinado: "id:<data.id>;request-id:<x-request-id>;ts:<timestamp>;"
+  // Referência: https://www.mercadopago.com.br/developers/en/docs/your-integrations/notifications/webhooks
   async validateWebhookSignature(
     payload: any,
     headers: Record<string, string>,
+    queryDataId?: string,
   ): Promise<boolean> {
     try {
-      // Verificar se o secret está configurado antes de qualquer validação
-      if (!process.env.MP_WEBHOOK_SECRET) {
+      const webhookSecret = process.env.MP_WEBHOOK_SECRET;
+      if (!webhookSecret) {
         this.logger.error(
           '❌ [WEBHOOK] MP_WEBHOOK_SECRET não configurado - rejeitando webhook',
         );
         return false;
       }
 
-      const signature = headers['x-signature'];
+      const xSignature = headers['x-signature'];
       const requestId = headers['x-request-id'];
 
-      if (!signature || !requestId) {
+      if (!xSignature || !requestId) {
         this.logger.error('❌ [WEBHOOK] Headers de assinatura não encontrados');
         return false;
       }
 
-      // Verificar se é um webhook válido do Mercado Pago
-      const expectedSignature = this.generateSignature(payload, requestId);
+      // Extrair ts e v1 do header x-signature (formato: "ts=...,v1=...")
+      const parts = xSignature.split(',');
+      let ts: string | undefined;
+      let v1: string | undefined;
+      for (const part of parts) {
+        const [key, value] = part.split('=');
+        if (key === 'ts') ts = value;
+        if (key === 'v1') v1 = value;
+      }
 
-      if (signature !== expectedSignature) {
+      if (!ts || !v1) {
+        this.logger.error('❌ [WEBHOOK] Formato de x-signature inválido');
+        return false;
+      }
+
+      // O id vem do query param "data.id" conforme documentação oficial do MP.
+      // Fallback para payload.data.id pois o valor é o mesmo.
+      const dataId = queryDataId ?? payload?.data?.id ?? '';
+      const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
+
+      const expectedHash = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(manifest)
+        .digest('hex');
+
+      if (v1 !== expectedHash) {
         this.logger.error('❌ [WEBHOOK] Assinatura não confere');
         return false;
       }
@@ -47,23 +73,6 @@ export class WebhooksService {
       this.logger.error('❌ [WEBHOOK] Erro ao validar assinatura:', error);
       return false;
     }
-  }
-
-  private generateSignature(payload: any, requestId: string): string {
-    const webhookSecret = process.env.MP_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      this.logger.error(
-        '❌ [WEBHOOK] MP_WEBHOOK_SECRET não configurado - operação sensível bloqueada',
-      );
-      throw new Error(
-        'Configuracao do Mercado Pago incompleta: MP_ACCESS_TOKEN, MP_PUBLIC_KEY e MP_WEBHOOK_SECRET sao obrigatorios.',
-      );
-    }
-    const data = JSON.stringify(payload) + requestId;
-    return crypto
-      .createHmac('sha256', webhookSecret)
-      .update(data)
-      .digest('hex');
   }
 
   // ===== HANDLERS DE PAGAMENTO =====
@@ -85,9 +94,9 @@ export class WebhooksService {
       }
 
       // Criar novo pagamento no banco
+      // external_reference é o UUID interno do pagamento (payments.id)
       await db.insert(payments).values({
         mpPaymentId: payment.id,
-        studentId: payment.external_reference?.replace('class_', '') || null,
         totalAmount: payment.transaction_amount.toString(),
         platformFee: '0.00',
         personalAmount: payment.transaction_amount.toString(),

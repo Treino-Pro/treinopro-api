@@ -66,6 +66,11 @@ async function bootstrap() {
     prefix: '/static/',
   });
 
+  // Painel admin em HTML estático servido pelo próprio backend
+  app.useStaticAssets(join(process.cwd(), 'public'), {
+    prefix: '/panel',
+  });
+
   // Configuração do Swagger
   const config = new DocumentBuilder()
     .setTitle('TreinoPRO API')

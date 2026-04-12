@@ -3,6 +3,7 @@ import {
   Post,
   Body,
   Headers,
+  Query,
   HttpCode,
   HttpStatus,
   Logger,
@@ -39,6 +40,7 @@ export class WebhooksController {
   async handleMercadoPagoWebhook(
     @Body() payload: WebhookPayload,
     @Headers() headers: Record<string, string>,
+    @Query('data.id') dataId?: string,
   ): Promise<{ status: string }> {
     try {
       this.logger.log('🔔 [WEBHOOK] Recebido webhook do Mercado Pago');
@@ -47,9 +49,11 @@ export class WebhooksController {
       this.logger.log('🔍 [WEBHOOK] Data ID:', payload.data.id);
 
       // Validar assinatura do webhook
+      // O id para o manifest vem do query param "data.id" conforme documentação oficial do MP
       const isValid = await this.webhooksService.validateWebhookSignature(
         payload,
         headers,
+        dataId,
       );
       if (!isValid) {
         this.logger.error('❌ [WEBHOOK] Assinatura inválida');

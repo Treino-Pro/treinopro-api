@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TreinoPRO — Painel Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e334d;
+      --accent: #6c63ff;
+      --accent-hover: #5a52e0;
+      --danger: #e05252;
+      --success: #4caf7d;
+      --warning: #f0a500;
+      --text: #e8eaf0;
+      --text-muted: #7b82a0;
+      --radius: 10px;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    /* ===== LOGIN ===== */
+    #login-screen {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh;
+    }
+    .login-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 48px 40px; width: 100%; max-width: 400px;
+    }
+    .login-box h1 { font-size: 22px; margin-bottom: 8px; }
+    .login-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 28px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+    .field input {
+      width: 100%; padding: 10px 14px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+      font-size: 14px; outline: none; transition: border-color .2s;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .error-msg { background: rgba(224,82,82,.15); border: 1px solid var(--danger); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--danger); margin-bottom: 16px; display: none; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px;
+      border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+      border: none; transition: background .2s, opacity .2s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; width: 100%; justify-content: center; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { opacity: .85; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-danger:hover  { opacity: .85; }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-warning:hover { opacity: .85; }
+    .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--accent); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ===== APP ===== */
+    #app { display: none; min-height: 100vh; }
+    .topbar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px; height: 60px; position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-brand { font-size: 16px; font-weight: 700; color: var(--accent); }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .admin-badge { font-size: 12px; color: var(--text-muted); }
+
+    .nav {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; padding: 0 28px; gap: 4px;
+    }
+    .nav-btn {
+      padding: 14px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+      background: none; border: none; color: var(--text-muted);
+      border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+    }
+    .nav-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .nav-btn:hover { color: var(--text); }
+
+    .main { padding: 28px; max-width: 1200px; margin: 0 auto; }
+
+    /* ===== SECTIONS ===== */
+    .section { display: none; }
+    .section.active { display: block; }
+    .section-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .section-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
+
+    /* ===== STATS ===== */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 20px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-value { font-size: 28px; font-weight: 700; }
+
+    /* ===== CARDS / TABLES ===== */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; margin-bottom: 24px;
+    }
+    .card-header {
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .badge {
+      display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .badge-pending  { background: rgba(240,165,0,.2);  color: var(--warning); }
+    .badge-approved { background: rgba(76,175,125,.2); color: var(--success); }
+    .badge-rejected { background: rgba(224,82,82,.2);  color: var(--danger);  }
+    .badge-review   { background: rgba(108,99,255,.2); color: var(--accent);  }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 20px; text-align: left; font-size: 13px; }
+    th { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); }
+    tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    td .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ===== MODAL ===== */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.75);
+      display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      width: 100%; max-width: 700px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-header {
+      padding: 20px 24px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: var(--surface);
+    }
+    .modal-header h2 { font-size: 16px; font-weight: 700; }
+    .modal-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 22px; line-height: 1; }
+    .modal-body { padding: 24px; }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .info-item { }
+    .info-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .info-value { font-size: 14px; font-weight: 500; }
+
+    .doc-image {
+      width: 100%; border-radius: 8px; border: 1px solid var(--border);
+      margin-top: 8px; background: var(--surface2);
+      min-height: 120px; display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .doc-image img { width: 100%; border-radius: 8px; display: block; }
+
+    .textarea {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: 13px; padding: 10px 14px;
+      resize: vertical; min-height: 80px; outline: none; font-family: inherit;
+    }
+    .textarea:focus { border-color: var(--accent); }
+    .form-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; display: block; }
+
+    .evidence-box {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px; margin-bottom: 12px;
+    }
+    .evidence-box h4 { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .evidence-box p { font-size: 13px; line-height: 1.6; }
+
+    .loading { text-align: center; padding: 40px; color: var(--text-muted); font-size: 13px; }
+    .empty   { text-align: center; padding: 40px; color: var(--text-muted); font-size: 13px; }
+
+    .select {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 13px; padding: 8px 12px; outline: none; cursor: pointer;
+    }
+    .select:focus { border-color: var(--accent); }
+
+    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+    .alert-info { background: rgba(108,99,255,.15); border: 1px solid var(--accent); color: var(--accent); }
+    .alert-success { background: rgba(76,175,125,.15); border: 1px solid var(--success); color: var(--success); }
+    .alert-danger { background: rgba(224,82,82,.15); border: 1px solid var(--danger); color: var(--danger); }
+  </style>
+</head>
+<body>
+
+<!-- ===== LOGIN ===== -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>TreinoPRO</h1>
+    <p>Painel Administrativo — acesso restrito</p>
+    <div id="login-error" class="error-msg"></div>
+    <div class="field">
+      <label>E-mail</label>
+      <input type="email" id="login-email" placeholder="admin@treinopro.com" />
+    </div>
+    <div class="field">
+      <label>Senha</label>
+      <input type="password" id="login-password" placeholder="••••••••" />
+    </div>
+    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- ===== APP ===== -->
+<div id="app">
+  <div class="topbar">
+    <span class="topbar-brand">TreinoPRO Admin</span>
+    <div class="topbar-right">
+      <span class="admin-badge" id="topbar-email"></span>
+      <button class="btn btn-ghost" style="padding:6px 14px;font-size:13px" onclick="doLogout()">Sair</button>
+    </div>
+  </div>
+
+  <div class="nav">
+    <button class="nav-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="nav-btn" onclick="switchTab('personals')">Cadastros Pendentes</button>
+    <button class="nav-btn" onclick="switchTab('disputes')">Disputas</button>
+  </div>
+
+  <div class="main">
+
+    <!-- ===== DASHBOARD ===== -->
+    <div class="section active" id="sec-dashboard">
+      <div class="section-title">Dashboard</div>
+      <div class="section-sub">Visão geral da plataforma</div>
+      <div id="dashboard-content"><div class="loading">Carregando...</div></div>
+    </div>
+
+    <!-- ===== PERSONALS PENDENTES ===== -->
+    <div class="section" id="sec-personals">
+      <div class="section-title">Cadastros Pendentes</div>
+      <div class="section-sub">Personal trainers aguardando análise de documentos e CREF</div>
+      <div id="personals-content"><div class="loading">Carregando...</div></div>
+    </div>
+
+    <!-- ===== DISPUTAS ===== -->
+    <div class="section" id="sec-disputes">
+      <div class="section-title">Disputas</div>
+      <div class="section-sub">Disputas de pagamento e no-show de aulas</div>
+
+      <div style="display:flex;gap:12px;margin-bottom:20px">
+        <button class="btn btn-ghost" id="dtab-payment" onclick="switchDisputeTab('payment')" style="border-color:var(--accent);color:var(--accent)">Pagamentos</button>
+        <button class="btn btn-ghost" id="dtab-class" onclick="switchDisputeTab('class')">No-show de Aulas</button>
+      </div>
+
+      <div id="disputes-payment-content"><div class="loading">Carregando...</div></div>
+      <div id="disputes-class-content" style="display:none"><div class="loading">Carregando...</div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== MODAL PERSONAL ===== -->
+<div class="modal-backdrop" id="modal-personal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Revisão de Cadastro</h2>
+      <button class="modal-close" onclick="closeModal('modal-personal')">×</button>
+    </div>
+    <div class="modal-body" id="modal-personal-body">Carregando...</div>
+    <div class="modal-footer" id="modal-personal-footer"></div>
+  </div>
+</div>
+
+<!-- ===== MODAL DISPUTA PAGAMENTO ===== -->
+<div class="modal-backdrop" id="modal-dispute">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Detalhes da Disputa</h2>
+      <button class="modal-close" onclick="closeModal('modal-dispute')">×</button>
+    </div>
+    <div class="modal-body" id="modal-dispute-body">Carregando...</div>
+    <div class="modal-footer" id="modal-dispute-footer"></div>
+  </div>
+</div>
+
+<!-- ===== MODAL DISPUTA AULA ===== -->
+<div class="modal-backdrop" id="modal-class-dispute">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Disputa de Aula (No-show)</h2>
+      <button class="modal-close" onclick="closeModal('modal-class-dispute')">×</button>
+    </div>
+    <div class="modal-body" id="modal-class-dispute-body">Carregando...</div>
+    <div class="modal-footer" id="modal-class-dispute-footer"></div>
+  </div>
+</div>
+
+<script>
+  // ===== CONFIG =====
+  const API = '';  // mesmo origin, sem prefixo
+
+  // ===== STATE =====
+  let token = localStorage.getItem('admin_token') || '';
+  let currentTab = 'dashboard';
+  let currentDisputeTab = 'payment';
+  let currentPersonalId = null;
+  let currentDisputeId = null;
+  let currentClassDisputeId = null;
+
+  // ===== BOOT =====
+  window.onload = () => {
+    if (token) showApp();
+  };
+
+  // ===== AUTH =====
+  async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn = document.getElementById('login-btn');
+    const errEl = document.getElementById('login-error');
+
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Entrando...';
+
+    try {
+      const res = await fetch(`${API}/panel/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+
+      if (res.status === 403) throw new Error(data.message || 'IP bloqueado por excesso de tentativas');
+      if (!res.ok) throw new Error(data.message || 'Credenciais inválidas');
+
+      token = data.access_token;
+      localStorage.setItem('admin_token', token);
+      document.getElementById('topbar-email').textContent = data.user.email;
+      showApp();
+    } catch (e) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Entrar';
+    }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') doLogin();
+  });
+
+  function doLogout() {
+    token = '';
+    localStorage.removeItem('admin_token');
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+
+  function showApp() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadDashboard();
+  }
+
+  // ===== API HELPER =====
+  async function api(path, opts = {}) {
+    const res = await fetch(`${API}${path}`, {
+      ...opts,
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    });
+    if (res.status === 401) { doLogout(); throw new Error('Sessão expirada'); }
+    const text = await res.text();
+    try { return { ok: res.ok, status: res.status, data: JSON.parse(text) }; }
+    catch { return { ok: res.ok, status: res.status, data: text }; }
+  }
+
+  // Carrega imagem protegida via auth header e retorna blob URL
+  async function loadProtectedImage(fileId) {
+    if (!fileId) return null;
+    try {
+      const res = await fetch(`${API}/admin/files/${fileId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    } catch { return null; }
+  }
+
+  // ===== TABS =====
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.nav-btn').forEach((b, i) => {
+      const tabs = ['dashboard', 'personals', 'disputes'];
+      b.classList.toggle('active', tabs[i] === tab);
+    });
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById(`sec-${tab}`).classList.add('active');
+
+    if (tab === 'dashboard') loadDashboard();
+    if (tab === 'personals') loadPersonals();
+    if (tab === 'disputes') loadDisputes();
+  }
+
+  function switchDisputeTab(tab) {
+    currentDisputeTab = tab;
+    document.getElementById('dtab-payment').style.borderColor = tab === 'payment' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('dtab-payment').style.color = tab === 'payment' ? 'var(--accent)' : 'var(--text)';
+    document.getElementById('dtab-class').style.borderColor = tab === 'class' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('dtab-class').style.color = tab === 'class' ? 'var(--accent)' : 'var(--text)';
+    document.getElementById('disputes-payment-content').style.display = tab === 'payment' ? 'block' : 'none';
+    document.getElementById('disputes-class-content').style.display = tab === 'class' ? 'block' : 'none';
+  }
+
+  // ===== MODAL =====
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+  document.querySelectorAll('.modal-backdrop').forEach(el => {
+    el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
+  });
+
+  // ===== DASHBOARD =====
+  async function loadDashboard() {
+    document.getElementById('dashboard-content').innerHTML = '<div class="loading">Carregando...</div>';
+    const { ok, data } = await api('/admin/dashboard');
+    if (!ok) { document.getElementById('dashboard-content').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro ao carregar dashboard'}</div>`; return; }
+
+    const s = data.summary || data;
+    document.getElementById('dashboard-content').innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total usuários</div><div class="stat-value">${s.totalUsers ?? s.users?.total ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Alunos</div><div class="stat-value">${s.totalStudents ?? s.users?.students ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Personals</div><div class="stat-value">${s.totalPersonals ?? s.users?.personals ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Cadastros pendentes</div><div class="stat-value" style="color:var(--warning)">${s.pendingApprovals ?? s.pendingPersonals ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Disputas abertas</div><div class="stat-value" style="color:var(--danger)">${s.openDisputes ?? s.disputes?.pending ?? '—'}</div></div>
+        <div class="stat-card"><div class="stat-label">Aulas hoje</div><div class="stat-value">${s.classesToday ?? s.classes?.today ?? '—'}</div></div>
+      </div>
+      <div class="alert alert-info">Para gerenciar cadastros pendentes vá em <strong>Cadastros Pendentes</strong>. Para disputas vá em <strong>Disputas</strong>.</div>
+    `;
+  }
+
+  // ===== PERSONALS =====
+  async function loadPersonals() {
+    document.getElementById('personals-content').innerHTML = '<div class="loading">Carregando...</div>';
+    const { ok, data } = await api('/admin/personals/pending');
+    if (!ok) { document.getElementById('personals-content').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const items = data.items || data;
+    if (!items.length) { document.getElementById('personals-content').innerHTML = '<div class="card"><div class="empty">Nenhum cadastro pendente 🎉</div></div>'; return; }
+
+    const rows = items.map(p => `
+      <tr>
+        <td>
+          <div style="font-weight:600">${p.firstName} ${p.lastName}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${p.email}</div>
+        </td>
+        <td>${p.cref || '—'}</td>
+        <td><span class="badge badge-${p.crefValidated ? 'approved' : 'pending'}">${p.crefValidated ? 'Validado' : 'Pendente'}</span></td>
+        <td>${fmtDate(p.createdAt)}</td>
+        <td><div class="actions"><button class="btn btn-ghost" onclick="openPersonal('${p.id}')">Analisar →</button></div></td>
+      </tr>
+    `).join('');
+
+    document.getElementById('personals-content').innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Personals aguardando aprovação</span>
+          <span class="badge badge-pending">${items.length} pendente${items.length !== 1 ? 's' : ''}</span>
+        </div>
+        <table>
+          <thead><tr><th>Nome</th><th>CREF</th><th>CREF API</th><th>Cadastro</th><th>Ação</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function openPersonal(id) {
+    currentPersonalId = id;
+    document.getElementById('modal-personal-body').innerHTML = '<div class="loading">Carregando dados...</div>';
+    document.getElementById('modal-personal-footer').innerHTML = '';
+    openModal('modal-personal');
+
+    const { ok, data } = await api(`/admin/users/${id}`);
+    if (!ok) { document.getElementById('modal-personal-body').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const u = data.user || data;
+
+    // Carrega imagens em paralelo
+    const [docBlobUrl, crefBlobUrl] = await Promise.all([
+      loadProtectedImage(u.documentImageId),
+      loadProtectedImage(u.crefImageId),
+    ]);
+
+    const docImg = docBlobUrl
+      ? `<div class="doc-image"><img src="${docBlobUrl}" alt="Documento" /></div>`
+      : `<div class="doc-image" style="height:80px">Imagem não disponível</div>`;
+
+    const crefImg = crefBlobUrl
+      ? `<div class="doc-image"><img src="${crefBlobUrl}" alt="CREF" /></div>`
+      : `<div class="doc-image" style="height:80px">Imagem não disponível</div>`;
+
+    document.getElementById('modal-personal-body').innerHTML = `
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">Nome</div><div class="info-value">${u.firstName} ${u.lastName}</div></div>
+        <div class="info-item"><div class="info-label">E-mail</div><div class="info-value">${u.email}</div></div>
+        <div class="info-item"><div class="info-label">CREF</div><div class="info-value">${u.cref || '—'}</div></div>
+        <div class="info-item"><div class="info-label">UF</div><div class="info-value">${u.crefUf || '—'}</div></div>
+        <div class="info-item"><div class="info-label">CREF validado (API CONFEF)</div><div class="info-value"><span class="badge badge-${u.crefValidated ? 'approved' : 'pending'}">${u.crefValidated ? 'Sim' : 'Não'}</span></div></div>
+        <div class="info-item"><div class="info-label">Situação CONFEF</div><div class="info-value">${u.crefValidatedSituation || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Nome na API CONFEF</div><div class="info-value">${u.crefValidatedName || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Documento</div><div class="info-value">${u.documentType || '—'} — ${u.documentNumber || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Cadastro em</div><div class="info-value">${fmtDate(u.createdAt)}</div></div>
+        <div class="info-item"><div class="info-label">Status atual</div><div class="info-value"><span class="badge badge-${statusBadge(u.approvalStatus)}">${u.approvalStatus || '—'}</span></div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div>
+          <div class="info-label" style="margin-bottom:6px">Documento de identidade</div>
+          ${docImg}
+        </div>
+        <div>
+          <div class="info-label" style="margin-bottom:6px">Carteira CREF</div>
+          ${crefImg}
+        </div>
+      </div>
+
+      <div>
+        <label class="form-label">Notas administrativas (opcional)</label>
+        <textarea class="textarea" id="personal-notes" placeholder="Motivo da aprovação ou rejeição..."></textarea>
+      </div>
+    `;
+
+    document.getElementById('modal-personal-footer').innerHTML = `
+      <button class="btn btn-danger" onclick="reviewPersonal('rejected')">Rejeitar</button>
+      <button class="btn btn-success" onclick="reviewPersonal('approved')">Aprovar</button>
+    `;
+  }
+
+  async function reviewPersonal(decision) {
+    const notes = document.getElementById('personal-notes').value.trim();
+    const btns = document.querySelectorAll('#modal-personal-footer button');
+    btns.forEach(b => b.disabled = true);
+
+    const { ok, data } = await api(`/admin/personals/${currentPersonalId}/approval`, {
+      method: 'PATCH',
+      body: JSON.stringify({ decision, adminNotes: notes }),
+    });
+
+    btns.forEach(b => b.disabled = false);
+
+    if (!ok) { alert(data?.message || 'Erro ao salvar decisão'); return; }
+
+    closeModal('modal-personal');
+    loadPersonals();
+  }
+
+  // ===== DISPUTAS =====
+  async function loadDisputes() {
+    loadPaymentDisputes();
+    loadClassDisputes();
+  }
+
+  async function loadPaymentDisputes() {
+    document.getElementById('disputes-payment-content').innerHTML = '<div class="loading">Carregando...</div>';
+    const { ok, data } = await api('/admin/disputes?limit=50');
+    if (!ok) { document.getElementById('disputes-payment-content').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const items = data.items || data;
+    if (!items.length) { document.getElementById('disputes-payment-content').innerHTML = '<div class="card"><div class="empty">Nenhuma disputa de pagamento aberta</div></div>'; return; }
+
+    const rows = items.map(d => `
+      <tr>
+        <td><code style="font-size:11px;color:var(--text-muted)">${d.id?.slice(0,8)}…</code></td>
+        <td>${d.reason || '—'}</td>
+        <td><span class="badge badge-${disputeBadge(d.status)}">${d.status || '—'}</span></td>
+        <td>${fmtDate(d.createdAt)}</td>
+        <td>${fmtDate(d.expiresAt)}</td>
+        <td><div class="actions"><button class="btn btn-ghost" onclick="openDispute('${d.id}')">Ver →</button></div></td>
+      </tr>
+    `).join('');
+
+    document.getElementById('disputes-payment-content').innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Disputas de pagamento</span>
+          <span class="badge badge-pending">${items.length}</span>
+        </div>
+        <table>
+          <thead><tr><th>ID</th><th>Motivo</th><th>Status</th><th>Aberta em</th><th>Expira em</th><th>Ação</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function openDispute(id) {
+    currentDisputeId = id;
+    document.getElementById('modal-dispute-body').innerHTML = '<div class="loading">Carregando...</div>';
+    document.getElementById('modal-dispute-footer').innerHTML = '';
+    openModal('modal-dispute');
+
+    const { ok, data } = await api(`/admin/disputes/${id}`);
+    if (!ok) { document.getElementById('modal-dispute-body').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const d = data.dispute || data;
+    const canResolve = d.status === 'under_review' || d.status === 'pending';
+
+    document.getElementById('modal-dispute-body').innerHTML = `
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">ID da Disputa</div><div class="info-value" style="font-size:12px">${d.id}</div></div>
+        <div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="badge badge-${disputeBadge(d.status)}">${d.status}</span></div></div>
+        <div class="info-item"><div class="info-label">Motivo</div><div class="info-value">${d.reason || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Aberta em</div><div class="info-value">${fmtDate(d.createdAt)}</div></div>
+        <div class="info-item"><div class="info-label">Expira em</div><div class="info-value">${fmtDate(d.expiresAt)}</div></div>
+        <div class="info-item"><div class="info-label">ID Pagamento</div><div class="info-value" style="font-size:12px">${d.paymentId || '—'}</div></div>
+      </div>
+
+      ${d.description ? `<div class="evidence-box"><h4>Descrição</h4><p>${d.description}</p></div>` : ''}
+
+      <div class="evidence-box">
+        <h4>Evidência do Aluno</h4>
+        <p>${d.studentEvidence || '<em style="color:var(--text-muted)">Nenhuma evidência enviada</em>'}</p>
+      </div>
+      <div class="evidence-box">
+        <h4>Evidência do Personal</h4>
+        <p>${d.personalEvidence || '<em style="color:var(--text-muted)">Nenhuma evidência enviada</em>'}</p>
+      </div>
+
+      ${d.adminNotes ? `<div class="evidence-box"><h4>Notas Admin</h4><p>${d.adminNotes}</p></div>` : ''}
+
+      ${canResolve ? `
+        <div style="margin-top:16px">
+          <label class="form-label">Notas administrativas</label>
+          <textarea class="textarea" id="dispute-notes" placeholder="Justificativa da decisão..."></textarea>
+        </div>
+      ` : ''}
+    `;
+
+    if (canResolve) {
+      document.getElementById('modal-dispute-footer').innerHTML = `
+        <button class="btn btn-success" onclick="resolveDispute('RESOLVED_PRO_STUDENT')">Favor do Aluno</button>
+        <button class="btn btn-warning" onclick="resolveDispute('RESOLVED_PRO_PERSONAL')">Favor do Personal</button>
+      `;
+    } else {
+      document.getElementById('modal-dispute-footer').innerHTML = `<span style="font-size:13px;color:var(--text-muted)">Disputa já resolvida</span>`;
+    }
+  }
+
+  async function resolveDispute(resolution) {
+    const notes = document.getElementById('dispute-notes')?.value.trim() || '';
+    const btns = document.querySelectorAll('#modal-dispute-footer button');
+    btns.forEach(b => b.disabled = true);
+
+    const { ok, data } = await api(`/admin/disputes/${currentDisputeId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution, adminNotes: notes }),
+    });
+
+    btns.forEach(b => b.disabled = false);
+    if (!ok) { alert(data?.message || 'Erro ao resolver disputa'); return; }
+
+    closeModal('modal-dispute');
+    loadPaymentDisputes();
+  }
+
+  // ===== CLASS DISPUTES =====
+  async function loadClassDisputes() {
+    document.getElementById('disputes-class-content').innerHTML = '<div class="loading">Carregando...</div>';
+    const { ok, data } = await api('/admin/disputes/classes?limit=50');
+    if (!ok) { document.getElementById('disputes-class-content').innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const items = data.items || data;
+    if (!items.length) { document.getElementById('disputes-class-content').innerHTML = '<div class="card"><div class="empty">Nenhuma disputa de aula aberta</div></div>'; return; }
+
+    const rows = items.map(d => `
+      <tr>
+        <td><code style="font-size:11px;color:var(--text-muted)">${d.id?.slice(0,8)}…</code></td>
+        <td>${d.personalName || d.personal?.firstName || '—'}</td>
+        <td>${d.studentName || d.student?.firstName || '—'}</td>
+        <td>${fmtDate(d.date || d.scheduledAt)}</td>
+        <td><span class="badge badge-review">${d.status || 'no_show_dispute'}</span></td>
+        <td><div class="actions"><button class="btn btn-ghost" onclick="openClassDispute('${d.id}')">Ver →</button></div></td>
+      </tr>
+    `).join('');
+
+    document.getElementById('disputes-class-content').innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Disputas de aula (no-show)</span>
+          <span class="badge badge-pending">${items.length}</span>
+        </div>
+        <table>
+          <thead><tr><th>ID</th><th>Personal</th><th>Aluno</th><th>Data da Aula</th><th>Status</th><th>Ação</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function openClassDispute(id) {
+    currentClassDisputeId = id;
+    document.getElementById('modal-class-dispute-body').innerHTML = '<div class="loading">Carregando...</div>';
+    document.getElementById('modal-class-dispute-footer').innerHTML = '';
+    openModal('modal-class-dispute');
+
+    // Busca a aula diretamente para pegar evidências
+    const { ok, data } = await api(`/admin/disputes/classes?limit=50`);
+    const classItem = (data.items || data).find(c => c.id === id);
+
+    if (!ok || !classItem) {
+      document.getElementById('modal-class-dispute-body').innerHTML = `<div class="alert alert-danger">Erro ao carregar dados da aula</div>`;
+      return;
+    }
+
+    const d = classItem;
+    document.getElementById('modal-class-dispute-body').innerHTML = `
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">ID da Aula</div><div class="info-value" style="font-size:12px">${d.id}</div></div>
+        <div class="info-item"><div class="info-label">Status</div><div class="info-value"><span class="badge badge-review">${d.status}</span></div></div>
+        <div class="info-item"><div class="info-label">Personal</div><div class="info-value">${d.personalName || d.personal?.firstName || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Aluno</div><div class="info-value">${d.studentName || d.student?.firstName || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Data da Aula</div><div class="info-value">${fmtDate(d.date || d.scheduledAt)}</div></div>
+        <div class="info-item"><div class="info-label">Local</div><div class="info-value">${d.location || '—'}</div></div>
+        <div class="info-item"><div class="info-label">Valor</div><div class="info-value">${d.price ? `R$ ${Number(d.price).toFixed(2)}` : '—'}</div></div>
+      </div>
+
+      ${d.disputeReason ? `<div class="evidence-box"><h4>Motivo do Dispute</h4><p>${d.disputeReason}</p></div>` : ''}
+      ${d.studentDisputeNote ? `<div class="evidence-box"><h4>Relato do Aluno</h4><p>${d.studentDisputeNote}</p></div>` : ''}
+      ${d.personalDisputeNote ? `<div class="evidence-box"><h4>Relato do Personal</h4><p>${d.personalDisputeNote}</p></div>` : ''}
+
+      <div style="margin-top:16px">
+        <label class="form-label">Notas administrativas</label>
+        <textarea class="textarea" id="class-dispute-notes" placeholder="Justificativa da decisão..."></textarea>
+      </div>
+    `;
+
+    document.getElementById('modal-class-dispute-footer').innerHTML = `
+      <button class="btn btn-success" onclick="resolveClassDispute('resolved_for_student')">Favor do Aluno (reembolso)</button>
+      <button class="btn btn-warning" onclick="resolveClassDispute('resolved_for_personal')">Favor do Personal (manter pagamento)</button>
+    `;
+  }
+
+  async function resolveClassDispute(resolution) {
+    const notes = document.getElementById('class-dispute-notes')?.value.trim() || '';
+    const btns = document.querySelectorAll('#modal-class-dispute-footer button');
+    btns.forEach(b => b.disabled = true);
+
+    const { ok, data } = await api(`/admin/disputes/classes/${currentClassDisputeId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution, adminNotes: notes }),
+    });
+
+    btns.forEach(b => b.disabled = false);
+    if (!ok) { alert(data?.message || 'Erro ao resolver disputa'); return; }
+
+    closeModal('modal-class-dispute');
+    loadClassDisputes();
+  }
+
+  // ===== UTILS =====
+  function fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function statusBadge(s) {
+    if (s === 'approved') return 'approved';
+    if (s === 'rejected') return 'rejected';
+    return 'pending';
+  }
+
+  function disputeBadge(s) {
+    if (!s) return 'pending';
+    if (s.includes('resolved') || s === 'expired') return 'approved';
+    if (s === 'under_review') return 'review';
+    return 'pending';
+  }
+</script>
+</body>
+</html>
