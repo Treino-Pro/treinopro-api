@@ -93,19 +93,29 @@ export class WebhooksService {
         return;
       }
 
-      // Criar novo pagamento no banco
-      // external_reference é o UUID interno do pagamento (payments.id)
-      await db.insert(payments).values({
-        mpPaymentId: payment.id,
-        totalAmount: payment.transaction_amount.toString(),
-        platformFee: '0.00',
-        personalAmount: payment.transaction_amount.toString(),
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      // O external_reference é o UUID interno do nosso registro de pagamento.
+      // Tenta localizar pelo external_reference e vincular o mpPaymentId.
+      const byRef = payment.external_reference
+        ? await db.query.payments.findFirst({
+            where: eq(payments.id, payment.external_reference),
+          })
+        : null;
 
-      this.logger.log(`✅ [WEBHOOK] Pagamento criado no banco: ${payment.id}`);
+      if (byRef) {
+        await db
+          .update(payments)
+          .set({ mpPaymentId: payment.id, updatedAt: new Date() })
+          .where(eq(payments.id, byRef.id));
+        this.logger.log(
+          `✅ [WEBHOOK] mpPaymentId vinculado ao registro ${byRef.id}`,
+        );
+      } else {
+        // Sem external_reference válido não é possível criar o registro com
+        // segurança (campos obrigatórios como studentId estariam ausentes).
+        this.logger.warn(
+          `⚠️ [WEBHOOK] Pagamento MP ${payment.id} não encontrado no banco — ignorando criação`,
+        );
+      }
     } catch (error) {
       this.logger.error(`❌ [WEBHOOK] Erro ao criar pagamento:`, error);
       throw error;
