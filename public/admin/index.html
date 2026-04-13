@@ -474,7 +474,7 @@
 
   async function openUser(id) {
     // Reutiliza a lógica de abrir personal mas adaptada para ambos
-    currentPersonalId = id; // Mantemos o nome da variável para não quebrar o reviewPersonal
+    currentPersonalId = id; 
     document.getElementById('modal-personal-body').innerHTML = '<div class="loading">Carregando dados...</div>';
     document.getElementById('modal-personal-footer').innerHTML = '';
     openModal('modal-personal');
@@ -485,23 +485,27 @@
     const u = data.user || data;
     const isPersonal = u.userType === 'personal';
 
-    // Se for personal, mostra documentos. Se for aluno, mostra menos info.
-    let docImg = '';
-    let crefImg = '';
-    
-    if (isPersonal) {
-      const [docUrl, crefUrl] = await Promise.all([
-        resolveImageUrl(u.documentImageUrl, u.documentImageId),
-        resolveImageUrl(u.crefImageUrl, u.crefImageId),
-      ]);
-      docImg = imgBlock(docUrl, 'Documento', 'documento');
-      crefImg = imgBlock(crefUrl, 'CREF', 'CREF');
-    }
+    // Carregar todas as imagens disponíveis
+    const [profileUrl, docUrl, crefUrl] = await Promise.all([
+      resolveImageUrl(u.profileImageUrl, u.profileImageId),
+      resolveImageUrl(u.documentImageUrl, u.documentImageId),
+      resolveImageUrl(u.crefImageUrl, u.crefImageId),
+    ]);
+
+    const profileImg = imgBlock(profileUrl, 'Foto de Perfil', 'perfil', true);
+    const docImg  = imgBlock(docUrl,  'Documento', 'documento');
+    const crefImg = imgBlock(crefUrl, 'CREF',      'CREF');
 
     document.getElementById('modal-personal-body').innerHTML = `
+      <div style="display:flex;gap:20px;align-items:center;margin-bottom:24px">
+        ${profileImg}
+        <div>
+          <h2 style="font-size:18px">${u.firstName} ${u.lastName}</h2>
+          <div style="font-size:13px;color:var(--text-muted)">${u.email}</div>
+        </div>
+      </div>
+
       <div class="info-grid">
-        <div class="info-item"><div class="info-label">Nome</div><div class="info-value">${u.firstName} ${u.lastName}</div></div>
-        <div class="info-item"><div class="info-label">E-mail</div><div class="info-value">${u.email}</div></div>
         <div class="info-item"><div class="info-label">Tipo</div><div class="info-value">${isPersonal ? 'Personal Trainer' : 'Aluno'}</div></div>
         <div class="info-item"><div class="info-label">Status atual</div><div class="info-value"><span class="badge badge-${statusBadge(u.approvalStatus)}">${u.approvalStatus || '—'}</span></div></div>
         ${isPersonal ? `
@@ -581,18 +585,10 @@
     return 'pending';
   }
 
-  // Resolve a URL da imagem: tenta a URL estática primeiro (mais simples),
-  // depois o endpoint protegido por auth como fallback.
+  // Resolve a URL da imagem. Prioriza o endpoint autenticado /admin/files/:id
+  // para garantir que o token seja enviado e a imagem carregue no admin.
   async function resolveImageUrl(staticUrl, fileId) {
-    // Se a API retornou uma URL estática, tenta usá-la diretamente
-    if (staticUrl) {
-      try {
-        const res = await fetch(staticUrl, { method: 'HEAD' });
-        if (res.ok) return staticUrl;
-      } catch {}
-    }
-
-    // Fallback: endpoint /admin/files/:id com auth (retorna blob)
+    // 1. Tentar via endpoint autenticado (Recomendado para Admin)
     if (fileId) {
       try {
         const res = await fetch(`${API}/admin/files/${fileId}`, {
@@ -602,20 +598,26 @@
           const blob = await res.blob();
           return URL.createObjectURL(blob);
         }
-        console.warn(`[admin/files/${fileId}] HTTP ${res.status}`);
+        console.warn(`[admin/files/${fileId}] status ${res.status}`);
       } catch (e) {
         console.warn(`[admin/files/${fileId}] fetch error:`, e);
       }
     }
 
+    // 2. Fallback: tentar URL estática direta se houver
+    if (staticUrl) {
+      return staticUrl;
+    }
+
     return null;
   }
 
-  function imgBlock(url, alt, label) {
+  function imgBlock(url, alt, label, isCircle = false) {
     if (url) {
-      return `<div class="doc-image"><img src="${url}" alt="${alt}" onerror="this.parentElement.innerHTML='<span style=\\'padding:12px;color:var(--text-muted)\\'>Falha ao carregar imagem</span>'" /></div>`;
+      const style = isCircle ? 'width:80px;height:80px;border-radius:50%;object-fit:cover' : 'width:100%';
+      return `<div class="doc-image" style="${isCircle ? 'border:none;background:none' : ''}"><img src="${url}" alt="${alt}" style="${style}" onerror="this.parentElement.innerHTML='<span style=\\'padding:12px;color:var(--text-muted);font-size:11px\\'>Erro</span>'" /></div>`;
     }
-    return `<div class="doc-image" style="height:80px;font-size:12px">Sem ${label} cadastrado</div>`;
+    return `<div class="doc-image" style="height:80px;font-size:11px">Sem ${label}</div>`;
   }
 
   async function openPersonal(id) {
