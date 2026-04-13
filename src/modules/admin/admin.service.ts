@@ -1211,4 +1211,57 @@ export class AdminService {
           : null,
     };
   }
+
+  async listClasses(filters: {
+    page?: number;
+    limit?: number;
+    status?: string;
+  }) {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    const studentAlias = sql`student`;
+    const personalAlias = sql`personal`;
+
+    const baseQuery = this.db
+      .select({
+        id: classes.id,
+        status: classes.status,
+        scheduledAt: classes.scheduledAt,
+        location: classes.location,
+        price: classes.price,
+        studentId: classes.studentId,
+        personalId: classes.personalId,
+        studentName: sql<string>`concat(s.first_name, ' ', s.last_name)`,
+        studentEmail: sql<string>`s.email`,
+        personalName: sql<string>`concat(p.first_name, ' ', p.last_name)`,
+        personalEmail: sql<string>`p.email`,
+      })
+      .from(classes)
+      .leftJoin(sql`${users} as s`, eq(classes.studentId, sql`s.id`))
+      .leftJoin(sql`${users} as p`, eq(classes.personalId, sql`p.id`))
+      .orderBy(desc(classes.scheduledAt));
+
+    if (filters.status) {
+      baseQuery.where(eq(classes.status, filters.status));
+    }
+
+    const items = await baseQuery.limit(limit).offset(offset);
+
+    const [totalRes] = await this.db
+      .select({ count: count() })
+      .from(classes)
+      .where(filters.status ? eq(classes.status, filters.status) : undefined);
+
+    const total = Number(totalRes.count);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 }

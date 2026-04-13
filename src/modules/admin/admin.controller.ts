@@ -932,4 +932,25 @@ export class AdminController {
   async getClassesMonitoring() {
     return this.adminService.getClassesMonitoring();
   }
+
+  @Get('classes')
+  @ApiOperation({
+    summary: 'Listar todas as aulas',
+    description: 'Retorna lista paginada de todas as aulas com detalhes de aluno e personal',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  async listClasses(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+  ) {
+    const filters = {
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status,
+    };
+    return this.adminService.listClasses(filters);
+  }
 }
