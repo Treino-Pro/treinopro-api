@@ -601,15 +601,14 @@
           <div class="info-item"><div class="info-label">UF CREF</div><div class="info-value">${u.crefUf || '—'}</div></div>
           <div class="info-item"><div class="info-label">API CONFEF</div><div class="info-value"><span class="badge badge-${u.crefValidated ? 'approved' : 'pending'}">${u.crefValidated ? 'Válido' : 'Pendente'}</span></div></div>
         ` : ''}
+        <div class="info-item"><div class="info-label">Documento</div><div class="info-value">${u.documentType || '—'} — ${u.documentNumber || '—'}</div></div>
         <div class="info-item"><div class="info-label">Cadastro em</div><div class="info-value">${fmtDate(u.createdAt)}</div></div>
       </div>
 
-      ${isPersonal ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-          <div><div class="info-label">Documento</div>${docImg}</div>
-          <div><div class="info-label">CREF</div>${crefImg}</div>
-        </div>
-      ` : ''}
+      <div style="display:grid;grid-template-columns:${isPersonal ? '1fr 1fr' : '1fr'};gap:16px;margin-bottom:20px">
+        <div><div class="info-label">Documento</div>${docImg}</div>
+        ${isPersonal ? `<div><div class="info-label">CREF</div>${crefImg}</div>` : ''}
+      </div>
 
       <div>
         <label class="form-label">Notas administrativas</label>
