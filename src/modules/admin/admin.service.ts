@@ -417,14 +417,47 @@ export class AdminService {
       process.env.STORAGE_PATH && path.isAbsolute(process.env.STORAGE_PATH)
         ? process.env.STORAGE_PATH
         : path.join(process.cwd(), process.env.STORAGE_PATH || 'storage');
-    const relativePath = storedPath.replace(/^(\.\/)?storage\/?/, '');
-    const absolutePath = path.isAbsolute(storedPath)
-      ? storedPath
-      : path.join(storageBase, relativePath);
 
-    try {
-      await fs.access(absolutePath);
-    } catch {
+    let absolutePath = storedPath;
+
+    // Tentar acesso direto primeiro (se for um caminho absoluto válido no ambiente atual)
+    let fileExists = false;
+    if (path.isAbsolute(storedPath)) {
+      try {
+        await fs.access(storedPath);
+        fileExists = true;
+      } catch {
+        fileExists = false;
+      }
+    }
+
+    // Se falhar ou não for absoluto, tentar resolver pelo storageBase atual
+    if (!fileExists) {
+      let relativePath = storedPath;
+
+      // Se o caminho contiver "storage/", extrair a partir dali (mais robusto para caminhos absolutos de outros sistemas)
+      const storageIndex = storedPath.lastIndexOf('storage/');
+      if (storageIndex !== -1) {
+        relativePath = storedPath.substring(storageIndex + 'storage/'.length);
+      } else {
+        // Fallback: remover prefixos comuns no início
+        relativePath = storedPath.replace(/^(\.\/)?storage\/?/, '');
+      }
+
+      absolutePath = path.join(storageBase, relativePath);
+
+      try {
+        await fs.access(absolutePath);
+        fileExists = true;
+      } catch {
+        fileExists = false;
+      }
+    }
+
+    if (!fileExists) {
+      this.logger.error(
+        `❌ Arquivo não encontrado no servidor. Tentativas: [Direto: ${storedPath}], [Resolvido: ${absolutePath}]`,
+      );
       throw new NotFoundException('Arquivo não encontrado no servidor');
     }
 
