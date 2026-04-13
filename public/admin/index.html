@@ -522,7 +522,13 @@
     const { ok, data } = await api(url);
     if (!ok) { contentEl.innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
 
-    const items = data.items || data;
+    const items = Array.isArray(data?.users)
+      ? data.users
+      : Array.isArray(data?.items)
+        ? data.items
+        : Array.isArray(data)
+          ? data
+          : [];
     if (!items.length) { contentEl.innerHTML = '<div class="card"><div class="empty">Nenhum usuário encontrado.</div></div>'; return; }
 
     const rows = items.map(u => {
