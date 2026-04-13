@@ -456,7 +456,34 @@ export class AdminService {
 
     if (!fileExists) {
       this.logger.error(
-        `❌ Arquivo não encontrado no servidor. Tentativas: [Direto: ${storedPath}], [Resolvido: ${absolutePath}]`,
+        `❌ Arquivo não encontrado no servidor. Tentativas: [Direto: ${storedPath}], [Resolvido: ${absolutePath}]. Tentando fallback final em ./storage...`,
+      );
+
+      // Terceira tentativa: Fallback absoluto para o diretório "storage" local do projeto
+      const localFallbackBase = path.join(process.cwd(), 'storage');
+      if (storageBase !== localFallbackBase) {
+        let relativePath = storedPath;
+        const storageIndex = storedPath.lastIndexOf('storage/');
+        if (storageIndex !== -1) {
+          relativePath = storedPath.substring(storageIndex + 'storage/'.length);
+        } else {
+          relativePath = storedPath.replace(/^(\.\/)?storage\/?/, '');
+        }
+
+        absolutePath = path.join(localFallbackBase, relativePath);
+        try {
+          await fs.access(absolutePath);
+          fileExists = true;
+          this.logger.log(`✅ Arquivo encontrado via fallback local: ${absolutePath}`);
+        } catch {
+          fileExists = false;
+        }
+      }
+    }
+
+    if (!fileExists) {
+      this.logger.error(
+        `❌ Falha crítica: Arquivo não encontrado após todas as tentativas.`,
       );
       throw new NotFoundException('Arquivo não encontrado no servidor');
     }
