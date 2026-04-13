@@ -1221,16 +1221,16 @@ export class AdminService {
     const limit = filters.limit || 20;
     const offset = (page - 1) * limit;
 
-    const studentAlias = sql`student`;
-    const personalAlias = sql`personal`;
+    // Converte status string para o tipo do enum se necessário
+    const statusFilter = filters.status as any;
 
     const baseQuery = this.db
       .select({
         id: classes.id,
         status: classes.status,
-        scheduledAt: classes.scheduledAt,
+        scheduledAt: classes.date,
         location: classes.location,
-        price: classes.price,
+        price: proposals.price,
         studentId: classes.studentId,
         personalId: classes.personalId,
         studentName: sql<string>`concat(s.first_name, ' ', s.last_name)`,
@@ -1239,12 +1239,13 @@ export class AdminService {
         personalEmail: sql<string>`p.email`,
       })
       .from(classes)
+      .leftJoin(proposals, eq(classes.proposalId, proposals.id))
       .leftJoin(sql`${users} as s`, eq(classes.studentId, sql`s.id`))
       .leftJoin(sql`${users} as p`, eq(classes.personalId, sql`p.id`))
-      .orderBy(desc(classes.scheduledAt));
+      .orderBy(desc(classes.date));
 
     if (filters.status) {
-      baseQuery.where(eq(classes.status, filters.status));
+      baseQuery.where(eq(classes.status, statusFilter));
     }
 
     const items = await baseQuery.limit(limit).offset(offset);
@@ -1252,7 +1253,7 @@ export class AdminService {
     const [totalRes] = await this.db
       .select({ count: count() })
       .from(classes)
-      .where(filters.status ? eq(classes.status, filters.status) : undefined);
+      .where(filters.status ? eq(classes.status, statusFilter) : undefined);
 
     const total = Number(totalRes.count);
 
