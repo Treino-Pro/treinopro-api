@@ -423,7 +423,89 @@
     if (tab === 'disputes') loadDisputes();
   }
 
-  // ... (switchDisputeTab, openModal, closeModal, loadDashboard remains same) ...
+  function switchDisputeTab(tab) {
+    currentDisputeTab = tab;
+    document.getElementById('dtab-payment').style.borderColor = tab === 'payment' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('dtab-payment').style.color = tab === 'payment' ? 'var(--accent)' : 'var(--text)';
+    document.getElementById('dtab-class').style.borderColor = tab === 'class' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('dtab-class').style.color = tab === 'class' ? 'var(--accent)' : 'var(--text)';
+
+    document.getElementById('disputes-payment-content').style.display = tab === 'payment' ? 'block' : 'none';
+    document.getElementById('disputes-class-content').style.display = tab === 'class' ? 'block' : 'none';
+  }
+
+  function openModal(id) {
+    document.getElementById(id).classList.add('open');
+  }
+
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('open');
+  }
+
+  async function loadDashboard() {
+    const contentEl = document.getElementById('dashboard-content');
+    contentEl.innerHTML = '<div class="loading">Carregando resumo...</div>';
+
+    const { ok, data } = await api('/admin/dashboard');
+    if (!ok) {
+      contentEl.innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro ao carregar dashboard'}</div>`;
+      return;
+    }
+
+    const { users, proposals, classes, latestPayments, unresolvedDisputes } = data;
+
+    const paymentsRows = (latestPayments || []).map(p => `
+      <tr>
+        <td>${fmtDate(p.createdAt)}</td>
+        <td>${p.studentName || '—'}</td>
+        <td>${p.personalName || '—'}</td>
+        <td>R$ ${Number(p.totalAmount).toFixed(2)}</td>
+        <td><span class="badge badge-${p.status === 'approved' ? 'approved' : 'pending'}">${p.status}</span></td>
+      </tr>
+    `).join('');
+
+    contentEl.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Usuários Totais</div>
+          <div class="stat-value">${users}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Aulas Concluídas</div>
+          <div class="stat-value">${classes.completed}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Disputas Pendentes</div>
+          <div class="stat-value" style="color:${unresolvedDisputes > 0 ? 'var(--warning)' : 'inherit'}">${unresolvedDisputes}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Propostas Ativas</div>
+          <div class="stat-value">${proposals.matched + proposals.pending}</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Pagamentos Recentes</span>
+          <button class="btn btn-ghost" style="font-size:11px" onclick="switchTab('classes')">Ver todas as aulas</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Aluno</th>
+              <th>Personal</th>
+              <th>Valor</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${paymentsRows || '<tr><td colspan="5" class="empty">Nenhum pagamento recente</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
 
   // ===== USERS =====
   async function loadUsers() {
