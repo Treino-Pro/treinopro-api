@@ -604,6 +604,17 @@ export class MercadoPagoService {
         );
       }
 
+      // Erro 4047 do MP: conta coletora (recebedora) sem chave PIX cadastrada/habilitada.
+      if (
+        normalizedMessage.includes('collector user without key') ||
+        normalizedMessage.includes('without key enabled for qr')
+      ) {
+        throw new BadRequestException(
+          'A conta do Mercado Pago vinculada à plataforma ainda não possui uma chave PIX habilitada. ' +
+            'Acesse o painel do Mercado Pago, vá em "Seu dinheiro > PIX" e cadastre uma chave PIX para habilitar pagamentos via QR Code.',
+        );
+      }
+
       throw new BadRequestException(
         `Erro ao processar pagamento PIX: ${finalMessage}`,
       );
