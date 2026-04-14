@@ -510,9 +510,19 @@ export class ClassesService {
           );
         }
       } else {
+        // Sem registro na tabela payments → pode ser pagamento PIX de proposta.
+        // Nesse caso o dinheiro está na conta MP da plataforma e o repasse deve
+        // ser feito via MP Transfers para a conta MP do personal.
         console.log(
-          '⚠️ [COMPLETE_CLASS] Nenhum pagamento encontrado para esta aula',
+          '⚠️ [COMPLETE_CLASS] Nenhum pagamento na tabela payments — verificando proposta PIX...',
         );
+        if (classData.proposalId) {
+          await this.triggerPixProposalSplit(
+            id,
+            classData.proposalId,
+            classData.personalId,
+          );
+        }
       }
     } catch (error) {
       console.error(
@@ -707,8 +717,15 @@ export class ClassesService {
         }
       } else {
         console.log(
-          '⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado para esta aula',
+          '⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado — verificando proposta PIX...',
         );
+        if (classData.proposalId) {
+          await this.triggerPixProposalSplit(
+            classId,
+            classData.proposalId,
+            classData.personalId,
+          );
+        }
       }
     } catch (error) {
       console.error(
@@ -969,6 +986,76 @@ export class ClassesService {
     }
 
     return this.formatClassResponse(updatedClass);
+  }
+
+  // Verifica se a proposta tem pagamento PIX confirmado e aciona o repasse MP
+  private async triggerPixProposalSplit(
+    classId: string,
+    proposalId: string,
+    personalId: string,
+  ): Promise<void> {
+    try {
+      const proposal = await this.db.query.proposals.findFirst({
+        where: eq(proposals.id, proposalId),
+        columns: {
+          id: true,
+          paymentId: true,
+          paymentStatus: true,
+          price: true,
+        },
+      });
+
+      if (!proposal) {
+        console.log(`⚠️ [SPLIT PIX] Proposta ${proposalId} não encontrada`);
+        return;
+      }
+
+      const { paymentId, paymentStatus, price } = proposal;
+
+      // Apenas pagamentos confirmados e com ID numérico do MP (PIX real)
+      const confirmedStatuses = ['captured', 'approved', 'authorized'];
+      if (!paymentId || !confirmedStatuses.includes(paymentStatus ?? '')) {
+        console.log(
+          `⚠️ [SPLIT PIX] Proposta ${proposalId} sem pagamento PIX confirmado (status=${paymentStatus}, paymentId=${paymentId}) — split pulado`,
+        );
+        return;
+      }
+
+      const isSimulated =
+        paymentId.startsWith('sim_pix_') ||
+        paymentId.startsWith('sim_') ||
+        paymentId.startsWith('proposal_');
+      if (isSimulated) {
+        console.log(
+          `🧪 [SPLIT PIX] Pagamento simulado (${paymentId}) — split externo pulado`,
+        );
+        return;
+      }
+
+      const platformFeePercentage =
+        parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
+      const totalAmount = parseFloat(String(price));
+      const personalAmount = parseFloat(
+        (totalAmount * (1 - platformFeePercentage)).toFixed(2),
+      );
+
+      console.log(
+        `💸 [SPLIT PIX] Aula ${classId}: repassando R$${personalAmount} ao personal ${personalId}`,
+      );
+
+      await this.paymentsService.transferPixSplitToPersonal({
+        personalId,
+        amount: personalAmount,
+        classId,
+        proposalId,
+      });
+    } catch (error) {
+      console.error(
+        `❌ [SPLIT PIX] Erro ao acionar repasse PIX para proposta ${proposalId}:`,
+        error,
+      );
+      // Não propagar — não deve bloquear a conclusão da aula
+    }
   }
 
   private async findPaymentForClass(

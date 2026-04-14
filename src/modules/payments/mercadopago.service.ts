@@ -1129,6 +1129,81 @@ export class MercadoPagoService {
     };
   }
 
+  // ===== SPLIT DE PIX: TRANSFERÊNCIA MARKETPLACE MP =====
+
+  // Transfere o valor do repasse da conta da plataforma para a conta MP do personal
+  // usando o endpoint /v1/transfers (transferência entre contas no mesmo marketplace).
+  async sendMpTransfer(data: {
+    destinationMpUserId: string;
+    amount: number;
+    idempotencyKey: string;
+  }): Promise<{ success: boolean; transferId?: string; error?: string }> {
+    const accessToken = process.env.MP_ACCESS_TOKEN;
+    if (!accessToken) {
+      return { success: false, error: 'MP_ACCESS_TOKEN não configurado' };
+    }
+
+    const isTestEnv = accessToken.startsWith('TEST-');
+    if (isTestEnv) {
+      this.logger.warn(
+        `🧪 [TRANSFER MOCK] Ambiente de teste — transferência simulada para mpUserId=${data.destinationMpUserId} valor=R$${data.amount}`,
+      );
+      return { success: true, transferId: `sim_transfer_${Date.now()}` };
+    }
+
+    try {
+      this.logger.log(
+        `💸 [MP TRANSFER] Enviando R$${data.amount} para mpUserId=${data.destinationMpUserId}`,
+      );
+
+      const response = await fetch('https://api.mercadopago.com/v1/transfers', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': data.idempotencyKey,
+        },
+        body: JSON.stringify({
+          amount: Number(data.amount.toFixed(2)),
+          currency_id: 'BRL',
+          origin: { type: 'mp_account_money' },
+          destination: {
+            type: 'mp_account_money',
+            user_id: data.destinationMpUserId,
+          },
+        }),
+      });
+
+      const responseText = await response.text();
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        parsed = { message: responseText };
+      }
+
+      if (!response.ok) {
+        this.logger.error(
+          `❌ [MP TRANSFER] Falha HTTP ${response.status}:`,
+          parsed,
+        );
+        return {
+          success: false,
+          error: parsed?.message || `HTTP ${response.status}`,
+        };
+      }
+
+      const transferId = String(parsed.id || parsed.transfer_id || '');
+      this.logger.log(
+        `✅ [MP TRANSFER] Transferência criada: id=${transferId}`,
+      );
+      return { success: true, transferId };
+    } catch (error) {
+      this.logger.error(`❌ [MP TRANSFER] Erro inesperado:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // ===== TRANSFERÊNCIA REAL PARA PERSONAL =====
 
   // Transferir dinheiro real para conta do personal

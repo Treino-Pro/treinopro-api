@@ -85,6 +85,51 @@ export class PaymentsService {
     return this.mercadoPagoService.createRefund(mpPaymentId, { reason });
   }
 
+  // Repasse de split PIX para a conta MP do personal (chamado após conclusão de aula)
+  async transferPixSplitToPersonal(data: {
+    personalId: string;
+    amount: number;
+    classId: string;
+    proposalId: string;
+  }): Promise<void> {
+    try {
+      const financialProfile =
+        await this.db.query.financialProfiles.findFirst({
+          where: (fp: any, { eq }: any) => eq(fp.userId, data.personalId),
+        });
+
+      if (!financialProfile?.canReceivePayments || !financialProfile.mpUserId) {
+        console.warn(
+          `⚠️ [SPLIT PIX] Personal ${data.personalId} não tem conta MP vinculada — repasse externo pulado (carteira interna mantida)`,
+        );
+        return;
+      }
+
+      const idempotencyKey = `split_${data.classId}_${data.proposalId}`;
+      const result = await this.mercadoPagoService.sendMpTransfer({
+        destinationMpUserId: financialProfile.mpUserId,
+        amount: data.amount,
+        idempotencyKey,
+      });
+
+      if (result.success) {
+        console.log(
+          `✅ [SPLIT PIX] Repasse de R$${data.amount.toFixed(2)} enviado para personal ${data.personalId} (transferId=${result.transferId})`,
+        );
+      } else {
+        console.error(
+          `❌ [SPLIT PIX] Falha no repasse para personal ${data.personalId}: ${result.error}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `❌ [SPLIT PIX] Erro inesperado ao transferir repasse:`,
+        error,
+      );
+      // Não propagar erro — não deve bloquear a conclusão da aula
+    }
+  }
+
   // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)
   async getMpPayment(mpPaymentId: string): Promise<any> {
     return this.mercadoPagoService.getPayment(mpPaymentId);
