@@ -1096,6 +1096,36 @@ export class ProposalsService {
       );
     }
 
+    // ===== FALLBACK: consulta ao MP quando webhook não atualizou o status =====
+    // Se o pagamento ainda está pendente e o paymentId é um ID numérico do MP
+    // (pagamento PIX real), consulta o MP diretamente para obter o status atual.
+    // Isso garante que o polling no app detecte o pagamento mesmo quando o
+    // webhook falha (ex: MP_WEBHOOK_SECRET incorreto ou URL não configurada).
+    const isRealMpId = /^\d+$/.test(proposal.paymentId ?? '');
+    const needsLiveCheck =
+      isRealMpId &&
+      (!proposal.paymentStatus || proposal.paymentStatus === 'pending');
+
+    if (needsLiveCheck) {
+      try {
+        const mpPayment = await this.paymentsService.getMpPayment(
+          proposal.paymentId,
+        );
+        if (mpPayment?.status && mpPayment.status !== 'pending') {
+          const mappedStatus = this.paymentsService.mapMpPaymentStatus(
+            mpPayment.status,
+          );
+          await this.db
+            .update(proposals)
+            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, id));
+          proposal.paymentStatus = mappedStatus;
+        }
+      } catch {
+        // Ignora erros de rede — retorna o status que está no banco
+      }
+    }
+
     // Buscar dados do usuário para incluir na resposta
     const [student] = await this.db
       .select()
@@ -2105,17 +2135,40 @@ export class ProposalsService {
         }
       } else {
         // Pagamento PIX ou cartão real: paymentId é o ID numérico do MP
-        console.log(
-          `💰 [PROPOSALS] Solicitando reembolso real ao MP para pagamento: ${paymentId}`,
-        );
+        // Antes de tentar o reembolso, verificar o status real do pagamento no MP.
+        // PIX com status 'pending' (QR gerado mas não pago) não pode ser reembolsado —
+        // o MP expira o QR automaticamente na date_of_expiration. Tentar refund retorna
+        // "Invalid status to refund" e derruba o fluxo desnecessariamente.
         try {
-          await this.paymentsService.createRefundByMpId(paymentId, reason);
-          console.log(
-            `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${paymentId}`,
-          );
+          const mpPayment =
+            await this.paymentsService.getMpPayment(paymentId);
+          const mpStatus = mpPayment?.status ?? 'unknown';
+
+          if (mpStatus === 'pending' || mpStatus === 'in_process') {
+            console.log(
+              `⏳ [PROPOSALS] Pagamento ${paymentId} ainda está '${mpStatus}' — QR PIX não foi pago; nenhum reembolso necessário (expira automaticamente no MP)`,
+            );
+            // Não há dinheiro a devolver; encerrar sem erro
+          } else if (
+            mpStatus === 'approved' ||
+            mpStatus === 'authorized' ||
+            mpStatus === 'captured'
+          ) {
+            console.log(
+              `💰 [PROPOSALS] Solicitando reembolso real ao MP para pagamento: ${paymentId} (status=${mpStatus})`,
+            );
+            await this.paymentsService.createRefundByMpId(paymentId, reason);
+            console.log(
+              `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${paymentId}`,
+            );
+          } else {
+            console.log(
+              `⚠️ [PROPOSALS] Pagamento ${paymentId} com status '${mpStatus}' — reembolso não aplicável`,
+            );
+          }
         } catch (refundError) {
           console.error(
-            `❌ [PROPOSALS] Falha ao criar reembolso no MP para ${paymentId}:`,
+            `❌ [PROPOSALS] Falha ao processar reembolso para ${paymentId}:`,
             refundError,
           );
           throw refundError;
