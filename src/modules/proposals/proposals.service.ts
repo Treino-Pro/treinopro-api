@@ -2084,19 +2084,42 @@ export class ProposalsService {
     reason: string,
   ): Promise<void> {
     try {
-      // Verificar se é uma preferência do Mercado Pago ou pagamento simulado
-      if (paymentId.startsWith('proposal_')) {
-        // Pagamento real via Mercado Pago - processar reembolso via PaymentsService
+      const isSimulated =
+        paymentId.startsWith('sim_pix_') || paymentId.startsWith('sim_');
+      const isMpPreferenceId = paymentId.startsWith('proposal_');
 
-        // Buscar pagamento no sistema de pagamentos
+      if (isSimulated) {
+        // Pagamento mockado — não há nada a reembolsar no MP
+        console.log(
+          `🧪 [PROPOSALS] Pagamento simulado ${paymentId} — nenhuma chamada ao MP necessária`,
+        );
+      } else if (isMpPreferenceId) {
+        // Fluxo antigo: preferência MP com ID no formato "proposal_xxx"
         const payment = await this.findPaymentByExternalReference(paymentId);
-
         if (payment) {
           await this.paymentsService.refundPayment(payment.id, reason);
         } else {
+          console.warn(
+            `⚠️ [PROPOSALS] Pagamento de preferência não encontrado para reembolso: ${paymentId}`,
+          );
         }
       } else {
-        // Pagamento simulado - apenas marcar como reembolsado
+        // Pagamento PIX ou cartão real: paymentId é o ID numérico do MP
+        console.log(
+          `💰 [PROPOSALS] Solicitando reembolso real ao MP para pagamento: ${paymentId}`,
+        );
+        try {
+          await this.paymentsService.createRefundByMpId(paymentId, reason);
+          console.log(
+            `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${paymentId}`,
+          );
+        } catch (refundError) {
+          console.error(
+            `❌ [PROPOSALS] Falha ao criar reembolso no MP para ${paymentId}:`,
+            refundError,
+          );
+          throw refundError;
+        }
       }
 
       // Atualizar status da proposta

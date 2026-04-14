@@ -77,6 +77,14 @@ export class PaymentsService {
     return this.mercadoPagoService.createPixPayment(pixData);
   }
 
+  // Delegador para reembolso direto pelo ID numérico do MP (PIX de propostas)
+  async createRefundByMpId(
+    mpPaymentId: string,
+    reason?: string,
+  ): Promise<any> {
+    return this.mercadoPagoService.createRefund(mpPaymentId, { reason });
+  }
+
   // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)
   async getMpPayment(mpPaymentId: string): Promise<any> {
     return this.mercadoPagoService.getPayment(mpPaymentId);

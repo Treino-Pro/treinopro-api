@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { db } from '../../database/connection';
 import { payments } from '../../database/schema/payments';
+import { proposals } from '../../database/schema/proposals';
 import { PaymentStatus } from './dto/payments.dto';
 import { classes } from '../../database/schema/classes';
 import { eq } from 'drizzle-orm';
@@ -126,32 +127,49 @@ export class WebhooksService {
     this.logger.log(`🔄 [WEBHOOK] Pagamento atualizado: ${payment.id}`);
 
     try {
-      // Buscar pagamento no banco
+      const mappedStatus = this.mapMercadoPagoStatus(
+        payment.status,
+      ) as PaymentStatus;
+
+      // Buscar pagamento no banco de pagamentos
       const existingPayment = await db.query.payments.findFirst({
         where: eq(payments.mpPaymentId, payment.id),
       });
 
-      if (!existingPayment) {
-        this.logger.warn(
-          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+      if (existingPayment) {
+        await db
+          .update(payments)
+          .set({ status: mappedStatus, updatedAt: new Date() })
+          .where(eq(payments.id, existingPayment.id));
+
+        this.logger.log(
+          `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${payment.status}`,
         );
         return;
       }
 
-      // Atualizar status
-      const mappedStatus = this.mapMercadoPagoStatus(
-        payment.status,
-      ) as PaymentStatus;
-      await db
-        .update(payments)
-        .set({
-          status: mappedStatus,
-          updatedAt: new Date(),
-        })
-        .where(eq(payments.id, existingPayment.id));
+      // Pagamento PIX de proposta: o mpPaymentId fica em proposals.paymentId
+      // e o external_reference é o proposalId
+      if (payment.external_reference) {
+        const proposal = await db.query.proposals.findFirst({
+          where: eq(proposals.id, payment.external_reference),
+        });
 
-      this.logger.log(
-        `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${payment.status}`,
+        if (proposal) {
+          await db
+            .update(proposals)
+            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, proposal.id));
+
+          this.logger.log(
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${mappedStatus} (via payment.updated)`,
+          );
+          return;
+        }
+      }
+
+      this.logger.warn(
+        `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
       );
     } catch (error) {
       this.logger.error(`❌ [WEBHOOK] Erro ao atualizar pagamento:`, error);
@@ -163,42 +181,56 @@ export class WebhooksService {
     this.logger.log(`✅ [WEBHOOK] Pagamento aprovado: ${payment.id}`);
 
     try {
-      // Buscar pagamento no banco
-      const existingPayment = await db.query.payments.findFirst({
-        where: eq(payments.mpPaymentId, payment.id),
-      });
-
-      if (!existingPayment) {
-        this.logger.warn(
-          `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
-        );
-        return;
-      }
-
-      // ✅ CORRIGIDO: Usar mapeamento correto para disparar repasse
       const mappedStatus = this.mapMercadoPagoStatus(
         payment.status,
       ) as PaymentStatus;
 
-      await db
-        .update(payments)
-        .set({
-          status: mappedStatus,
-          updatedAt: new Date(),
-        })
-        .where(eq(payments.id, existingPayment.id));
+      // Buscar pagamento no banco de pagamentos
+      const existingPayment = await db.query.payments.findFirst({
+        where: eq(payments.mpPaymentId, payment.id),
+      });
 
-      this.logger.log(
-        `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${mappedStatus}`,
-      );
+      if (existingPayment) {
+        await db
+          .update(payments)
+          .set({ status: mappedStatus, updatedAt: new Date() })
+          .where(eq(payments.id, existingPayment.id));
 
-      // Notificar personal trainer se for uma aula
-      if (existingPayment.studentId) {
-        await this.notifyPersonalTrainer(
-          existingPayment.studentId,
-          'payment_approved',
+        this.logger.log(
+          `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${mappedStatus}`,
         );
+
+        if (existingPayment.studentId) {
+          await this.notifyPersonalTrainer(
+            existingPayment.studentId,
+            'payment_approved',
+          );
+        }
+        return;
       }
+
+      // Pagamento PIX de proposta: busca pela proposals via external_reference
+      if (payment.external_reference) {
+        const proposal = await db.query.proposals.findFirst({
+          where: eq(proposals.id, payment.external_reference),
+        });
+
+        if (proposal) {
+          await db
+            .update(proposals)
+            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, proposal.id));
+
+          this.logger.log(
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${mappedStatus} (via payment.approved)`,
+          );
+          return;
+        }
+      }
+
+      this.logger.warn(
+        `⚠️ [WEBHOOK] Pagamento não encontrado no banco: ${payment.id}`,
+      );
     } catch (error) {
       this.logger.error(
         `❌ [WEBHOOK] Erro ao processar pagamento aprovado:`,
