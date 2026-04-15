@@ -1229,16 +1229,23 @@ export class StudentPaymentMethodsService {
         timesUsed: savedCard.timesUsed,
       });
 
-      // ✅ SEMPRE gerar token fresco - tokens expiram em poucos minutos
+      // ⚠️ AMEX requer CVV em TODA transação (regra da rede AMEX via Mercado Pago)
+      const brand = (savedCard.cardBrand || '').toLowerCase();
+      if (brand === 'amex' || brand === 'american_express') {
+        throw new BadRequestException(
+          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação. ' +
+          'Por favor, refaça o pagamento selecionando "Novo cartão" e insira os dados completos do seu cartão AMEX.',
+        );
+      }
+
+      // ✅ Gerar token fresco a partir do card_id salvo no MP
       const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
       if (isTestEnv) {
-        // ✅ Em teste: Re-tokenizar usando cartão oficial de teste (sandbox)
         const fullYear =
           savedCard.expirationYear.length === 2
             ? `20${savedCard.expirationYear}`
             : savedCard.expirationYear;
 
-        // Buscar dados do usuário para identification
         const user = await db.query.users.findFirst({
           where: eq(users.id, userId),
         });
@@ -1247,19 +1254,16 @@ export class StudentPaymentMethodsService {
         const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
 
         cardToken = await this.mercadoPagoService.createCardToken({
-          cardNumber: '4235 6477 2802 5682', // Visa oficial de teste MP
+          cardNumber: '4235 6477 2802 5682',
           expirationMonth: savedCard.expirationMonth,
           expirationYear: fullYear,
           securityCode: '123',
           cardholderName: savedCard.cardHolderName || 'APRO',
-          identificationType: identificationType, // ✅ Adicionar identification
-          identificationNumber: userCpf, // ✅ Adicionar identification
+          identificationType: identificationType,
+          identificationNumber: userCpf,
         });
-        console.log(
-          '✅ [CARD PAYMENT] Token fresco gerado para ambiente de teste',
-        );
+        console.log('✅ [CARD PAYMENT] Token fresco gerado para ambiente de teste');
       } else {
-        // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
         if (!savedCard.mpCardId) {
           throw new BadRequestException(
             'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
@@ -1478,69 +1482,16 @@ export class StudentPaymentMethodsService {
         cardBrand,
       );
 
-      // ✅ SEMPRE gerar token fresco - tokens expiram em poucos minutos
-      // Não reutilizar token salvo
-      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
-      if (isTestEnv) {
-        // ✅ Em teste: Gerar token fresco usando cartão oficial de teste
-        const fullYear =
-          savedCard.expirationYear.length === 2
-            ? `20${savedCard.expirationYear}`
-            : savedCard.expirationYear;
-
-        // Buscar dados do usuário para identification
-        const user = await db.query.users.findFirst({
-          where: eq(users.id, userId),
-        });
-
-        const userCpf = user?.documentNumber || '19119119100';
-        const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
-
-        // Mapear bandeira do cartão salvo para cartão de teste MP correspondente
-        let testCardNumber: string;
-        if (cardBrand === 'MASTERCARD' || cardBrand === 'master') {
-          testCardNumber = '4009172292806176'; // Mastercard oficial de teste MP
-        } else {
-          testCardNumber = '4235 6477 2802 5682'; // Visa oficial de teste MP
-        }
-
-        cardToken = await this.mercadoPagoService.createCardToken({
-          cardNumber: testCardNumber,
-          expirationMonth: savedCard.expirationMonth,
-          expirationYear: fullYear,
-          securityCode: '123',
-          cardholderName: savedCard.cardHolderName || 'APRO',
-          identificationType: identificationType,
-          identificationNumber: userCpf,
-        });
-        console.log(
-          '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para ambiente de teste',
-        );
-      } else {
-        // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
-        if (!savedCard.mpCardId) {
-          throw new BadRequestException(
-            'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
-          );
-        }
-        console.log(
-          '🔄 [PROPOSAL CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
-          savedCard.mpCardId,
-        );
-        cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
-          savedCard.mpCardId,
-        );
-        console.log(
-          '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para produção',
+      // ⚠️ AMEX requer CVV em TODA transação (regra da rede AMEX via Mercado Pago)
+      // Tokens gerados a partir de card_id não incluem security_code_id → erro 3031
+      const brand = (cardBrand || '').toLowerCase();
+      if (brand === 'amex' || brand === 'american_express') {
+        throw new BadRequestException(
+          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação. ' +
+          'Por favor, refaça o pagamento selecionando "Novo cartão" e insira os dados completos do seu cartão AMEX.',
         );
       }
 
-      console.log('🔍 [PROPOSAL CARD PAYMENT] Token fresco gerado:', {
-        tokenLength: cardToken?.length || 0,
-        tokenPreview: cardToken?.substring(0, 20) + '...',
-        hasToken: !!cardToken,
-        cardBrandUsed: cardBrand,
-      });
       cardInfo = {
         lastFourDigits: savedCard.lastFourDigits,
         cardBrand: savedCard.cardBrand,
