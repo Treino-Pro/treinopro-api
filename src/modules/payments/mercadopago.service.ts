@@ -285,20 +285,44 @@ export class MercadoPagoService {
     }
   }
 
-  // Cancelar pagamento
+  // Cancelar pagamento (pré-autorização)
   async cancelPayment(paymentId: string): Promise<any> {
+    const accessToken = process.env.MP_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new BadRequestException('MP_ACCESS_TOKEN não configurado');
+    }
+
     try {
       this.logger.log(`Cancelando pagamento MP: ${paymentId}`);
 
-      const response = await this.payment.cancel({
-        id: paymentId,
-      });
+      // Usar REST diretamente: PUT /v1/payments/{id} com status=cancelled
+      // O SDK às vezes não envia o payload correto para pré-autorizações
+      const response = await fetch(
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status: 'cancelled' }),
+        },
+      );
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        this.logger.error(`Erro ao cancelar pagamento ${paymentId}:`, errorData);
+        throw new BadRequestException(
+          `Erro ao cancelar pagamento: ${errorData.message || response.statusText}`,
+        );
+      }
+
+      const result = await response.json();
       this.logger.log(`Pagamento cancelado com sucesso: ${paymentId}`);
-
-      return response;
+      return result;
     } catch (error) {
       this.logger.error(`Erro ao cancelar pagamento ${paymentId}:`, error);
+      if (error instanceof BadRequestException) throw error;
       throw new BadRequestException(
         `Erro ao cancelar pagamento: ${error.message}`,
       );
@@ -1117,6 +1141,58 @@ export class MercadoPagoService {
         `Erro ao processar cartão: ${error.message}`,
       );
     }
+  }
+
+  // Criar token a partir de cartão salvo (card_id) sem precisar do CVV
+  // Usado para pagamentos com cartão salvo em produção (one-click / recorrente)
+  async createCardTokenFromSavedCard(mpCardId: string): Promise<string> {
+    const accessToken = process.env.MP_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new BadRequestException(
+        'Token de acesso do Mercado Pago não configurado',
+      );
+    }
+
+    this.logger.log(
+      `🔄 [MP TOKEN FROM CARD] Gerando token a partir do card_id: ${mpCardId}`,
+    );
+
+    const response = await fetch('https://api.mercadopago.com/v1/card_tokens', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ card_id: mpCardId }),
+    });
+
+    const responseText = await response.text();
+    this.logger.log(
+      `📥 [MP TOKEN FROM CARD] Status: ${response.status} ${response.statusText}`,
+    );
+
+    if (!response.ok) {
+      let errorData: any;
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { message: responseText };
+      }
+      this.logger.error(`❌ [MP TOKEN FROM CARD] Erro:`, errorData);
+      throw new BadRequestException(
+        `Erro ao gerar token do cartão salvo: ${errorData.message || 'Erro desconhecido'}`,
+      );
+    }
+
+    const tokenData = JSON.parse(responseText);
+    this.logger.log(`✅ [MP TOKEN FROM CARD] Token gerado com sucesso:`, {
+      id: tokenData.id,
+      status: tokenData.status,
+      last_four_digits: tokenData.last_four_digits,
+      date_due: tokenData.date_due,
+    });
+
+    return tokenData.id;
   }
 
   // Obter configuração atual

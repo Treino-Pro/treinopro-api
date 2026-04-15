@@ -1259,11 +1259,20 @@ export class StudentPaymentMethodsService {
           '✅ [CARD PAYMENT] Token fresco gerado para ambiente de teste',
         );
       } else {
-        // ❌ Em produção: Não podemos gerar token sem CVV
-        // Tokens expiram rapidamente, não podemos reutilizar
-        throw new BadRequestException(
-          'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+        // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
+        if (!savedCard.mpCardId) {
+          throw new BadRequestException(
+            'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
+          );
+        }
+        console.log(
+          '🔄 [CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
+          savedCard.mpCardId,
         );
+        cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
+          savedCard.mpCardId,
+        );
+        console.log('✅ [CARD PAYMENT] Token fresco gerado para produção');
       }
       cardInfo = {
         lastFourDigits: savedCard.lastFourDigits,
@@ -1501,17 +1510,28 @@ export class StudentPaymentMethodsService {
           expirationYear: fullYear,
           securityCode: '123',
           cardholderName: savedCard.cardHolderName || 'APRO',
-          identificationType: identificationType, // ✅ Adicionar identification
-          identificationNumber: userCpf, // ✅ Adicionar identification
+          identificationType: identificationType,
+          identificationNumber: userCpf,
         });
         console.log(
           '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para ambiente de teste',
         );
       } else {
-        // ❌ Em produção: Não podemos gerar token sem CVV
-        // Tokens expiram rapidamente, não podemos reutilizar
-        throw new BadRequestException(
-          'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+        // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
+        if (!savedCard.mpCardId) {
+          throw new BadRequestException(
+            'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
+          );
+        }
+        console.log(
+          '🔄 [PROPOSAL CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
+          savedCard.mpCardId,
+        );
+        cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
+          savedCard.mpCardId,
+        );
+        console.log(
+          '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para produção',
         );
       }
 
@@ -1694,13 +1714,16 @@ export class StudentPaymentMethodsService {
             },
           );
         } else {
-          // ❌ Produção: Não podemos gerar token sem CVV
-          // Tokens expiram rapidamente (poucos minutos), não podemos reutilizar
+          // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
           console.log(
-            '⚠️ [PROPOSAL CARD PAYMENT] Produção - token expirado, não é possível gerar novo sem CVV',
+            '🔄 [PROPOSAL CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
+            mpCard.id,
           );
-          throw new BadRequestException(
-            'Token do cartão expirado. Por favor, adicione o cartão novamente para realizar o pagamento.',
+          cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
+            mpCard.id,
+          );
+          console.log(
+            '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para produção a partir do card_id',
           );
         }
 
