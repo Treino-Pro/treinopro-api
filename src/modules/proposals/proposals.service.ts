@@ -2340,6 +2340,7 @@ export class ProposalsService {
             paymentMethod:
               createProposalDto.paymentMethod as StudentPaymentMethod,
             cardId: createProposalDto.cardId,
+            savedCardCvv: createProposalDto.savedCardCvv,
             cardData: null,
             installments: createProposalDto.installments || '1',
             saveCard: createProposalDto.saveCard || false,

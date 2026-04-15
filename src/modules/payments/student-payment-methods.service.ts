@@ -4,7 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import {
   studentPaymentMethods,
   savedCards,
@@ -162,6 +162,7 @@ export class StudentPaymentMethodsService {
     updateData: {
       preferredMethod?: string;
       enableAutoPayment?: boolean;
+      defaultCardId?: string;
       mercadoPagoAccount?: {
         email: string;
         allowSaveCard: boolean;
@@ -189,7 +190,43 @@ export class StudentPaymentMethodsService {
       paymentMethods = await this.createDefaultPaymentMethods(userId);
     }
 
-    // Preparar dados para atualização
+    // Processar definição de cartão padrão
+    if (updateData.defaultCardId) {
+      const targetCard = await db.query.savedCards.findFirst({
+        where: and(
+          eq(savedCards.id, updateData.defaultCardId),
+          eq(savedCards.userId, userId),
+          eq(savedCards.isActive, true),
+        ),
+      });
+
+      if (!targetCard) {
+        throw new NotFoundException('Cartão não encontrado');
+      }
+
+      // Remover flag de padrão dos outros cartões do usuário
+      await db
+        .update(savedCards)
+        .set({ isDefault: false })
+        .where(
+          and(
+            eq(savedCards.userId, userId),
+            ne(savedCards.id, updateData.defaultCardId),
+          ),
+        );
+
+      // Marcar o cartão selecionado como padrão
+      await db
+        .update(savedCards)
+        .set({ isDefault: true })
+        .where(eq(savedCards.id, updateData.defaultCardId));
+
+      console.log(
+        `✅ [SET_DEFAULT_CARD] Cartão ${updateData.defaultCardId} definido como padrão para userId ${userId}`,
+      );
+    }
+
+    // Preparar dados para atualização de studentPaymentMethods
     const updateValues: any = {
       updatedAt: new Date(),
     };
@@ -201,6 +238,11 @@ export class StudentPaymentMethodsService {
 
     if (updateData.enableAutoPayment !== undefined) {
       updateValues.enableAutoPayment = updateData.enableAutoPayment;
+    }
+
+    if (updateData.defaultCardId) {
+      updateValues.defaultCardId = updateData.defaultCardId;
+      updateValues.hasValidPaymentMethod = true;
     }
 
     if (updateData.mercadoPagoAccount) {
@@ -1229,12 +1271,12 @@ export class StudentPaymentMethodsService {
         timesUsed: savedCard.timesUsed,
       });
 
-      // ⚠️ AMEX requer CVV em TODA transação (regra da rede AMEX via Mercado Pago)
+      // Verificar se AMEX sem CVV: exige security_code para token card-on-file
       const brand = (savedCard.cardBrand || '').toLowerCase();
-      if (brand === 'amex' || brand === 'american_express') {
+      const isAmex = brand === 'amex' || brand === 'american_express';
+      if (isAmex && !processDto.savedCardCvv) {
         throw new BadRequestException(
-          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação. ' +
-          'Por favor, refaça o pagamento selecionando "Novo cartão" e insira os dados completos do seu cartão AMEX.',
+          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação.',
         );
       }
 
@@ -1275,6 +1317,7 @@ export class StudentPaymentMethodsService {
         );
         cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
           savedCard.mpCardId,
+          processDto.savedCardCvv,
         );
         console.log('✅ [CARD PAYMENT] Token fresco gerado para produção');
       }
@@ -1482,13 +1525,12 @@ export class StudentPaymentMethodsService {
         cardBrand,
       );
 
-      // ⚠️ AMEX requer CVV em TODA transação (regra da rede AMEX via Mercado Pago)
-      // Tokens gerados a partir de card_id não incluem security_code_id → erro 3031
+      // Verificar se AMEX sem CVV: exige security_code para token card-on-file
       const brand = (cardBrand || '').toLowerCase();
-      if (brand === 'amex' || brand === 'american_express') {
+      const isAmex = brand === 'amex' || brand === 'american_express';
+      if (isAmex && !processDto.savedCardCvv) {
         throw new BadRequestException(
-          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação. ' +
-          'Por favor, refaça o pagamento selecionando "Novo cartão" e insira os dados completos do seu cartão AMEX.',
+          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação.',
         );
       }
 
@@ -1672,19 +1714,27 @@ export class StudentPaymentMethodsService {
           );
           cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
             mpCard.id,
+            processDto.savedCardCvv,
           );
           console.log(
             '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para produção a partir do card_id',
           );
         }
 
+        // Normalizar payment_method_id do MP (pode vir como string 'master' ou objeto { id: 'master' })
+        const mpPaymentMethodId =
+          typeof mpCard.payment_method === 'string'
+            ? mpCard.payment_method
+            : (mpCard.payment_method as any)?.id;
+
         cardInfo = {
           lastFourDigits: savedCard.lastFourDigits,
-          cardBrand: mpCard.payment_method?.id || savedCard.cardBrand,
+          cardBrand: mpPaymentMethodId || savedCard.cardBrand,
           wasCardSaved: false,
           cardId: savedCard.id,
           mpCustomerId: savedCard.mpCustomerId,
           mpCardId: mpCard.id,
+          mpPaymentMethodId, // Guardar o id exato retornado pelo MP
         };
       } catch (mpError) {
         console.error(
@@ -1710,19 +1760,29 @@ export class StudentPaymentMethodsService {
       cardToken?.substring(0, 20) + '...',
     );
     const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
-    // Derivar payment_method_id quando possível (visa/master)
+
+    // Derivar payment_method_id — obrigatório em PROD e TEST para card-on-file sem CVV.
+    // Sem esse campo, o MP não consegue aplicar as regras da bandeira e rejeita o token
+    // com erro 3031 (security_code_id can't be null).
     let derivedPaymentMethodId: string | undefined;
     try {
-      if (isTestEnv) {
-        // Preferir a bandeira informada pelo MP
-        if (cardInfo?.cardBrand && typeof cardInfo.cardBrand === 'string') {
-          const brand = String(cardInfo.cardBrand).toLowerCase();
-          if (brand.includes('mastercard') || brand === 'mastercard')
-            derivedPaymentMethodId = 'master';
-          else if (brand.includes('master')) derivedPaymentMethodId = 'master';
-          else if (brand.includes('visa')) derivedPaymentMethodId = 'visa';
-        }
+      // Usar o id exato retornado pelo MP quando disponível (ex.: 'master', 'visa')
+      if (cardInfo?.mpPaymentMethodId) {
+        derivedPaymentMethodId = String(cardInfo.mpPaymentMethodId).toLowerCase();
+      } else if (cardInfo?.cardBrand && typeof cardInfo.cardBrand === 'string') {
+        const brand = String(cardInfo.cardBrand).toLowerCase();
+        if (brand.includes('mastercard') || brand === 'mastercard' || brand.includes('master'))
+          derivedPaymentMethodId = 'master';
+        else if (brand.includes('visa'))
+          derivedPaymentMethodId = 'visa';
+        else if (brand.includes('elo'))
+          derivedPaymentMethodId = 'elo';
+        else if (brand.includes('hipercard'))
+          derivedPaymentMethodId = 'hipercard';
       }
+      console.log(
+        `🔍 [PROPOSAL CARD PAYMENT] payment_method_id derivado: ${derivedPaymentMethodId || 'não determinado'} (env: ${isTestEnv ? 'TEST' : 'PROD'})`,
+      );
     } catch {}
 
     const mpPayment = await this.mercadoPagoService.createPayment({

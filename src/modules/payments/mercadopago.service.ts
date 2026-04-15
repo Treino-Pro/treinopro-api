@@ -1143,9 +1143,9 @@ export class MercadoPagoService {
     }
   }
 
-  // Criar token a partir de cartão salvo (card_id) sem precisar do CVV
-  // Usado para pagamentos com cartão salvo em produção (one-click / recorrente)
-  async createCardTokenFromSavedCard(mpCardId: string): Promise<string> {
+  // Criar token a partir de cartão salvo (card_id).
+  // securityCode é obrigatório para cartões AMEX (exigência da rede).
+  async createCardTokenFromSavedCard(mpCardId: string, securityCode?: string): Promise<string> {
     const accessToken = process.env.MP_ACCESS_TOKEN;
     if (!accessToken) {
       throw new BadRequestException(
@@ -1163,7 +1163,10 @@ export class MercadoPagoService {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ card_id: mpCardId }),
+      body: JSON.stringify({
+        card_id: mpCardId,
+        ...(securityCode ? { security_code: securityCode } : {}),
+      }),
     });
 
     const responseText = await response.text();

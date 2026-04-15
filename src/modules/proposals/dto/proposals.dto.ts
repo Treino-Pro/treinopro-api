@@ -195,6 +195,15 @@ export class CreateProposalDto {
   installments?: string;
 
   @ApiProperty({
+    description: 'CVV do cartão salvo (obrigatório para cartões AMEX)',
+    example: '1234',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  savedCardCvv?: string;
+
+  @ApiProperty({
     description: 'Salvar cartão para futuras compras',
     example: true,
     required: false,

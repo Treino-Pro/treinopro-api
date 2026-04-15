@@ -153,6 +153,10 @@ export class ProcessClassPaymentDto {
   @IsOptional()
   cardId?: string; // ID do cartão salvo (se aplicável)
 
+  @IsString()
+  @IsOptional()
+  savedCardCvv?: string; // CVV do cartão salvo (obrigatório para AMEX)
+
   @IsOptional()
   cardData?: SaveCardDto; // Dados do cartão (se não salvo)
 

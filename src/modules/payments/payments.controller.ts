@@ -214,6 +214,7 @@ export class PaymentsController {
     updateData: {
       preferredMethod?: string;
       enableAutoPayment?: boolean;
+      defaultCardId?: string;
       mercadoPagoAccount?: {
         email: string;
         allowSaveCard: boolean;
