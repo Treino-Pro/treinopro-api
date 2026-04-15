@@ -522,11 +522,10 @@ export class StudentPaymentMethodsService {
           );
           newCard = existingDbCard;
         } else {
-          // Converter expirationDate (MM/YY) para expirationMonth e expirationYear
+          // Converter expirationDate (MM/YY) para os 2 dígitos esperados no banco
           const [month, year] = saveCardDto.expirationDate.split('/');
-          const fullYear = year.length === 2 ? `20${year}` : year;
-          const expirationMonth = month.padStart(2, '0');
-          const expirationYear = fullYear.slice(-2); // Últimos 2 dígitos do ano
+          const expirationMonth = this.normalizeExpirationMonth(month);
+          const expirationYear = this.normalizeExpirationYear(year);
 
           [newCard] = await db
             .insert(savedCards)
@@ -601,16 +600,21 @@ export class StudentPaymentMethodsService {
         );
 
         // 3. Estornar imediatamente
-        console.log('🔄 [SAVE_CARD] Estornando pré-autorização...');
+        console.log('🔄 [SAVE_CARD] Limpando pré-autorização...');
         try {
-          await this.mercadoPagoService.refundPayment(
-            validationPayment.id,
-            1.0,
-          );
-          console.log('✅ [SAVE_CARD] Estorno realizado com sucesso');
+          if (validationPayment.status === 'authorized') {
+            await this.mercadoPagoService.cancelPayment(validationPayment.id);
+            console.log('✅ [SAVE_CARD] Pré-autorização cancelada com sucesso');
+          } else {
+            await this.mercadoPagoService.refundPayment(
+              validationPayment.id,
+              1.0,
+            );
+            console.log('✅ [SAVE_CARD] Estorno realizado com sucesso');
+          }
         } catch (refundError) {
           console.error(
-            '⚠️ [SAVE_CARD] Erro ao estornar (não crítico):',
+            '⚠️ [SAVE_CARD] Erro ao limpar pré-autorização (não crítico):',
             refundError,
           );
           // Não bloquear o fluxo se o estorno falhar
@@ -782,6 +786,12 @@ export class StudentPaymentMethodsService {
 
       // 5. Calcular data de expiração
       const [month, year] = saveCardDto.expirationDate.split('/');
+      const expirationMonth = this.normalizeExpirationMonth(
+        savedCard.expirationMonth?.toString() || month,
+      );
+      const expirationYear = this.normalizeExpirationYear(
+        savedCard.expirationYear?.toString() || year,
+      );
       const expiresAt = new Date(2000 + parseInt(year), parseInt(month) - 1, 1);
 
       // 6. Se for definir como padrão, remover padrão dos outros
@@ -827,8 +837,8 @@ export class StudentPaymentMethodsService {
               cardBrand,
               cardType: saveCardDto.cardType,
               lastFourDigits: lastFourDigits,
-              expirationMonth: savedCard.expirationMonth?.toString() || month,
-              expirationYear: savedCard.expirationYear?.toString() || year,
+              expirationMonth: expirationMonth,
+              expirationYear: expirationYear,
               cardHolderName: cardholderName, // ✅ Usar nome do cartão (pode ser de outra pessoa)
               nickname: saveCardDto.nickname,
               isDefault: saveCardDto.setAsDefault || false,
@@ -954,6 +964,19 @@ export class StudentPaymentMethodsService {
     if (/^3[0689]/.test(number)) return CardBrand.DINERS;
 
     return CardBrand.VISA; // Padrão para cartões não reconhecidos
+  }
+
+  private normalizeExpirationMonth(month: string): string {
+    return month.padStart(2, '0').slice(-2);
+  }
+
+  private normalizeExpirationYear(year: string): string {
+    const digitsOnlyYear = year.replace(/\D/g, '');
+    if (!digitsOnlyYear) {
+      throw new BadRequestException('Ano de expiração inválido');
+    }
+
+    return digitsOnlyYear.slice(-2).padStart(2, '0');
   }
 
   // Validar cartão
