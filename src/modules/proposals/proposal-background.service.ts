@@ -135,6 +135,7 @@ export class ProposalBackgroundService
         this.logger.log(
           `🔄 [BACKGROUND] Processando proposta expirada: ${proposal.id}`,
         );
+        let shouldDeleteProposal = true;
 
         // Processar reembolso se houver pagamento
         if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
@@ -148,11 +149,27 @@ export class ProposalBackgroundService
               `💰 [BACKGROUND] Reembolso processado para proposta ${proposal.id}`,
             );
           } catch (error) {
+            shouldDeleteProposal = false;
             this.logger.error(
               `❌ [BACKGROUND] Erro ao processar reembolso da proposta ${proposal.id}:`,
               error,
             );
+
+            await this.db
+              .update(proposals)
+              .set({
+                paymentStatus: 'refund_error',
+                updatedAt: new Date(),
+              })
+              .where(eq(proposals.id, proposal.id));
           }
+        }
+
+        if (!shouldDeleteProposal) {
+          this.logger.warn(
+            `⚠️ [BACKGROUND] Proposta ${proposal.id} mantida no banco porque o reembolso falhou`,
+          );
+          continue;
         }
 
         // Deletar proposta após processar reembolso

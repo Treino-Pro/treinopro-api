@@ -2211,6 +2211,12 @@ export class ProposalsService {
     return /^\d+$/.test(String(value || '').trim());
   }
 
+  private isUuid(value?: string | null): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      String(value || '').trim(),
+    );
+  }
+
   private async resolveAutomaticRefundPayment(
     proposalId: string,
     paymentId: string,
@@ -2220,13 +2226,17 @@ export class ProposalsService {
     source: string;
   }> {
     const normalizedPaymentId = String(paymentId || '').trim();
+    const paymentLookupConditions: any[] = [
+      eq(payments.proposalId, proposalId),
+      eq(payments.mpPaymentId, normalizedPaymentId),
+    ];
+
+    if (this.isUuid(normalizedPaymentId)) {
+      paymentLookupConditions.push(eq(payments.id, normalizedPaymentId));
+    }
 
     const localPayment = await this.db.query.payments.findFirst({
-      where: or(
-        eq(payments.proposalId, proposalId),
-        eq(payments.id, normalizedPaymentId),
-        eq(payments.mpPaymentId, normalizedPaymentId),
-      ),
+      where: or(...paymentLookupConditions),
     });
 
     if (localPayment?.mpPaymentId) {
