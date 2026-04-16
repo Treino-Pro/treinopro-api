@@ -2012,10 +2012,18 @@ export class MercadoPagoService {
       this.logger.log(`🔍 [MP SEARCH] Buscando pagamentos...`);
 
       const queryParams = new URLSearchParams();
+      queryParams.append('sort', 'date_created');
+      queryParams.append('criteria', 'desc');
       if (params.externalReference)
         queryParams.append('external_reference', params.externalReference);
       if (params.status) queryParams.append('status', params.status);
-      if (params.dateCreatedFrom) queryParams.append('range', `date_created`);
+      if (params.dateCreatedFrom || params.dateCreatedTo) {
+        queryParams.append('range', 'date_created');
+      }
+      if (params.dateCreatedFrom)
+        queryParams.append('begin_date', params.dateCreatedFrom);
+      if (params.dateCreatedTo)
+        queryParams.append('end_date', params.dateCreatedTo);
       if (params.limit) queryParams.append('limit', params.limit.toString());
       if (params.offset) queryParams.append('offset', params.offset.toString());
 

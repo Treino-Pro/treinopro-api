@@ -85,6 +85,21 @@ export class PaymentsService {
     return this.mercadoPagoService.createRefund(mpPaymentId, { reason });
   }
 
+  async cancelMpPayment(mpPaymentId: string): Promise<any> {
+    return this.mercadoPagoService.cancelPayment(mpPaymentId);
+  }
+
+  async searchMpPayments(params: {
+    externalReference?: string;
+    status?: string;
+    dateCreatedFrom?: string;
+    dateCreatedTo?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    return this.mercadoPagoService.searchPayments(params);
+  }
+
   // Repasse de split PIX para a conta MP do personal (chamado após conclusão de aula)
   async transferPixSplitToPersonal(data: {
     personalId: string;

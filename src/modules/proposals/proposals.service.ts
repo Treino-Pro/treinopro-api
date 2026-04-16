@@ -2116,53 +2116,72 @@ export class ProposalsService {
     try {
       const isSimulated =
         paymentId.startsWith('sim_pix_') || paymentId.startsWith('sim_');
-      const isMpPreferenceId = paymentId.startsWith('proposal_');
 
       if (isSimulated) {
         // Pagamento mockado — não há nada a reembolsar no MP
         console.log(
           `🧪 [PROPOSALS] Pagamento simulado ${paymentId} — nenhuma chamada ao MP necessária`,
         );
-      } else if (isMpPreferenceId) {
-        // Fluxo antigo: preferência MP com ID no formato "proposal_xxx"
-        const payment = await this.findPaymentByExternalReference(paymentId);
-        if (payment) {
-          await this.paymentsService.refundPayment(payment.id, reason);
-        } else {
-          console.warn(
-            `⚠️ [PROPOSALS] Pagamento de preferência não encontrado para reembolso: ${paymentId}`,
-          );
-        }
       } else {
-        // Pagamento PIX ou cartão real: paymentId é o ID numérico do MP
-        // Antes de tentar o reembolso, verificar o status real do pagamento no MP.
-        // PIX com status 'pending' (QR gerado mas não pago) não pode ser reembolsado —
-        // o MP expira o QR automaticamente na date_of_expiration. Tentar refund retorna
-        // "Invalid status to refund" e derruba o fluxo desnecessariamente.
         try {
-          const mpPayment = await this.paymentsService.getMpPayment(paymentId);
-          const mpStatus = mpPayment?.status ?? 'unknown';
+          const resolvedPayment =
+            await this.resolveAutomaticRefundPayment(proposalId, paymentId);
 
-          if (mpStatus === 'pending' || mpStatus === 'in_process') {
+          if (resolvedPayment.localPayment && !resolvedPayment.mpPaymentId) {
             console.log(
-              `⏳ [PROPOSALS] Pagamento ${paymentId} ainda está '${mpStatus}' — QR PIX não foi pago; nenhum reembolso necessário (expira automaticamente no MP)`,
+              `💾 [PROPOSALS] Pagamento ${paymentId} resolvido apenas localmente (${resolvedPayment.source}) — aplicando reembolso interno`,
             );
-            // Não há dinheiro a devolver; encerrar sem erro
-          } else if (
-            mpStatus === 'approved' ||
-            mpStatus === 'authorized' ||
-            mpStatus === 'captured'
-          ) {
-            console.log(
-              `💰 [PROPOSALS] Solicitando reembolso real ao MP para pagamento: ${paymentId} (status=${mpStatus})`,
+            await this.paymentsService.refundPayment(
+              resolvedPayment.localPayment.id,
+              reason,
             );
-            await this.paymentsService.createRefundByMpId(paymentId, reason);
-            console.log(
-              `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${paymentId}`,
+          } else if (resolvedPayment.mpPaymentId) {
+            const mpPayment = await this.paymentsService.getMpPayment(
+              resolvedPayment.mpPaymentId,
             );
+            const mpStatus = String(mpPayment?.status ?? 'unknown').toLowerCase();
+
+            if (
+              mpStatus === 'pending' ||
+              mpStatus === 'in_process' ||
+              mpStatus === 'authorized'
+            ) {
+              console.log(
+                `🛑 [PROPOSALS] Cancelando pagamento MP ${resolvedPayment.mpPaymentId} (origem=${resolvedPayment.source}, status=${mpStatus})`,
+              );
+              await this.paymentsService.cancelMpPayment(
+                resolvedPayment.mpPaymentId,
+              );
+              console.log(
+                `✅ [PROPOSALS] Pagamento MP ${resolvedPayment.mpPaymentId} cancelado com sucesso`,
+              );
+            } else if (mpStatus === 'approved' || mpStatus === 'captured') {
+              console.log(
+                `💰 [PROPOSALS] Solicitando reembolso ao MP para ${resolvedPayment.mpPaymentId} (origem=${resolvedPayment.source}, status=${mpStatus})`,
+              );
+              await this.paymentsService.createRefundByMpId(
+                resolvedPayment.mpPaymentId,
+                reason,
+              );
+              console.log(
+                `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${resolvedPayment.mpPaymentId}`,
+              );
+            } else if (
+              mpStatus === 'cancelled' ||
+              mpStatus === 'canceled' ||
+              mpStatus === 'refunded'
+            ) {
+              console.log(
+                `ℹ️ [PROPOSALS] Pagamento ${resolvedPayment.mpPaymentId} já está em estado terminal (${mpStatus})`,
+              );
+            } else {
+              console.log(
+                `⚠️ [PROPOSALS] Pagamento ${resolvedPayment.mpPaymentId} com status '${mpStatus}' — ação de reembolso/cancelamento não aplicável`,
+              );
+            }
           } else {
-            console.log(
-              `⚠️ [PROPOSALS] Pagamento ${paymentId} com status '${mpStatus}' — reembolso não aplicável`,
+            throw new BadRequestException(
+              `Nao foi possivel resolver o pagamento da proposta ${proposalId} para reembolso automatico`,
             );
           }
         } catch (refundError) {
@@ -2188,14 +2207,92 @@ export class ProposalsService {
     }
   }
 
+  private isMercadoPagoNumericId(value?: string | null): boolean {
+    return /^\d+$/.test(String(value || '').trim());
+  }
+
+  private async resolveAutomaticRefundPayment(
+    proposalId: string,
+    paymentId: string,
+  ): Promise<{
+    localPayment: any | null;
+    mpPaymentId: string | null;
+    source: string;
+  }> {
+    const normalizedPaymentId = String(paymentId || '').trim();
+
+    const localPayment = await this.db.query.payments.findFirst({
+      where: or(
+        eq(payments.proposalId, proposalId),
+        eq(payments.id, normalizedPaymentId),
+        eq(payments.mpPaymentId, normalizedPaymentId),
+      ),
+    });
+
+    if (localPayment?.mpPaymentId) {
+      return {
+        localPayment,
+        mpPaymentId: localPayment.mpPaymentId,
+        source:
+          localPayment.proposalId === proposalId
+            ? 'payments.proposalId'
+            : 'payments.mpPaymentId',
+      };
+    }
+
+    if (localPayment) {
+      return {
+        localPayment,
+        mpPaymentId: null,
+        source: 'payments.id',
+      };
+    }
+
+    if (this.isMercadoPagoNumericId(normalizedPaymentId)) {
+      return {
+        localPayment: null,
+        mpPaymentId: normalizedPaymentId,
+        source: 'proposal.paymentId',
+      };
+    }
+
+    const externalReference = proposalId || normalizedPaymentId;
+
+    try {
+      const searchResult = await this.paymentsService.searchMpPayments({
+        externalReference,
+        limit: 1,
+      });
+      const matchedPayment = searchResult?.results?.[0];
+
+      if (matchedPayment?.id) {
+        return {
+          localPayment: null,
+          mpPaymentId: String(matchedPayment.id),
+          source: 'mp.external_reference',
+        };
+      }
+    } catch (searchError) {
+      console.warn(
+        `⚠️ [PROPOSALS] Busca no MP por external_reference falhou para ${externalReference}:`,
+        searchError?.message || searchError,
+      );
+    }
+
+    return {
+      localPayment: null,
+      mpPaymentId: null,
+      source: 'unresolved',
+    };
+  }
+
   async findPaymentByExternalReference(
     externalReference: string,
   ): Promise<any> {
-    // Buscar pagamento no banco de dados usando external reference
+    // No fluxo de propostas, o external_reference do MP corresponde ao proposalId.
     try {
       const payment = await this.db.query.payments?.findFirst({
-        where: (payments: any) =>
-          eq(payments.externalReference, externalReference),
+        where: eq(payments.proposalId, externalReference),
       });
 
       return payment;
@@ -2380,7 +2477,10 @@ export class ProposalsService {
 
           const response = {
             success: true,
-            paymentId: proposalId, // Usar ID real da proposta
+            paymentId:
+              paymentResult.mpPaymentId ||
+              paymentResult.paymentId ||
+              proposalId,
             status: paymentResult.status,
             method: createProposalDto.paymentMethod,
             amount: createProposalDto.price,
