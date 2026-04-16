@@ -311,7 +311,10 @@ export class MercadoPagoService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        this.logger.error(`Erro ao cancelar pagamento ${paymentId}:`, errorData);
+        this.logger.error(
+          `Erro ao cancelar pagamento ${paymentId}:`,
+          errorData,
+        );
         throw new BadRequestException(
           `Erro ao cancelar pagamento: ${errorData.message || response.statusText}`,
         );
@@ -431,7 +434,9 @@ export class MercadoPagoService {
 
     const payerCpf = String(pixData.payerCpf || '').replace(/\D/g, '');
     if (!payerCpf) {
-      throw new BadRequestException('payerCpf e obrigatorio para pagamento PIX');
+      throw new BadRequestException(
+        'payerCpf e obrigatorio para pagamento PIX',
+      );
     }
     if (!this.isValidCpf(payerCpf)) {
       throw new BadRequestException('payerCpf invalido para pagamento PIX');
@@ -446,9 +451,7 @@ export class MercadoPagoService {
       description: (pixData.description || 'Treino').slice(0, 60),
       payment_method_id: 'pix',
       external_reference: pixData.externalReference,
-      date_of_expiration: new Date(
-        Date.now() + 30 * 60 * 1000,
-      ).toISOString(),
+      date_of_expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       payer: {
         email: payerEmail,
         first_name: pixData.payerFirstName || 'Aluno',
@@ -1144,13 +1147,27 @@ export class MercadoPagoService {
   }
 
   // Criar token a partir de cartão salvo (card_id).
-  // securityCode é obrigatório para cartões AMEX (exigência da rede).
-  async createCardTokenFromSavedCard(mpCardId: string, securityCode?: string): Promise<string> {
+  // O CVV é obrigatório em toda transação de cartão de crédito com card-on-file.
+  async createCardTokenFromSavedCard(
+    mpCardId: string,
+    securityCode?: string,
+  ): Promise<string> {
     const accessToken = process.env.MP_ACCESS_TOKEN;
     if (!accessToken) {
       throw new BadRequestException(
         'Token de acesso do Mercado Pago não configurado',
       );
+    }
+
+    const normalizedSecurityCode = securityCode?.trim();
+    if (!normalizedSecurityCode) {
+      throw new BadRequestException(
+        'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.',
+      );
+    }
+
+    if (!/^\d{3,4}$/.test(normalizedSecurityCode)) {
+      throw new BadRequestException('CVV deve ter 3 ou 4 dígitos');
     }
 
     this.logger.log(
@@ -1165,7 +1182,7 @@ export class MercadoPagoService {
       },
       body: JSON.stringify({
         card_id: mpCardId,
-        ...(securityCode ? { security_code: securityCode } : {}),
+        security_code: normalizedSecurityCode,
       }),
     });
 

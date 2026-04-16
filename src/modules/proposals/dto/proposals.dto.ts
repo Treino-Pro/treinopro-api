@@ -3,6 +3,7 @@ import {
   IsString,
   IsNumber,
   IsOptional,
+  IsNotEmpty,
   IsDateString,
   IsEnum,
   IsUUID,
@@ -13,6 +14,8 @@ import {
   IsEmail,
   Length,
   Matches,
+  ValidateIf,
+  ValidateNested,
   registerDecorator,
   ValidationOptions,
 } from 'class-validator';
@@ -45,6 +48,60 @@ export enum ProposalStatus {
   MATCHED = 'matched',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+}
+
+export class ProposalCardDataDto {
+  @ApiProperty({
+    description: 'Número do cartão',
+    example: '4111111111111111',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\d{13,19}$/, {
+    message: 'Número do cartão deve conter entre 13 e 19 dígitos',
+  })
+  cardNumber: string;
+
+  @ApiProperty({
+    description: 'Nome impresso no cartão',
+    example: 'JOAO SILVA',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  cardHolderName: string;
+
+  @ApiProperty({
+    description: 'Data de expiração no formato MM/YY',
+    example: '12/28',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^(0[1-9]|1[0-2])\/\d{2}$/, {
+    message: 'Data deve estar no formato MM/YY',
+  })
+  expirationDate: string;
+
+  @ApiProperty({
+    description: 'CVV do cartão novo',
+    example: '123',
+  })
+  @IsString()
+  @IsNotEmpty({
+    message:
+      'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.',
+  })
+  @Matches(/^\d{3,4}$/, { message: 'CVV deve ter 3 ou 4 dígitos' })
+  cvv: string;
+
+  @ApiProperty({
+    description: 'Tipo do cartão',
+    example: 'credit',
+    enum: ['credit', 'debit'],
+  })
+  @IsString()
+  @IsIn(['credit', 'debit'])
+  cardType: 'credit' | 'debit';
 }
 
 export class CreateProposalDto {
@@ -176,14 +233,10 @@ export class CreateProposalDto {
     description: 'Dados do cartão (se não usar cartão salvo)',
     required: false,
   })
-  @IsOptional()
-  cardData?: {
-    cardNumber: string;
-    cardHolderName: string;
-    expirationDate: string;
-    cvv: string;
-    cardType: 'credit' | 'debit';
-  };
+  @ValidateIf((o) => o.paymentMethod === 'credit_card' && !o.cardId)
+  @ValidateNested()
+  @Type(() => ProposalCardDataDto)
+  cardData?: ProposalCardDataDto;
 
   @ApiProperty({
     description: 'Número de parcelas (1-12)',
@@ -195,12 +248,17 @@ export class CreateProposalDto {
   installments?: string;
 
   @ApiProperty({
-    description: 'CVV do cartão salvo (obrigatório para cartões AMEX)',
+    description: 'CVV do cartão salvo',
     example: '1234',
     required: false,
   })
-  @IsOptional()
+  @ValidateIf((o) => o.paymentMethod === 'credit_card' && !!o.cardId)
   @IsString()
+  @IsNotEmpty({
+    message:
+      'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.',
+  })
+  @Matches(/^\d{3,4}$/, { message: 'CVV deve ter 3 ou 4 dígitos' })
   savedCardCvv?: string;
 
   @ApiProperty({

@@ -8,7 +8,10 @@ import {
   Length,
   IsBoolean,
   IsDateString,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 // Enums
 export enum StudentPaymentMethod {
@@ -153,12 +156,22 @@ export class ProcessClassPaymentDto {
   @IsOptional()
   cardId?: string; // ID do cartão salvo (se aplicável)
 
-  @IsString()
   @IsOptional()
-  savedCardCvv?: string; // CVV do cartão salvo (obrigatório para AMEX)
-
-  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveCardDto)
   cardData?: SaveCardDto; // Dados do cartão (se não salvo)
+
+  @ValidateIf(
+    (o) =>
+      o.paymentMethod === StudentPaymentMethod.CREDIT_CARD && Boolean(o.cardId),
+  )
+  @IsString()
+  @IsNotEmpty({
+    message:
+      'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.',
+  })
+  @Matches(/^\d{3,4}$/, { message: 'CVV deve ter 3 ou 4 dígitos' })
+  savedCardCvv?: string; // CVV do cartão salvo para tokenização
 
   @IsString()
   @IsOptional()

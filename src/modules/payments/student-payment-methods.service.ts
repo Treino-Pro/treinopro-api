@@ -30,10 +30,123 @@ import {
 
 @Injectable()
 export class StudentPaymentMethodsService {
+  private static readonly CREDIT_CARD_CVV_REQUIRED_MESSAGE =
+    'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.';
+
   constructor(
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly paymentsService: PaymentsService,
   ) {}
+
+  private normalizeSecurityCode(value?: string | null): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private sanitizeProcessDtoForLog(processDto: ProcessClassPaymentDto): any {
+    return {
+      ...processDto,
+      savedCardCvv: processDto.savedCardCvv
+        ? `*** (${processDto.savedCardCvv.trim().length} dígitos)`
+        : undefined,
+      cardData: processDto.cardData
+        ? {
+            ...processDto.cardData,
+            cardNumber: processDto.cardData.cardNumber
+              ? processDto.cardData.cardNumber.replace(/\d(?=\d{4})/g, '*')
+              : undefined,
+            cvv: processDto.cardData.cvv
+              ? `*** (${processDto.cardData.cvv.trim().length} dígitos)`
+              : undefined,
+          }
+        : undefined,
+    };
+  }
+
+  private assertCreditCardSecurityCode(
+    processDto: ProcessClassPaymentDto,
+  ): string | undefined {
+    const normalizedSavedCardCvv = this.normalizeSecurityCode(
+      processDto.savedCardCvv,
+    );
+
+    if (normalizedSavedCardCvv) {
+      processDto.savedCardCvv = normalizedSavedCardCvv;
+    }
+
+    if (processDto.cardData?.cvv) {
+      processDto.cardData.cvv = processDto.cardData.cvv.trim();
+    }
+
+    if (processDto.paymentMethod !== StudentPaymentMethod.CREDIT_CARD) {
+      return normalizedSavedCardCvv;
+    }
+
+    const normalizedCardCvv = this.normalizeSecurityCode(
+      processDto.cardData?.cvv,
+    );
+
+    if (processDto.cardId) {
+      if (!normalizedSavedCardCvv) {
+        throw new BadRequestException(
+          StudentPaymentMethodsService.CREDIT_CARD_CVV_REQUIRED_MESSAGE,
+        );
+      }
+
+      if (!/^\d{3,4}$/.test(normalizedSavedCardCvv)) {
+        throw new BadRequestException('CVV deve ter 3 ou 4 dígitos');
+      }
+
+      processDto.savedCardCvv = normalizedSavedCardCvv;
+      return normalizedSavedCardCvv;
+    }
+
+    if (processDto.cardData) {
+      if (!normalizedCardCvv) {
+        throw new BadRequestException(
+          StudentPaymentMethodsService.CREDIT_CARD_CVV_REQUIRED_MESSAGE,
+        );
+      }
+
+      if (!/^\d{3,4}$/.test(normalizedCardCvv)) {
+        throw new BadRequestException('CVV deve ter 3 ou 4 dígitos');
+      }
+
+      processDto.cardData.cvv = normalizedCardCvv;
+    }
+
+    return normalizedSavedCardCvv;
+  }
+
+  private logSavedCardCvvAudit(
+    context: 'CARD PAYMENT' | 'PROPOSAL CARD PAYMENT',
+    userId: string,
+    processDto: ProcessClassPaymentDto,
+    savedCard: {
+      id: string;
+      lastFourDigits?: string | null;
+      mpCardId?: string | null;
+      mpCustomerId?: string | null;
+    },
+    securityCode: string,
+  ): void {
+    console.log(
+      `🛡️ [${context}] CVV recebido para tokenização do cartão salvo`,
+      {
+        userId,
+        referenceId: processDto.classId,
+        cardId: savedCard.id,
+        lastFourDigits: savedCard.lastFourDigits,
+        cvvLength: securityCode.length,
+        hasMpCardId: !!savedCard.mpCardId,
+        hasMpCustomerId: !!savedCard.mpCustomerId,
+      },
+    );
+  }
 
   // Método simplificado para teste
   async getStudentPaymentMethodsSimple(userId: string): Promise<any> {
@@ -1092,7 +1205,7 @@ export class StudentPaymentMethodsService {
     console.log('👤 [PROPOSAL PAYMENT] User ID:', userId);
     console.log(
       '📋 [PROPOSAL PAYMENT] Dados recebidos:',
-      JSON.stringify(processDto, null, 2),
+      JSON.stringify(this.sanitizeProcessDtoForLog(processDto), null, 2),
     );
     console.log('📋 [PROPOSAL PAYMENT] Dados da proposta:', proposalData);
 
@@ -1113,6 +1226,8 @@ export class StudentPaymentMethodsService {
       '🔍 [PROPOSAL PAYMENT] Método de pagamento:',
       processDto.paymentMethod,
     );
+
+    this.assertCreditCardSecurityCode(processDto);
 
     // Processar pagamento baseado no método
     switch (processDto.paymentMethod) {
@@ -1157,7 +1272,7 @@ export class StudentPaymentMethodsService {
     console.log('👤 [STUDENT PAYMENT] User ID:', userId);
     console.log(
       '📋 [STUDENT PAYMENT] Dados recebidos:',
-      JSON.stringify(processDto, null, 2),
+      JSON.stringify(this.sanitizeProcessDtoForLog(processDto), null, 2),
     );
 
     // Verificar se a aula existe
@@ -1206,6 +1321,8 @@ export class StudentPaymentMethodsService {
       processDto.paymentMethod,
     );
 
+    this.assertCreditCardSecurityCode(processDto);
+
     // Processar pagamento baseado no método
     switch (processDto.paymentMethod) {
       case StudentPaymentMethod.CREDIT_CARD:
@@ -1246,6 +1363,9 @@ export class StudentPaymentMethodsService {
     let cardInfo: any;
 
     if (processDto.cardId) {
+      const savedCardSecurityCode =
+        this.assertCreditCardSecurityCode(processDto);
+
       console.log('🔍 [CARD PAYMENT] Buscando cartão salvo...');
       // Usar cartão salvo
       const savedCard = await db.query.savedCards.findFirst({
@@ -1271,56 +1391,36 @@ export class StudentPaymentMethodsService {
         timesUsed: savedCard.timesUsed,
       });
 
-      // Verificar se AMEX sem CVV: exige security_code para token card-on-file
-      const brand = (savedCard.cardBrand || '').toLowerCase();
-      const isAmex = brand === 'amex' || brand === 'american_express';
-      if (isAmex && !processDto.savedCardCvv) {
+      if (!savedCard.mpCardId) {
         throw new BadRequestException(
-          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação.',
+          'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
         );
       }
 
-      // ✅ Gerar token fresco a partir do card_id salvo no MP
-      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
-      if (isTestEnv) {
-        const fullYear =
-          savedCard.expirationYear.length === 2
-            ? `20${savedCard.expirationYear}`
-            : savedCard.expirationYear;
-
-        const user = await db.query.users.findFirst({
-          where: eq(users.id, userId),
-        });
-
-        const userCpf = user?.documentNumber || '19119119100';
-        const identificationType = user?.documentType === 'CPF' ? 'CPF' : 'CPF';
-
-        cardToken = await this.mercadoPagoService.createCardToken({
-          cardNumber: '4235 6477 2802 5682',
-          expirationMonth: savedCard.expirationMonth,
-          expirationYear: fullYear,
-          securityCode: '123',
-          cardholderName: savedCard.cardHolderName || 'APRO',
-          identificationType: identificationType,
-          identificationNumber: userCpf,
-        });
-        console.log('✅ [CARD PAYMENT] Token fresco gerado para ambiente de teste');
-      } else {
-        if (!savedCard.mpCardId) {
-          throw new BadRequestException(
-            'Cartão salvo não possui ID do Mercado Pago. Por favor, salve o cartão novamente.',
-          );
-        }
-        console.log(
-          '🔄 [CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
-          savedCard.mpCardId,
+      if (!savedCardSecurityCode) {
+        throw new BadRequestException(
+          StudentPaymentMethodsService.CREDIT_CARD_CVV_REQUIRED_MESSAGE,
         );
-        cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
-          savedCard.mpCardId,
-          processDto.savedCardCvv,
-        );
-        console.log('✅ [CARD PAYMENT] Token fresco gerado para produção');
       }
+
+      this.logSavedCardCvvAudit(
+        'CARD PAYMENT',
+        userId,
+        processDto,
+        savedCard,
+        savedCardSecurityCode,
+      );
+
+      console.log(
+        '🔄 [CARD PAYMENT] Gerando token a partir do card_id MP do cartão salvo:',
+        savedCard.mpCardId,
+      );
+      cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
+        savedCard.mpCardId,
+        savedCardSecurityCode,
+      );
+      console.log('✅ [CARD PAYMENT] Token fresco gerado para cartão salvo');
+
       cardInfo = {
         lastFourDigits: savedCard.lastFourDigits,
         cardBrand: savedCard.cardBrand,
@@ -1493,6 +1593,9 @@ export class StudentPaymentMethodsService {
     let savedCard: any = null; // Declarar fora do bloco if
 
     if (processDto.cardId) {
+      const savedCardSecurityCode =
+        this.assertCreditCardSecurityCode(processDto);
+
       console.log('🔍 [PROPOSAL CARD PAYMENT] Buscando cartão salvo...');
       // Usar cartão salvo
       savedCard = await db.query.savedCards.findFirst({
@@ -1525,15 +1628,6 @@ export class StudentPaymentMethodsService {
         cardBrand,
       );
 
-      // Verificar se AMEX sem CVV: exige security_code para token card-on-file
-      const brand = (cardBrand || '').toLowerCase();
-      const isAmex = brand === 'amex' || brand === 'american_express';
-      if (isAmex && !processDto.savedCardCvv) {
-        throw new BadRequestException(
-          'AMEX_CVV_REQUIRED: Cartões American Express requerem o CVV para cada transação.',
-        );
-      }
-
       cardInfo = {
         lastFourDigits: savedCard.lastFourDigits,
         cardBrand: savedCard.cardBrand,
@@ -1551,6 +1645,20 @@ export class StudentPaymentMethodsService {
         .where(eq(savedCards.id, savedCard.id));
 
       console.log('✅ [PROPOSAL CARD PAYMENT] Cartão atualizado com novo uso');
+
+      if (!savedCardSecurityCode) {
+        throw new BadRequestException(
+          StudentPaymentMethodsService.CREDIT_CARD_CVV_REQUIRED_MESSAGE,
+        );
+      }
+
+      this.logSavedCardCvvAudit(
+        'PROPOSAL CARD PAYMENT',
+        userId,
+        processDto,
+        savedCard,
+        savedCardSecurityCode,
+      );
     } else if (processDto.cardData) {
       console.log('🆕 [PROPOSAL CARD PAYMENT] Processando cartão novo...');
       // Usar cartão novo
@@ -1641,85 +1749,25 @@ export class StudentPaymentMethodsService {
           last_four_digits: mpCard.last_four_digits,
         });
 
-        // ✅ SOLUÇÃO CORRETA: Usar dados reais do cartão salvo para gerar token consistente
-        const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith(
-          'TEST-',
-        );
-
-        if (isTestEnv) {
-          console.log(
-            '🧪 [PROPOSAL CARD PAYMENT] Ambiente de teste - usando dados do cartão salvo real',
-          );
-
-          // ✅ Usar dados do cartão salvo real, não cartão oficial MP diferente
-          // Mapear bandeira do cartão salvo para cartão de teste MP correspondente
-          let testCardNumber: string;
-          let testCardholderName: string;
-
-          if (mpCard.payment_method?.id === 'visa') {
-            testCardNumber = '4235 6477 2802 5682'; // Visa oficial de teste MP
-            testCardholderName = 'APRO';
-          } else if (mpCard.payment_method?.id === 'master') {
-            testCardNumber = '4009172292806176'; // Mastercard oficial de teste MP
-            testCardholderName = 'APRO';
-          } else {
-            // Fallback para Visa se bandeira não reconhecida
-            testCardNumber = '4235 6477 2802 5682';
-            testCardholderName = 'APRO';
-          }
-
-          console.log('🔍 [PROPOSAL CARD PAYMENT] Usando cartão de teste MP:', {
-            cardBrand: mpCard.payment_method?.id,
-            testCardNumber:
-              testCardNumber.substring(0, 4) +
-              ' **** **** ' +
-              testCardNumber.substring(-4),
-            testCardholderName,
-          });
-
-          // Buscar dados do usuário para identification
-          const user = await db.query.users.findFirst({
-            where: eq(users.id, userId),
-          });
-
-          const userCpf = user?.documentNumber || '19119119100';
-          const identificationType =
-            user?.documentType === 'CPF' ? 'CPF' : 'CPF';
-
-          // Gerar token usando cartão de teste MP correspondente à bandeira do cartão salvo
-          cardToken = await this.mercadoPagoService.createCardToken({
-            cardNumber: testCardNumber,
-            expirationMonth: savedCard.expirationMonth || '11',
-            expirationYear: '20' + (savedCard.expirationYear || '25'), // ✅ '20' + dígitos do cartão
-            securityCode: '123',
-            cardholderName: testCardholderName,
-            identificationType: identificationType, // ✅ Adicionar identification
-            identificationNumber: userCpf, // ✅ Adicionar identification
-          });
-
-          console.log(
-            '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado com dados consistentes:',
-            {
-              tokenLength: cardToken?.length || 0,
-              tokenPreview: cardToken?.substring(0, 20) + '...',
-              cardBrandUsed: mpCard.payment_method?.id,
-              expirationYearUsed: '20' + (savedCard.expirationYear || '25'), // ✅ Log do ano usado
-            },
-          );
-        } else {
-          // ✅ Produção: Gerar token fresco a partir do card_id salvo no MP (sem precisar de CVV)
-          console.log(
-            '🔄 [PROPOSAL CARD PAYMENT] Produção - gerando token a partir do card_id MP:',
-            mpCard.id,
-          );
-          cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
-            mpCard.id,
-            processDto.savedCardCvv,
-          );
-          console.log(
-            '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para produção a partir do card_id',
+        const savedCardSecurityCode =
+          this.assertCreditCardSecurityCode(processDto);
+        if (!savedCardSecurityCode) {
+          throw new BadRequestException(
+            StudentPaymentMethodsService.CREDIT_CARD_CVV_REQUIRED_MESSAGE,
           );
         }
+
+        console.log(
+          '🔄 [PROPOSAL CARD PAYMENT] Gerando token a partir do card_id MP com CVV recebido na requisição atual:',
+          mpCard.id,
+        );
+        cardToken = await this.mercadoPagoService.createCardTokenFromSavedCard(
+          mpCard.id,
+          savedCardSecurityCode,
+        );
+        console.log(
+          '✅ [PROPOSAL CARD PAYMENT] Token fresco gerado para cartão salvo',
+        );
 
         // Normalizar payment_method_id do MP (pode vir como string 'master' ou objeto { id: 'master' })
         const mpPaymentMethodId =
@@ -1768,15 +1816,22 @@ export class StudentPaymentMethodsService {
     try {
       // Usar o id exato retornado pelo MP quando disponível (ex.: 'master', 'visa')
       if (cardInfo?.mpPaymentMethodId) {
-        derivedPaymentMethodId = String(cardInfo.mpPaymentMethodId).toLowerCase();
-      } else if (cardInfo?.cardBrand && typeof cardInfo.cardBrand === 'string') {
+        derivedPaymentMethodId = String(
+          cardInfo.mpPaymentMethodId,
+        ).toLowerCase();
+      } else if (
+        cardInfo?.cardBrand &&
+        typeof cardInfo.cardBrand === 'string'
+      ) {
         const brand = String(cardInfo.cardBrand).toLowerCase();
-        if (brand.includes('mastercard') || brand === 'mastercard' || brand.includes('master'))
+        if (
+          brand.includes('mastercard') ||
+          brand === 'mastercard' ||
+          brand.includes('master')
+        )
           derivedPaymentMethodId = 'master';
-        else if (brand.includes('visa'))
-          derivedPaymentMethodId = 'visa';
-        else if (brand.includes('elo'))
-          derivedPaymentMethodId = 'elo';
+        else if (brand.includes('visa')) derivedPaymentMethodId = 'visa';
+        else if (brand.includes('elo')) derivedPaymentMethodId = 'elo';
         else if (brand.includes('hipercard'))
           derivedPaymentMethodId = 'hipercard';
       }

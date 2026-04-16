@@ -2140,8 +2140,7 @@ export class ProposalsService {
         // o MP expira o QR automaticamente na date_of_expiration. Tentar refund retorna
         // "Invalid status to refund" e derruba o fluxo desnecessariamente.
         try {
-          const mpPayment =
-            await this.paymentsService.getMpPayment(paymentId);
+          const mpPayment = await this.paymentsService.getMpPayment(paymentId);
           const mpStatus = mpPayment?.status ?? 'unknown';
 
           if (mpStatus === 'pending' || mpStatus === 'in_process') {
@@ -2351,7 +2350,12 @@ export class ProposalsService {
 
           console.log(
             '📤 [PROPOSALS] Dados enviados para processProposalPayment:',
-            paymentDto,
+            {
+              ...paymentDto,
+              savedCardCvv: paymentDto.savedCardCvv
+                ? `*** (${paymentDto.savedCardCvv.trim().length} dígitos)`
+                : undefined,
+            },
           );
 
           // Dados da proposta para o pagamento
