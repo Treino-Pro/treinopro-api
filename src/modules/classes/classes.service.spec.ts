@@ -818,6 +818,7 @@ describe('ClassesService', () => {
       expect(mockPaymentsService.cancelPaymentBeforeClass).toHaveBeenCalledWith(
         classId,
         'Cancelamento pelo aluno com antecedência mínima',
+        'proposal-1',
       );
     });
 
@@ -849,6 +850,7 @@ describe('ClassesService', () => {
       expect(mockPaymentsService.cancelPaymentBeforeClass).toHaveBeenCalledWith(
         classId,
         'Cancelamento pelo personal trainer',
+        'proposal-1',
       );
     });
 
@@ -1147,6 +1149,109 @@ describe('ClassesService', () => {
         userId,
       );
       expect(result.time).toBe('16:00');
+    });
+  });
+
+  // ===== BUG 4: janelas de tempo configuráveis via variáveis de ambiente =====
+
+  describe('janelas de tempo configuráveis via env (Bug 4)', () => {
+    afterEach(() => {
+      delete process.env.CLASS_MIN_COMPLETION_MINUTES;
+      delete process.env.CLASS_CANCELLATION_WINDOW_HOURS;
+    });
+
+    it('CLASS_MIN_COMPLETION_MINUTES=10 permite finalizar aula de 12 minutos', async () => {
+      process.env.CLASS_MIN_COMPLETION_MINUTES = '10';
+
+      const classId = 'class-env-1';
+      const userId = 'personal-1';
+      const startedAt = new Date(Date.now() - 12 * 60 * 1000); // 12 min atrás
+
+      const mockClass = {
+        id: classId,
+        personalId: userId,
+        status: ClassStatus.ACTIVE,
+        startedAt,
+      };
+      const updatedClass = { ...mockClass, status: ClassStatus.COMPLETED, completedAt: new Date() };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(mockClass)
+        .mockResolvedValueOnce({ minimumCompletionAt: null }); // forçar cálculo dinâmico
+
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([updatedClass]),
+          }),
+        }),
+      });
+
+      // Com 10 min de mínimo e 12 min de aula → deve completar
+      const result = await service.completeClass(classId, {}, userId);
+      expect(result.status).toBe(ClassStatus.COMPLETED);
+    });
+
+    it('sem override (padrão 45min) bloqueia finalização de aula de 12 minutos', async () => {
+      // Sem CLASS_MIN_COMPLETION_MINUTES → padrão 45 min
+      const classId = 'class-env-2';
+      const userId = 'personal-1';
+      const startedAt = new Date(Date.now() - 12 * 60 * 1000); // 12 min atrás
+
+      const mockClass = {
+        id: classId,
+        personalId: userId,
+        status: ClassStatus.ACTIVE,
+        startedAt,
+      };
+
+      mockDb.query.classes.findFirst
+        .mockResolvedValueOnce(mockClass)
+        .mockResolvedValueOnce({ minimumCompletionAt: null }); // calculado: startedAt + 45min → futuro
+
+      await expect(service.completeClass(classId, {}, userId)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('CLASS_CANCELLATION_WINDOW_HOURS altera o valor da hora na mensagem de erro', async () => {
+      process.env.CLASS_CANCELLATION_WINDOW_HOURS = '3';
+
+      // Aula no passado → cancellationDeadline já passou → sempre lança
+      const mockClass = {
+        id: 'class-cancel-env',
+        personalId: 'personal-1',
+        studentId: 'student-1',
+        status: ClassStatus.SCHEDULED,
+        proposalId: 'proposal-1',
+        date: new Date('2020-01-01'),
+        time: '10:00',
+      };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+
+      await expect(service.cancelClass('class-cancel-env', 'student-1')).rejects.toThrow(
+        /3 hora\(s\)/,
+      );
+    });
+
+    it('janela padrão (2h) menciona "2 hora(s)" na mensagem de erro', async () => {
+      // Sem override
+      const mockClass = {
+        id: 'class-default-window',
+        personalId: 'personal-1',
+        studentId: 'student-1',
+        status: ClassStatus.SCHEDULED,
+        proposalId: 'proposal-1',
+        date: new Date('2020-01-01'),
+        time: '10:00',
+      };
+
+      mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
+
+      await expect(service.cancelClass('class-default-window', 'student-1')).rejects.toThrow(
+        /2 hora\(s\)/,
+      );
     });
   });
 

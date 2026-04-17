@@ -41,8 +41,8 @@ import {
 } from './dto/classes.dto';
 import { FeatureFlags } from '../../config/feature-flags';
 
+/** @deprecated Use FeatureFlags.CLASS_MIN_COMPLETION_MINUTES at call sites */
 const MINIMUM_COMPLETION_MINUTES = 45;
-const MINIMUM_COMPLETION_MS = MINIMUM_COMPLETION_MINUTES * 60 * 1000;
 
 @Injectable()
 export class ClassesService {
@@ -364,9 +364,11 @@ export class ClassesService {
 
     // Verificar regra de tempo mínimo para finalização
     // Kill switch: KILL_MIN_45_RULE=true desativa enforcement
+    const minCompletionMinutes = FeatureFlags.CLASS_MIN_COMPLETION_MINUTES;
+    const minCompletionMs = minCompletionMinutes * 60 * 1000;
     if (classData.startedAt && FeatureFlags.KILL_MIN_45_RULE) {
       console.warn(
-        `[CLASSES] KILL_SWITCH_ACTIVE: regra ${MINIMUM_COMPLETION_MINUTES}min desativada (KILL_MIN_45_RULE=true)`,
+        `[CLASSES] KILL_SWITCH_ACTIVE: regra ${minCompletionMinutes}min desativada (KILL_MIN_45_RULE=true)`,
         { classId: id, personalId: userId },
       );
     }
@@ -379,14 +381,14 @@ export class ClassesService {
       const minimumCompletionAt = rawClassData?.minimumCompletionAt
         ? new Date(rawClassData.minimumCompletionAt)
         : new Date(
-            (classData.startedAt as Date).getTime() + MINIMUM_COMPLETION_MS,
+            (classData.startedAt as Date).getTime() + minCompletionMs,
           );
 
       if (now < minimumCompletionAt) {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
-          `MIN_45_RULE: A aula deve durar pelo menos ${MINIMUM_COMPLETION_MINUTES} minutos. Faltam ${remainingMin} minuto(s).`,
+          `MIN_45_RULE: A aula deve durar pelo menos ${minCompletionMinutes} minutos. Faltam ${remainingMin} minuto(s).`,
         );
       }
     }
@@ -846,12 +848,13 @@ export class ClassesService {
           classData.time
         }`,
       );
+      const cancellationWindowHours = FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS;
       const cancellationDeadline = new Date(
-        classDateTime.getTime() - 2 * 60 * 60 * 1000,
+        classDateTime.getTime() - cancellationWindowHours * 60 * 60 * 1000,
       );
       if (now > cancellationDeadline) {
         throw new BadRequestException(
-          'Cancelamento pelo aluno só é permitido até 2 horas antes da aula. Para cancelamentos tardios, entre em contato com o suporte.',
+          `Cancelamento pelo aluno só é permitido até ${cancellationWindowHours} hora(s) antes da aula. Para cancelamentos tardios, entre em contato com o suporte.`,
         );
       }
       shouldRefund = true;
@@ -869,7 +872,11 @@ export class ClassesService {
     // Se o reembolso falhar, a operação inteira é abortada.
     if (shouldRefund) {
       try {
-        await this.paymentsService.cancelPaymentBeforeClass(id, refundReason);
+        await this.paymentsService.cancelPaymentBeforeClass(
+          id,
+          refundReason,
+          classData.proposalId ?? undefined,
+        );
         this.logger.log(
           `[CANCEL_CLASS] Reembolso para aula ${id} processado com sucesso. Motivo: ${refundReason}`,
         );
@@ -1156,19 +1163,22 @@ export class ClassesService {
     );
 
     // Calcular deadlines
+    const cancellationWindowMs = FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
+    const startWindowBeforeMs = FeatureFlags.CLASS_START_WINDOW_BEFORE_MINUTES * 60 * 1000;
+    const startWindowAfterMs = FeatureFlags.CLASS_START_WINDOW_AFTER_MINUTES * 60 * 1000;
     const cancellationDeadline = new Date(
-      classDateTime.getTime() - 2 * 60 * 60 * 1000,
-    ); // 2h antes
+      classDateTime.getTime() - cancellationWindowMs,
+    ); // configurável, padrão 2h antes
     const noShowReportDeadline = new Date(
-      classDateTime.getTime() + 10 * 60 * 1000,
-    ); // 10min depois
+      classDateTime.getTime() + startWindowAfterMs,
+    ); // configurável, padrão 10min depois
 
     // Lógica dos botões baseada no tempo
     const canCancel =
       now < cancellationDeadline && classData.status === ClassStatus.SCHEDULED;
     const canStart =
-      now >= new Date(classDateTime.getTime() - 30 * 60 * 1000) &&
-      now <= new Date(classDateTime.getTime() + 10 * 60 * 1000) &&
+      now >= new Date(classDateTime.getTime() - startWindowBeforeMs) &&
+      now <= new Date(classDateTime.getTime() + startWindowAfterMs) &&
       (classData.status === ClassStatus.SCHEDULED ||
         classData.status === ClassStatus.PENDING_CONFIRMATION);
     const canReportNoShow =
@@ -1188,10 +1198,11 @@ export class ClassesService {
     let canComplete = false;
 
     if (classData.status === ClassStatus.ACTIVE && rawClass?.startedAt) {
+      const timelineMinMs = FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000;
       const minAt = rawClass.minimumCompletionAt
         ? new Date(rawClass.minimumCompletionAt)
         : new Date(
-            new Date(rawClass.startedAt).getTime() + MINIMUM_COMPLETION_MS,
+            new Date(rawClass.startedAt).getTime() + timelineMinMs,
           );
       minimumCompletionAt = minAt;
       const remainingMs = Math.max(0, minAt.getTime() - now.getTime());
@@ -1488,8 +1499,8 @@ export class ClassesService {
 
     const startTime = new Date();
     const minimumCompletionAt = new Date(
-      startTime.getTime() + MINIMUM_COMPLETION_MS,
-    ); // T + 1min
+      startTime.getTime() + FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000,
+    );
     const durationMs = classData.duration * 60 * 1000;
 
     const [updatedClass] = await this.db
@@ -1809,6 +1820,38 @@ export class ClassesService {
       .set(updateData)
       .where(eq(classes.id, classId))
       .returning();
+
+    // Quando o aluno confirma a ausência, a aula é completada e o pagamento
+    // deve ser capturado e repassado ao personal trainer.
+    if (resolveDto.resolution === ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE) {
+      try {
+        let payment = await this.findPaymentForClass(classId, classData.proposalId);
+        if (payment) {
+          payment = await this.ensurePaymentLinkedToClass(
+            payment,
+            classId,
+            classData.personalId,
+          );
+        }
+        if (payment && (payment.status === 'authorized' || payment.status === 'pending')) {
+          await this.paymentsService.capturePaymentAfterClass(
+            classId,
+            'Disputa resolvida: aluno confirmou ausência',
+          );
+        } else if (!payment && classData.proposalId) {
+          await this.triggerPixProposalSplit(
+            classId,
+            classData.proposalId,
+            classData.personalId,
+          );
+        }
+      } catch (captureError) {
+        console.error(
+          `🚨 [DISPUTE] CRITICAL: aula ${classId} marcada como COMPLETED após disputa mas falhou ao capturar pagamento. Reconciliação manual necessária.`,
+          captureError,
+        );
+      }
+    }
 
     return this.formatClassResponse(updatedClass);
   }
@@ -2731,6 +2774,19 @@ export class ClassesService {
     if (classData.personalId !== userId && classData.studentId !== userId) {
       throw new ForbiddenException(
         'Você não tem permissão para deletar esta aula',
+      );
+    }
+
+    // Bloquear deleção de aulas com estado financeiro ativo para preservar auditoria.
+    const undeletableStatuses = [
+      ClassStatus.ACTIVE,
+      ClassStatus.COMPLETED,
+      ClassStatus.NO_SHOW_DISPUTE,
+      ClassStatus.CUSTODY,
+    ];
+    if (undeletableStatuses.includes(classData.status as ClassStatus)) {
+      throw new BadRequestException(
+        `Aulas com status '${classData.status}' não podem ser excluídas para preservar o histórico financeiro.`,
       );
     }
 

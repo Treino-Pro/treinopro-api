@@ -949,10 +949,20 @@ export class PaymentsService {
   async cancelPaymentBeforeClass(
     classId: string,
     reason: string = 'Aula cancelada pelo personal',
+    proposalId?: string,
   ): Promise<void> {
-    const payment = await this.db.query.payments.findFirst({
+    // Tentar localizar pelo classId primeiro; se não encontrar, tentar pelo proposalId.
+    // O vínculo payment→class só é consolidado após o início da aula (ensurePaymentLinkedToClass),
+    // portanto para aulas recém-criadas o pagamento pode só ter proposalId.
+    let payment = await this.db.query.payments.findFirst({
       where: eq(payments.classId, classId),
     });
+
+    if (!payment && proposalId) {
+      payment = await this.db.query.payments.findFirst({
+        where: eq(payments.proposalId, proposalId),
+      });
+    }
 
     if (!payment) {
       throw new NotFoundException('Pagamento não encontrado para esta aula');

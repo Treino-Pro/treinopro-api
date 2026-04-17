@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoService } from './mercadopago.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentStatus, PaymentType, DisputeStatus } from './dto/payments.dto';
 
 // Mock do banco de dados
@@ -78,14 +79,9 @@ describe('PaymentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
-        {
-          provide: 'DATABASE_CONNECTION',
-          useValue: mockDb,
-        },
-        {
-          provide: MercadoPagoService,
-          useValue: mockMercadoPagoService,
-        },
+        { provide: 'DATABASE_CONNECTION', useValue: mockDb },
+        { provide: MercadoPagoService, useValue: mockMercadoPagoService },
+        { provide: NotificationsService, useValue: { create: jest.fn() } },
       ],
     }).compile();
 
@@ -597,6 +593,81 @@ describe('PaymentsService', () => {
       expect(result.userId).toBe('user-1');
       expect(result.availableBalance).toBe(0);
       expect(mockDb.insert).toHaveBeenCalled();
+    });
+  });
+
+  // ===== BUG 2: capturePaymentAfterClass com pagamento PIX vinculado via proposalId =====
+
+  describe('capturePaymentAfterClass - pagamento PIX via proposalId (Bug 2)', () => {
+    const classId = 'class-pix-1';
+
+    const pixPayment = {
+      id: 'pay-pix-1',
+      classId,
+      proposalId: 'prop-pix-1',
+      studentId: 'student-1',
+      personalId: 'personal-1',
+      mpPaymentId: 'mp-pix-999',
+      totalAmount: '100.00',
+      platformFee: '10.00',
+      personalAmount: '90.00',
+      status: PaymentStatus.AUTHORIZED,
+      type: PaymentType.CLASS_PAYMENT,
+      class: {
+        id: classId,
+        studentId: 'student-1',
+        personalId: 'personal-1',
+      },
+      student: { id: 'student-1', name: 'Bernardo', email: 'b@test.com' },
+      personal: { id: 'personal-1', name: 'Luiz', email: 'l@test.com' },
+    };
+
+    it('deve capturar pagamento PIX quando classId foi vinculado após criação da aula', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValue(pixPayment);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([{ ...pixPayment, status: PaymentStatus.CAPTURED }]),
+      });
+
+      jest.spyOn(service, 'getUserWallet').mockResolvedValue({
+        id: 'wallet-1',
+        userId: 'personal-1',
+        availableBalance: 0,
+        pendingBalance: 0,
+        totalEarned: 0,
+        totalWithdrawn: 0,
+        isActive: 'true',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest.spyOn(service, 'updateWallet').mockResolvedValue({} as any);
+      mockMercadoPagoService.capturePayment.mockResolvedValue({});
+
+      await expect(service.capturePaymentAfterClass(classId)).resolves.not.toThrow();
+
+      expect(mockDb.query.payments.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.any(Object) }),
+      );
+    });
+
+    it('deve lançar NotFoundException quando pagamento PIX não está vinculado ao classId', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValue(null);
+
+      await expect(service.capturePaymentAfterClass(classId)).rejects.toThrow(
+        'Pagamento não encontrado para esta aula',
+      );
+    });
+
+    it('deve lançar BadRequestException se pagamento já foi capturado', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValue({
+        ...pixPayment,
+        status: PaymentStatus.CAPTURED,
+      });
+
+      await expect(service.capturePaymentAfterClass(classId)).rejects.toThrow(
+        /capturável/,
+      );
     });
   });
 

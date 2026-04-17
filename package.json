@@ -122,6 +122,12 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/../test/env-setup.ts"
+    ],
+    "setupFilesAfterFramework": [
+      "<rootDir>/../test/setup.ts"
+    ]
   }
 }

@@ -24,4 +24,30 @@ export const FeatureFlags = {
   get KILL_MIN_45_RULE() {
     return process.env.KILL_MIN_45_RULE === 'true';
   },
+
+  // ===== REGRAS DE NEGÓCIO CONFIGURÁVEIS =====
+
+  /** Duração mínima de uma aula em minutos. Padrão: 45. Ex: CLASS_MIN_COMPLETION_MINUTES=30 */
+  get CLASS_MIN_COMPLETION_MINUTES(): number {
+    const v = parseInt(process.env.CLASS_MIN_COMPLETION_MINUTES ?? '', 10);
+    return isNaN(v) || v <= 0 ? 45 : v;
+  },
+
+  /** Antecedência mínima para cancelamento pelo aluno, em horas. Padrão: 2. Ex: CLASS_CANCELLATION_WINDOW_HOURS=1 */
+  get CLASS_CANCELLATION_WINDOW_HOURS(): number {
+    const v = parseFloat(process.env.CLASS_CANCELLATION_WINDOW_HOURS ?? '');
+    return isNaN(v) || v < 0 ? 2 : v;
+  },
+
+  /** Antecedência máxima para o botão "Iniciar" ficar disponível, em minutos. Padrão: 30. */
+  get CLASS_START_WINDOW_BEFORE_MINUTES(): number {
+    const v = parseInt(process.env.CLASS_START_WINDOW_BEFORE_MINUTES ?? '', 10);
+    return isNaN(v) || v < 0 ? 30 : v;
+  },
+
+  /** Atraso máximo após o horário para o botão "Iniciar" ainda ficar disponível, em minutos. Padrão: 10. */
+  get CLASS_START_WINDOW_AFTER_MINUTES(): number {
+    const v = parseInt(process.env.CLASS_START_WINDOW_AFTER_MINUTES ?? '', 10);
+    return isNaN(v) || v < 0 ? 10 : v;
+  },
 };

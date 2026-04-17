@@ -54,6 +54,16 @@ export class WebhooksService {
         return false;
       }
 
+      // Proteção contra replay attack: rejeitar webhooks com timestamp > 5 min
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const tsSeconds = parseInt(ts, 10);
+      if (isNaN(tsSeconds) || Math.abs(nowSeconds - tsSeconds) > 300) {
+        this.logger.error(
+          `❌ [WEBHOOK] Timestamp fora da janela de 5 minutos (ts=${ts}, now=${nowSeconds})`,
+        );
+        return false;
+      }
+
       // O id vem do query param "data.id" conforme documentação oficial do MP.
       // Fallback para payload.data.id pois o valor é o mesmo.
       const dataId = queryDataId ?? payload?.data?.id ?? '';
@@ -64,7 +74,15 @@ export class WebhooksService {
         .update(manifest)
         .digest('hex');
 
-      if (v1 !== expectedHash) {
+      // timingSafeEqual lança exceção se os buffers tiverem tamanhos diferentes,
+      // o que causaria um crash por input malicioso. Validar comprimento antes.
+      if (
+        v1.length !== expectedHash.length ||
+        !crypto.timingSafeEqual(
+          Buffer.from(v1, 'hex'),
+          Buffer.from(expectedHash, 'hex'),
+        )
+      ) {
         this.logger.error('❌ [WEBHOOK] Assinatura não confere');
         return false;
       }
@@ -109,29 +127,48 @@ export class WebhooksService {
         return;
       }
 
-      // O external_reference é o UUID interno do nosso registro de pagamento.
-      // Tenta localizar pelo external_reference e vincular o mpPaymentId.
-      const byRef = payment.external_reference
+      // O external_reference pode ser:
+      // (a) o UUID de um registro em payments — tentativa legada
+      // (b) o UUID de uma proposal — caso de checkout MP redirect (fallback)
+      const byPaymentId = payment.external_reference
         ? await db.query.payments.findFirst({
             where: eq(payments.id, payment.external_reference),
           })
         : null;
 
-      if (byRef) {
+      if (byPaymentId) {
         await db
           .update(payments)
           .set({ mpPaymentId: payment.id, updatedAt: new Date() })
-          .where(eq(payments.id, byRef.id));
+          .where(eq(payments.id, byPaymentId.id));
         this.logger.log(
-          `✅ [WEBHOOK] mpPaymentId vinculado ao registro ${byRef.id}`,
+          `✅ [WEBHOOK] mpPaymentId vinculado ao registro de pagamento ${byPaymentId.id}`,
         );
-      } else {
-        // Sem external_reference válido não é possível criar o registro com
-        // segurança (campos obrigatórios como studentId estariam ausentes).
-        this.logger.warn(
-          `⚠️ [WEBHOOK] Pagamento MP ${payment.id} não encontrado no banco — ignorando criação`,
-        );
+        return;
       }
+
+      // Tentar vincular pelo proposalId (checkout MP redirect)
+      const byProposalId = payment.external_reference
+        ? await db.query.payments.findFirst({
+            where: eq(payments.proposalId, payment.external_reference),
+          })
+        : null;
+
+      if (byProposalId) {
+        await db
+          .update(payments)
+          .set({ mpPaymentId: payment.id, updatedAt: new Date() })
+          .where(eq(payments.id, byProposalId.id));
+        this.logger.log(
+          `✅ [WEBHOOK] mpPaymentId vinculado via proposalId ao registro ${byProposalId.id}`,
+        );
+        return;
+      }
+
+      // Sem registro localizável — sem dados suficientes para criar com segurança.
+      this.logger.warn(
+        `⚠️ [WEBHOOK] Pagamento MP ${payment.id} não encontrado no banco — ignorando criação`,
+      );
     } catch (error) {
       this.logger.error(`❌ [WEBHOOK] Erro ao criar pagamento:`, error);
       throw error;
@@ -146,30 +183,60 @@ export class WebhooksService {
         payment.status,
       ) as PaymentStatus;
 
-      // Buscar pagamento no banco de pagamentos
-      const existingPayment = await db.query.payments.findFirst({
-        where: eq(payments.mpPaymentId, payment.id),
-      });
+      // Buscar e atualizar dentro da mesma transação para minimizar race conditions.
+      const handled = await db.transaction(async (tx) => {
+        const existingPayment = await tx.query.payments.findFirst({
+          where: eq(payments.mpPaymentId, payment.id),
+        });
 
-      if (existingPayment) {
+        if (!existingPayment) return null;
+
         const resolvedStatus = this.resolveInternalStatusTransition(
           existingPayment.status,
           mappedStatus,
         ) as PaymentStatus;
 
-        await db
+        await tx
           .update(payments)
           .set({ status: resolvedStatus, updatedAt: new Date() })
           .where(eq(payments.id, existingPayment.id));
 
+        if (existingPayment.proposalId) {
+          await tx
+            .update(proposals)
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, existingPayment.proposalId));
+        }
+
+        return { existingPayment, resolvedStatus };
+      });
+
+      if (handled) {
         this.logger.log(
-          `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${resolvedStatus}`,
+          `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${handled.resolvedStatus}`,
         );
+        if (handled.existingPayment.proposalId) {
+          this.logger.log(
+            `✅ [WEBHOOK] Proposta ${handled.existingPayment.proposalId} paymentStatus sincronizado para ${handled.resolvedStatus} (via payment.updated)`,
+          );
+        }
+        // Notificar personal trainer quando pagamento for aprovado/autorizado
+        if (
+          handled.existingPayment.classId &&
+          (handled.resolvedStatus === 'authorized' ||
+            handled.resolvedStatus === 'captured')
+        ) {
+          await this.notifyPersonalTrainer(
+            handled.existingPayment.classId,
+            'payment_approved',
+          );
+        }
         return;
       }
 
-      // Pagamento PIX de proposta: o mpPaymentId fica em proposals.paymentId
-      // e o external_reference é o proposalId
+      // Fallback: Pagamento PIX de proposta sem registro em payments ainda.
+      // ATENÇÃO: este caminho indica que o Bug 2 (INSERT após createPixPayment)
+      // não funcionou corretamente. Logar como CRITICAL para investigação.
       if (payment.external_reference) {
         const proposal = await db.query.proposals.findFirst({
           where: eq(proposals.id, payment.external_reference),
@@ -181,13 +248,17 @@ export class WebhooksService {
             mappedStatus,
           );
 
+          this.logger.error(
+            `🚨 [WEBHOOK] CRITICAL: pagamento MP ${payment.id} chegou via webhook mas não tem registro em payments (proposalId=${proposal.id}). Registro faltante deve ser investigado.`,
+          );
+
           await db
             .update(proposals)
             .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
             .where(eq(proposals.id, proposal.id));
 
           this.logger.log(
-            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.updated)`,
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.updated fallback)`,
           );
           return;
         }
@@ -210,36 +281,57 @@ export class WebhooksService {
         payment.status,
       ) as PaymentStatus;
 
-      // Buscar pagamento no banco de pagamentos
-      const existingPayment = await db.query.payments.findFirst({
-        where: eq(payments.mpPaymentId, payment.id),
-      });
+      // Buscar e atualizar dentro da mesma transação para minimizar race conditions.
+      const handled = await db.transaction(async (tx) => {
+        const existingPayment = await tx.query.payments.findFirst({
+          where: eq(payments.mpPaymentId, payment.id),
+        });
 
-      if (existingPayment) {
+        if (!existingPayment) return null;
+
         const resolvedStatus = this.resolveInternalStatusTransition(
           existingPayment.status,
           mappedStatus,
         ) as PaymentStatus;
 
-        await db
+        await tx
           .update(payments)
           .set({ status: resolvedStatus, updatedAt: new Date() })
           .where(eq(payments.id, existingPayment.id));
 
+        if (existingPayment.proposalId) {
+          await tx
+            .update(proposals)
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, existingPayment.proposalId));
+        }
+
+        return { existingPayment, resolvedStatus };
+      });
+
+      if (handled) {
         this.logger.log(
-          `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${resolvedStatus}`,
+          `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${handled.resolvedStatus}`,
         );
 
-        if (existingPayment.studentId) {
+        if (handled.existingPayment.proposalId) {
+          this.logger.log(
+            `✅ [WEBHOOK] Proposta ${handled.existingPayment.proposalId} paymentStatus sincronizado para ${handled.resolvedStatus} (via payment.approved)`,
+          );
+        }
+
+        if (handled.existingPayment.classId) {
           await this.notifyPersonalTrainer(
-            existingPayment.studentId,
+            handled.existingPayment.classId,
             'payment_approved',
           );
         }
         return;
       }
 
-      // Pagamento PIX de proposta: busca pela proposals via external_reference
+      // Fallback: Pagamento PIX de proposta sem registro em payments ainda.
+      // ATENÇÃO: este caminho indica que o Bug 2 (INSERT após createPixPayment)
+      // não funcionou corretamente. Logar como CRITICAL para investigação.
       if (payment.external_reference) {
         const proposal = await db.query.proposals.findFirst({
           where: eq(proposals.id, payment.external_reference),
@@ -251,13 +343,17 @@ export class WebhooksService {
             mappedStatus,
           );
 
+          this.logger.error(
+            `🚨 [WEBHOOK] CRITICAL: pagamento MP ${payment.id} chegou via webhook mas não tem registro em payments (proposalId=${proposal.id}). Registro faltante deve ser investigado.`,
+          );
+
           await db
             .update(proposals)
             .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
             .where(eq(proposals.id, proposal.id));
 
           this.logger.log(
-            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.approved)`,
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.approved fallback)`,
           );
           return;
         }
@@ -279,7 +375,6 @@ export class WebhooksService {
     this.logger.log(`❌ [WEBHOOK] Pagamento cancelado: ${payment.id}`);
 
     try {
-      // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
         where: eq(payments.mpPaymentId, payment.id),
       });
@@ -291,21 +386,39 @@ export class WebhooksService {
         return;
       }
 
-      // Atualizar para cancelled
-      await db
-        .update(payments)
-        .set({
-          status: 'cancelled',
-          updatedAt: new Date(),
-        })
-        .where(eq(payments.id, existingPayment.id));
+      const resolvedStatus = this.resolveInternalStatusTransition(
+        existingPayment.status,
+        'cancelled',
+      ) as PaymentStatus;
 
-      this.logger.log(`✅ [WEBHOOK] Pagamento cancelado: ${payment.id}`);
+      await db.transaction(async (tx) => {
+        await tx
+          .update(payments)
+          .set({ status: resolvedStatus, updatedAt: new Date() })
+          .where(eq(payments.id, existingPayment.id));
+
+        if (existingPayment.proposalId) {
+          await tx
+            .update(proposals)
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, existingPayment.proposalId));
+        }
+      });
+
+      this.logger.log(
+        `✅ [WEBHOOK] Pagamento cancelado: ${payment.id} -> ${resolvedStatus}`,
+      );
+
+      if (existingPayment.proposalId) {
+        this.logger.log(
+          `✅ [WEBHOOK] Proposta ${existingPayment.proposalId} paymentStatus marcado como ${resolvedStatus}`,
+        );
+      }
 
       // Notificar personal trainer se for uma aula
-      if (existingPayment.studentId) {
+      if (existingPayment.classId) {
         await this.notifyPersonalTrainer(
-          existingPayment.studentId,
+          existingPayment.classId,
           'payment_cancelled',
         );
       }
@@ -322,7 +435,6 @@ export class WebhooksService {
     this.logger.log(`💰 [WEBHOOK] Pagamento reembolsado: ${payment.id}`);
 
     try {
-      // Buscar pagamento no banco
       const existingPayment = await db.query.payments.findFirst({
         where: eq(payments.mpPaymentId, payment.id),
       });
@@ -334,21 +446,39 @@ export class WebhooksService {
         return;
       }
 
-      // Atualizar para refunded
-      await db
-        .update(payments)
-        .set({
-          status: 'refunded',
-          updatedAt: new Date(),
-        })
-        .where(eq(payments.id, existingPayment.id));
+      const resolvedStatus = this.resolveInternalStatusTransition(
+        existingPayment.status,
+        'refunded',
+      ) as PaymentStatus;
 
-      this.logger.log(`✅ [WEBHOOK] Pagamento reembolsado: ${payment.id}`);
+      await db.transaction(async (tx) => {
+        await tx
+          .update(payments)
+          .set({ status: resolvedStatus, updatedAt: new Date() })
+          .where(eq(payments.id, existingPayment.id));
+
+        if (existingPayment.proposalId) {
+          await tx
+            .update(proposals)
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
+            .where(eq(proposals.id, existingPayment.proposalId));
+        }
+      });
+
+      this.logger.log(
+        `✅ [WEBHOOK] Pagamento reembolsado: ${payment.id} -> ${resolvedStatus}`,
+      );
+
+      if (existingPayment.proposalId) {
+        this.logger.log(
+          `✅ [WEBHOOK] Proposta ${existingPayment.proposalId} paymentStatus marcado como ${resolvedStatus}`,
+        );
+      }
 
       // Notificar personal trainer se for uma aula
-      if (existingPayment.studentId) {
+      if (existingPayment.classId) {
         await this.notifyPersonalTrainer(
-          existingPayment.studentId,
+          existingPayment.classId,
           'payment_refunded',
         );
       }
@@ -368,6 +498,7 @@ export class WebhooksService {
       pending: 'pending',
       approved: 'authorized', // Pago no MP, mas ainda em custódia até concluir a aula
       authorized: 'authorized',
+      captured: 'captured', // Captura confirmada após autorização
       in_process: 'pending',
       in_mediation: 'pending',
       rejected: 'cancelled',

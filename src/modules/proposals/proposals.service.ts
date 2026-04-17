@@ -426,7 +426,8 @@ export class ProposalsService {
         !statusOk ||
         (isSimulated && !(allowSimulated && isTestEnv))
       ) {
-        // Se pagamento falhar, deletar proposta criada
+        // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
+        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         const reason = isSimulated
           ? 'Pagamento em simulação (sandbox) não permite criar proposta'
@@ -695,13 +696,43 @@ export class ProposalsService {
       };
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro no pagamento:', error.message);
-      // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
+      // Se falhar após pagamento aprovado, tentar reembolso antes de deletar.
       try {
-        // 'proposal' existe no escopo externo
         if (proposal?.id) {
+          // Verificar se há pagamento aprovado que precisa ser reembolsado
+          const existingPayment = await this.db.query.payments.findFirst({
+            where: eq(payments.proposalId, proposal.id),
+          });
+          if (
+            existingPayment &&
+            this.isPaymentConfirmedStatus(existingPayment.status as string)
+          ) {
+            try {
+              await this.processAutomaticRefund(
+                proposal.id,
+                existingPayment.mpPaymentId ?? '',
+                'Falha ao criar proposta após pagamento aprovado',
+              );
+              console.log(
+                '✅ [PROPOSALS] Reembolso realizado após falha na criação da proposta:',
+                proposal.id,
+              );
+            } catch (refundErr) {
+              // Se o reembolso falhar, NÃO deletar — preservar registros para reconciliação manual.
+              console.error(
+                `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar após erro em createProposal (proposalId=${proposal.id}, paymentId=${existingPayment.mpPaymentId}). Registros preservados para auditoria.`,
+                refundErr,
+              );
+              return; // Sair sem deletar — auditoria é mais importante
+            }
+          }
+          // Remover registro de pagamento vinculado antes de deletar a proposta
+          await this.db
+            .delete(payments)
+            .where(eq(payments.proposalId, proposal.id));
           await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
           console.log(
-            '🗑️ [PROPOSALS] Proposta removida devido a falha no pagamento:',
+            '🗑️ [PROPOSALS] Proposta e pagamento removidos após falha:',
             proposal.id,
           );
         }
@@ -839,7 +870,8 @@ export class ProposalsService {
         !statusOk ||
         (isSimulated && !(allowSimulated && isTestEnv))
       ) {
-        // Se pagamento falhar, deletar proposta criada
+        // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
+        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         const reason = isSimulated
           ? 'Pagamento em simulação (sandbox) não permite criar proposta'
@@ -946,9 +978,34 @@ export class ProposalsService {
         '❌ [PROPOSALS SERVICE] Erro no pagamento da recontratação:',
         error.message,
       );
-      // Se falhar no pagamento, EXCLUIR a proposta criada para não ocupar horário
+      // Se falhar após pagamento aprovado, tentar reembolso antes de deletar.
       try {
         if (proposal?.id) {
+          const existingPayment = await this.db.query.payments.findFirst({
+            where: eq(payments.proposalId, proposal.id),
+          });
+          if (
+            existingPayment &&
+            this.isPaymentConfirmedStatus(existingPayment.status as string)
+          ) {
+            try {
+              await this.processAutomaticRefund(
+                proposal.id,
+                existingPayment.mpPaymentId ?? '',
+                'Falha ao criar recontratação após pagamento aprovado',
+              );
+            } catch (refundErr) {
+              // Se reembolso falhar, NÃO deletar — preservar para reconciliação manual.
+              console.error(
+                `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar recontratação (proposalId=${proposal.id}). Registros preservados para auditoria.`,
+                refundErr,
+              );
+              const friendlyMessage = this.extractErrorMessage(error, 'Erro no pagamento');
+              throw new BadRequestException(friendlyMessage);
+            }
+          }
+          // Remover pagamentos (FK) e depois a proposta
+          await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
           await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
           console.log(
             '🗑️ [PROPOSALS SERVICE] Proposta de recontratação removida por falha no pagamento:',
@@ -956,6 +1013,7 @@ export class ProposalsService {
           );
         }
       } catch (cleanupErr) {
+        if (cleanupErr instanceof BadRequestException) throw cleanupErr;
         console.error(
           '⚠️ [PROPOSALS SERVICE] Erro ao remover proposta de recontratação após falha:',
           cleanupErr,
@@ -1221,6 +1279,22 @@ export class ProposalsService {
       throw new BadRequestException('Proposta já foi cancelada');
     }
 
+    // Impedir cancelamento se a aula vinculada estiver em andamento (ACTIVE),
+    // pois o serviço já está sendo prestado.
+    if (proposal.classId) {
+      const [linkedClass] = await this.db
+        .select({ status: classes.status })
+        .from(classes)
+        .where(eq(classes.id, proposal.classId))
+        .limit(1);
+
+      if (linkedClass?.status === 'active') {
+        throw new BadRequestException(
+          'Não é possível cancelar uma proposta com aula em andamento.',
+        );
+      }
+    }
+
     if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
       const cancellationReason =
         userType === 'student'
@@ -1236,15 +1310,34 @@ export class ProposalsService {
 
     await this.jobsService.cancelProposalExpirationJob(id);
 
-    // Cancelar a proposta
-    const [cancelledProposal] = await this.db
-      .update(proposals)
-      .set({
-        status: ProposalStatus.CANCELLED,
-        updatedAt: new Date(),
-      })
-      .where(eq(proposals.id, id))
-      .returning();
+    // Cancelar a proposta (e a aula vinculada atomicamente, se existir)
+    const [cancelledProposal] = await this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(proposals)
+        .set({
+          status: ProposalStatus.CANCELLED,
+          updatedAt: new Date(),
+        })
+        .where(eq(proposals.id, id))
+        .returning();
+
+      // Se a proposta tinha uma aula criada (MATCHED), cancelar também a aula
+      // para evitar que o personal trainer fique com uma "aula zumbi" na agenda.
+      if (updated.classId) {
+        await tx
+          .update(classes)
+          .set({ status: 'cancelled', updatedAt: new Date() })
+          .where(
+            and(
+              eq(classes.id, updated.classId),
+              // Só cancelar se a aula ainda estiver scheduled (não iniciada)
+              eq(classes.status, 'scheduled'),
+            ),
+          );
+      }
+
+      return [updated];
+    });
 
     // ===== EMITIR EVENTOS WEBSOCKET =====
     try {
@@ -1319,13 +1412,11 @@ export class ProposalsService {
         );
       }
 
-      // Segurança extra: recontratação só pode ser aceita após pagamento confirmado.
-      if (
-        proposal.targetPersonalId &&
-        !this.isPaymentConfirmedStatus(proposal.paymentStatus)
-      ) {
+      // Propostas com valor > 0 só podem ser aceitas após confirmação de pagamento.
+      const proposalPrice = parseFloat(proposal.price ?? '0');
+      if (proposalPrice > 0 && !this.isPaymentConfirmedStatus(proposal.paymentStatus)) {
         throw new BadRequestException(
-          'Pagamento da recontratação ainda não foi confirmado.',
+          'O pagamento desta proposta ainda não foi confirmado.',
         );
       }
 
@@ -1986,15 +2077,31 @@ export class ProposalsService {
         );
       }
 
-      // Se pagamento falhou, cancelar proposta automaticamente
+      // Se pagamento falhou, cancelar proposta e aula vinculada atomicamente
       if (paymentStatus === 'rejected' || paymentStatus === 'cancelled') {
-        await this.db
-          .update(proposals)
-          .set({
-            status: ProposalStatus.CANCELLED,
-            updatedAt: new Date(),
-          })
-          .where(eq(proposals.id, proposalId));
+        await this.db.transaction(async (tx) => {
+          const [cancelledProposal] = await tx
+            .update(proposals)
+            .set({
+              status: ProposalStatus.CANCELLED,
+              updatedAt: new Date(),
+            })
+            .where(eq(proposals.id, proposalId))
+            .returning();
+
+          // Cancelar aula vinculada para evitar "aula zumbi" na agenda do personal
+          if (cancelledProposal?.classId) {
+            await tx
+              .update(classes)
+              .set({ status: 'cancelled', updatedAt: new Date() })
+              .where(
+                and(
+                  eq(classes.id, cancelledProposal.classId),
+                  eq(classes.status, 'scheduled'),
+                ),
+              );
+          }
+        });
       }
     } catch (error) {
       console.error(
@@ -2577,6 +2684,22 @@ export class ProposalsService {
           hasQrCodeBase64: !!pixResult.qrCodeBase64,
         });
 
+        // Registrar pagamento PIX na tabela payments para que os webhooks e a
+        // lógica de captura pós-aula consigam localizar o registro por proposalId.
+        // Se o INSERT falhar, propagar erro — sem registro interno não é seguro prosseguir.
+        const pixPaymentStatus = pixResult.status === 'approved' ? 'authorized' : 'pending';
+        await this.db.insert(payments).values({
+          proposalId,
+          studentId: userData.id,
+          mpPaymentId: String(pixResult.paymentId),
+          totalAmount: createProposalDto.price.toString(),
+          platformFee: platformFee.toString(),
+          personalAmount: personalAmount.toString(),
+          status: pixPaymentStatus,
+          type: 'class_payment',
+        });
+        console.log(`💾 [PROPOSALS] Registro PIX inserido na tabela payments (proposalId=${proposalId}, status=${pixPaymentStatus})`);
+
         const pixResponse = {
           success: true,
           paymentId: pixResult.paymentId,
@@ -2632,6 +2755,20 @@ export class ProposalsService {
         initPoint: mpPreference.initPoint,
         sandboxInitPoint: mpPreference.sandboxInitPoint,
       });
+
+      // Registrar pagamento de checkout na tabela payments (sem mpPaymentId ainda —
+      // será vinculado pelo webhook handlePaymentCreated via external_reference).
+      // Se o INSERT falhar, propagar erro — sem registro interno não é seguro prosseguir.
+      await this.db.insert(payments).values({
+        proposalId,
+        studentId: userData.id,
+        totalAmount: createProposalDto.price.toString(),
+        platformFee: platformFee.toString(),
+        personalAmount: personalAmount.toString(),
+        status: 'pending',
+        type: 'class_payment',
+      });
+      console.log(`💾 [PROPOSALS] Registro de checkout MP inserido em payments (proposalId=${proposalId})`);
 
       const response = {
         success: true,
@@ -3231,7 +3368,29 @@ export class ProposalsService {
         );
       }
 
-      // Deletar proposta
+      // Reembolsar se houver pagamento autorizado antes de deletar
+      if (
+        proposal.paymentId &&
+        this.isPaymentConfirmedStatus(proposal.paymentStatus)
+      ) {
+        try {
+          await this.processAutomaticRefund(
+            proposal.id,
+            proposal.paymentId,
+            'Proposta expirada sem match de personal',
+          );
+        } catch (refundErr) {
+          // Se reembolso falhar, NÃO deletar — preservar para reconciliação manual.
+          console.error(
+            `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar proposta expirada ${proposalId}. Registros preservados para auditoria.`,
+            refundErr,
+          );
+          throw refundErr; // Abortar sem deletar
+        }
+      }
+
+      // Deletar pagamentos vinculados (FK) antes de deletar a proposta
+      await this.db.delete(payments).where(eq(payments.proposalId, proposalId));
       await this.db.delete(proposals).where(eq(proposals.id, proposalId));
 
       // Emitir evento WebSocket
@@ -3372,6 +3531,29 @@ export class ProposalsService {
 
       // Deletar propostas expiradas
       for (const proposal of expiredProposals) {
+        // Reembolsar pagamentos autorizados antes de deletar
+        if (
+          proposal.paymentId &&
+          this.isPaymentConfirmedStatus(proposal.paymentStatus)
+        ) {
+          try {
+            await this.processAutomaticRefund(
+              proposal.id,
+              proposal.paymentId,
+              'Proposta expirada sem match de personal',
+            );
+          } catch (refundErr) {
+            // Se o reembolso falhar, NÃO deletar — manter registro para conciliação manual.
+            console.error(
+              `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar proposta expirada ${proposal.id}. Proposta NÃO deletada para preservar auditoria.`,
+              refundErr,
+            );
+            continue;
+          }
+        }
+
+        // Remover pagamentos vinculados (FK) antes de deletar a proposta
+        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
 
         // Notificar o aluno sobre a expiração via WebSocket
