@@ -324,6 +324,14 @@ export class PaymentsService {
     mpPaymentId?: string,
     mpData?: any,
   ): Promise<void> {
+    const currentPayment = await this.db.query.payments.findFirst({
+      where: eq(payments.id, paymentId),
+    });
+
+    if (!currentPayment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
     const updateData: any = {
       status,
       updatedAt: new Date(),
@@ -354,10 +362,10 @@ export class PaymentsService {
       console.log(`❌ Pagamento ${paymentId} CANCELADO`);
     }
 
-    // Aplicar split para pagamentos autorizados ou capturados
+    // Aplicar split apenas na transição real para CAPTURED
     if (
-      status === PaymentStatus.AUTHORIZED ||
-      status === PaymentStatus.CAPTURED
+      status === PaymentStatus.CAPTURED &&
+      currentPayment.status !== PaymentStatus.CAPTURED
     ) {
       console.log(`💳 Pagamento ${paymentId} - aplicando split e repasse`);
       await this.capturePayment(paymentId);

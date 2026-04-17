@@ -11,6 +11,7 @@ import { eq, and, lt } from 'drizzle-orm';
 import { ProposalStatus } from './dto/proposals.dto';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsService } from './proposals.service';
+import { JobsService } from '../jobs/jobs.service';
 
 @Injectable()
 export class ProposalBackgroundService
@@ -24,6 +25,7 @@ export class ProposalBackgroundService
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
     private readonly proposalsService: ProposalsService,
+    private readonly jobsService: JobsService,
   ) {}
 
   async onModuleInit() {
@@ -171,6 +173,8 @@ export class ProposalBackgroundService
           );
           continue;
         }
+
+        await this.jobsService.cancelProposalExpirationJob(proposal.id);
 
         // Deletar proposta após processar reembolso
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));

@@ -5,6 +5,7 @@ import { isProposalExpired } from './proposals.utils';
 import { ProposalStatus } from './dto/proposals.dto';
 import { ChatGateway } from '../chat/chat.gateway';
 import { LiveActivityNotificationService } from '../notifications/services/live-activity-notification.service';
+import { JobsService } from '../jobs/jobs.service';
 
 @Injectable()
 export class ProposalCleanupService {
@@ -14,6 +15,7 @@ export class ProposalCleanupService {
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly chatGateway: ChatGateway,
     private readonly liveActivityNotificationService: LiveActivityNotificationService,
+    private readonly jobsService: JobsService,
   ) {}
 
   /**
@@ -58,6 +60,7 @@ export class ProposalCleanupService {
 
       // Deletar propostas expiradas
       for (const proposal of expiredProposals) {
+        await this.jobsService.cancelProposalExpirationJob(proposal.id);
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
 
         this.logger.log(

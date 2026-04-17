@@ -78,6 +78,21 @@ export class WebhooksService {
 
   // ===== HANDLERS DE PAGAMENTO =====
 
+  private resolveInternalStatusTransition(
+    currentStatus: string | null | undefined,
+    nextStatus: string,
+  ): string {
+    const current = String(currentStatus || '').toLowerCase();
+    const next = String(nextStatus || '').toLowerCase();
+
+    if (!current) return next;
+    if (current === 'refunded' || current === 'cancelled') return current;
+    if (current === 'captured' && next !== 'refunded') return current;
+    if (current === 'authorized' && next === 'pending') return current;
+
+    return next;
+  }
+
   async handlePaymentCreated(payment: any): Promise<void> {
     this.logger.log(`🆕 [WEBHOOK] Pagamento criado: ${payment.id}`);
 
@@ -137,13 +152,18 @@ export class WebhooksService {
       });
 
       if (existingPayment) {
+        const resolvedStatus = this.resolveInternalStatusTransition(
+          existingPayment.status,
+          mappedStatus,
+        ) as PaymentStatus;
+
         await db
           .update(payments)
-          .set({ status: mappedStatus, updatedAt: new Date() })
+          .set({ status: resolvedStatus, updatedAt: new Date() })
           .where(eq(payments.id, existingPayment.id));
 
         this.logger.log(
-          `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${payment.status}`,
+          `✅ [WEBHOOK] Pagamento atualizado: ${payment.id} -> ${resolvedStatus}`,
         );
         return;
       }
@@ -156,13 +176,18 @@ export class WebhooksService {
         });
 
         if (proposal) {
+          const resolvedStatus = this.resolveInternalStatusTransition(
+            proposal.paymentStatus,
+            mappedStatus,
+          );
+
           await db
             .update(proposals)
-            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
             .where(eq(proposals.id, proposal.id));
 
           this.logger.log(
-            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${mappedStatus} (via payment.updated)`,
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.updated)`,
           );
           return;
         }
@@ -191,13 +216,18 @@ export class WebhooksService {
       });
 
       if (existingPayment) {
+        const resolvedStatus = this.resolveInternalStatusTransition(
+          existingPayment.status,
+          mappedStatus,
+        ) as PaymentStatus;
+
         await db
           .update(payments)
-          .set({ status: mappedStatus, updatedAt: new Date() })
+          .set({ status: resolvedStatus, updatedAt: new Date() })
           .where(eq(payments.id, existingPayment.id));
 
         this.logger.log(
-          `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${mappedStatus}`,
+          `✅ [WEBHOOK] Pagamento aprovado e mapeado para: ${resolvedStatus}`,
         );
 
         if (existingPayment.studentId) {
@@ -216,13 +246,18 @@ export class WebhooksService {
         });
 
         if (proposal) {
+          const resolvedStatus = this.resolveInternalStatusTransition(
+            proposal.paymentStatus,
+            mappedStatus,
+          );
+
           await db
             .update(proposals)
-            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
+            .set({ paymentStatus: resolvedStatus, updatedAt: new Date() })
             .where(eq(proposals.id, proposal.id));
 
           this.logger.log(
-            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${mappedStatus} (via payment.approved)`,
+            `✅ [WEBHOOK] Proposta ${proposal.id} paymentStatus atualizado para ${resolvedStatus} (via payment.approved)`,
           );
           return;
         }
@@ -331,7 +366,7 @@ export class WebhooksService {
   private mapMercadoPagoStatus(mpStatus: string): string {
     const statusMap: Record<string, string> = {
       pending: 'pending',
-      approved: 'captured', // ✅ CORRIGIDO: approved deve virar captured para disparar repasse
+      approved: 'authorized', // Pago no MP, mas ainda em custódia até concluir a aula
       authorized: 'authorized',
       in_process: 'pending',
       in_mediation: 'pending',

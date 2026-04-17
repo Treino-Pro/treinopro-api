@@ -359,9 +359,9 @@ export class MercadoPagoService {
   mapPaymentStatus(mpStatus: string): string {
     switch (mpStatus) {
       case 'pending':
-        return 'authorized'; // Em custódia
+        return 'pending'; // Aguardando pagamento/confirmação
       case 'approved':
-        return 'captured'; // Capturado (split aplicado)
+        return 'authorized'; // Pago no MP, mas ainda em custódia interna
       case 'authorized':
         return 'authorized'; // Autorizado
       case 'in_process':

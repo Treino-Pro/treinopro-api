@@ -33,7 +33,9 @@ export class ProposalJobsProcessor {
         .limit(1);
 
       if (!proposal) {
-        this.logger.warn(`⚠️ Proposta não encontrada: ${proposalId}`);
+        this.logger.log(
+          `ℹ️ Proposta ${proposalId} já foi removida/processada por outro fluxo`,
+        );
         return;
       }
 
