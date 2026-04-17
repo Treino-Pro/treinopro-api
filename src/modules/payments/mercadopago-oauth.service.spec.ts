@@ -73,6 +73,22 @@ describe('MercadoPagoOAuthService', () => {
       expect(result.state).toMatch(/^[a-f0-9]{64}$/);
     });
 
+    it('deve bloquear início do OAuth sem client secret configurado', async () => {
+      const previousSecret = process.env.MP_CLIENT_SECRET;
+      process.env.MP_CLIENT_SECRET = '';
+
+      mockDb.query.users.findFirst.mockResolvedValue({
+        id: 'user-1',
+        userType: 'personal',
+      });
+
+      await expect(service.startOAuth('user-1')).rejects.toThrow(
+        /Configuração OAuth do Mercado Pago incompleta/,
+      );
+
+      process.env.MP_CLIENT_SECRET = previousSecret;
+    });
+
     it('deve bloquear aluno de iniciar OAuth', async () => {
       mockDb.query.users.findFirst.mockResolvedValue({
         id: 'user-1',
@@ -86,6 +102,17 @@ describe('MercadoPagoOAuthService', () => {
   });
 
   describe('handleCallback — segurança', () => {
+    it('deve rejeitar callback sem client secret configurado', async () => {
+      const previousSecret = process.env.MP_CLIENT_SECRET;
+      process.env.MP_CLIENT_SECRET = '';
+
+      await expect(
+        service.handleCallback('valid-code', 'a'.repeat(64)),
+      ).rejects.toThrow(/Configuração OAuth do Mercado Pago incompleta/);
+
+      process.env.MP_CLIENT_SECRET = previousSecret;
+    });
+
     it('deve rejeitar callback sem code', async () => {
       await expect(
         service.handleCallback('', 'valid-state'),
@@ -219,6 +246,17 @@ describe('MercadoPagoOAuthService', () => {
   });
 
   describe('refreshAccessToken', () => {
+    it('deve rejeitar refresh sem client secret configurado', async () => {
+      const previousSecret = process.env.MP_CLIENT_SECRET;
+      process.env.MP_CLIENT_SECRET = '';
+
+      await expect(service.refreshAccessToken('user-1')).rejects.toThrow(
+        /Configuração OAuth do Mercado Pago incompleta/,
+      );
+
+      process.env.MP_CLIENT_SECRET = previousSecret;
+    });
+
     it('deve renovar token e salvar novo refresh token (rotation)', async () => {
       mockDb.query.financialProfiles.findFirst.mockResolvedValue({
         id: 'profile-1',

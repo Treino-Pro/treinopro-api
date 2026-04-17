@@ -52,6 +52,19 @@ export class MercadoPagoOAuthService {
 
   constructor(@Inject('DATABASE_CONNECTION') private readonly db: any) {}
 
+  private assertOAuthConfig(options?: { requireSecret?: boolean }): void {
+    const requireSecret = options?.requireSecret ?? false;
+
+    if (!this.clientId || !this.redirectUri || (requireSecret && !this.clientSecret)) {
+      this.logger.error(
+        `[OAUTH] Configuração inválida: client_id=${Boolean(this.clientId)} redirect_uri=${Boolean(this.redirectUri)} client_secret=${Boolean(this.clientSecret)}`,
+      );
+      throw new BadRequestException(
+        'Configuração OAuth do Mercado Pago incompleta. Verifique MP_CLIENT_ID, MP_CLIENT_SECRET e MP_OAUTH_REDIRECT_URI.',
+      );
+    }
+  }
+
   /**
    * Inicia fluxo OAuth — gera URL de autorização com state anti-CSRF.
    */
@@ -66,11 +79,7 @@ export class MercadoPagoOAuthService {
       );
     }
 
-    if (!this.clientId || !this.redirectUri) {
-      throw new BadRequestException(
-        'Configuração OAuth do Mercado Pago não encontrada. Contate o suporte.',
-      );
-    }
+    this.assertOAuthConfig({ requireSecret: true });
 
     // Gerar state anti-CSRF
     const state = crypto.randomBytes(32).toString('hex');
@@ -119,6 +128,8 @@ export class MercadoPagoOAuthService {
     code: string,
     state: string,
   ): Promise<OAuthCallbackResult> {
+    this.assertOAuthConfig({ requireSecret: true });
+
     if (!code || !state) {
       this.logger.warn('[OAUTH] Callback sem code ou state');
       throw new BadRequestException('Parâmetros code e state são obrigatórios');
@@ -182,6 +193,11 @@ export class MercadoPagoOAuthService {
       );
 
       if (tokenResponse.status === 400) {
+        if (errorBody.includes('client_secret')) {
+          throw new BadRequestException(
+            'Configuração OAuth do Mercado Pago incompleta. Verifique MP_CLIENT_SECRET.',
+          );
+        }
         throw new BadRequestException(
           'Código de autorização expirado ou inválido. Tente novamente.',
         );
@@ -317,6 +333,8 @@ export class MercadoPagoOAuthService {
    * Renova access token usando refresh token (chamado internamente quando necessário).
    */
   async refreshAccessToken(userId: string): Promise<string> {
+    this.assertOAuthConfig({ requireSecret: true });
+
     const profile = await this.db.query.financialProfiles.findFirst({
       where: eq(financialProfiles.userId, userId),
     });
