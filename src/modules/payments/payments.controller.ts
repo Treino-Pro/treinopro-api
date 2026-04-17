@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
 import { MercadoPagoService } from './mercadopago.service';
@@ -42,7 +43,7 @@ export interface CreateRefundDto {
   description?: string;
 }
 
-@Controller('payments')
+@Controller(['payments', 'api/payments'])
 @UseGuards(JwtAuthGuard)
 export class PaymentsController {
   constructor(
@@ -640,6 +641,7 @@ export class PaymentsController {
   }
 
   @Get('mercadopago/oauth/callback')
+  @Public()
   async handleMercadoPagoOAuthCallback(
     @Query('code') code: string,
     @Query('state') state: string,
