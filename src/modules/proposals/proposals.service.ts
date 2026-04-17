@@ -1221,6 +1221,21 @@ export class ProposalsService {
       throw new BadRequestException('Proposta já foi cancelada');
     }
 
+    if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
+      const cancellationReason =
+        userType === 'student'
+          ? 'Proposta cancelada pelo aluno'
+          : 'Proposta cancelada manualmente';
+
+      await this.processAutomaticRefund(
+        proposal.id,
+        proposal.paymentId,
+        cancellationReason,
+      );
+    }
+
+    await this.jobsService.cancelProposalExpirationJob(id);
+
     // Cancelar a proposta
     const [cancelledProposal] = await this.db
       .update(proposals)
