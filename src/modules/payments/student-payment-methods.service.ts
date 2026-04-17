@@ -1556,7 +1556,7 @@ export class StudentPaymentMethodsService {
     const result = {
       success: true,
       paymentId: newPayment.id,
-      mpPaymentId: mpPayment.id,
+      mpPaymentId: String(mpPayment.id),
       status: mpPayment.status,
       statusDetail: mpPayment.status_detail,
       transactionAmount: amount,
@@ -1878,7 +1878,7 @@ export class StudentPaymentMethodsService {
     const result = {
       success: true,
       paymentId: newPayment.id,
-      mpPaymentId: mpPayment.id,
+      mpPaymentId: String(mpPayment.id),
       status: 'authorized', // ✅ Usar status correto do banco, não do MP
       statusDetail: mpPayment.status_detail,
       transactionAmount: amount,

@@ -677,7 +677,7 @@ export class ProposalsService {
       return {
         ...proposalResponse,
         payment: {
-          paymentId: paymentResult.paymentId,
+          paymentId: String(paymentResult.paymentId),
           status: paymentResult.status,
           method: createProposalDto.paymentMethod,
           amount: createProposalDto.price,
@@ -925,7 +925,7 @@ export class ProposalsService {
       return {
         ...proposalResponse,
         payment: {
-          paymentId: paymentResult.paymentId,
+          paymentId: String(paymentResult.paymentId),
           status: paymentResult.status,
           method: createRecontractDto.paymentMethod,
           amount: createRecontractDto.price,
@@ -2502,10 +2502,11 @@ export class ProposalsService {
 
           const response = {
             success: true,
-            paymentId:
+            paymentId: String(
               paymentResult.mpPaymentId ||
-              paymentResult.paymentId ||
-              proposalId,
+                paymentResult.paymentId ||
+                proposalId,
+            ),
             status: paymentResult.status,
             method: createProposalDto.paymentMethod,
             amount: createProposalDto.price,
