@@ -169,73 +169,21 @@ export class PaymentsService {
       };
     }
 
-    try {
-      const financialProfile =
-        await this.db.query.financialProfiles.findFirst({
-          where: (fp: any, { eq }: any) => eq(fp.userId, data.personalId),
-        });
+    const result = {
+      attempted: false,
+      success: false,
+      skipped: true,
+      reason: 'disabled_invalid_mp_payout_flow',
+      error:
+        'Repasse externo manual via /v1/payouts desativado; saldo mantido na carteira interna',
+      usedOAuthToken: false,
+    };
 
-      if (!financialProfile?.canReceivePayments || !financialProfile.mpUserId) {
-        const result = {
-          attempted: false,
-          success: false,
-          skipped: true,
-          reason: 'missing_mp_account',
-          error:
-            'Personal não tem conta Mercado Pago OAuth vinculada para repasse externo',
-          usedOAuthToken: false,
-        };
-        console.warn(
-          `⚠️ [SPLIT PIX] Personal ${data.personalId} não tem conta MP vinculada — repasse externo pulado (carteira interna mantida)`,
-        );
-        await persistExternalPayoutResult(result);
-        return result;
-      }
-
-      const idempotencyKey = `split_${data.classId}_${data.proposalId}`;
-      const result = await this.mercadoPagoService.sendMpTransfer({
-        accessToken: financialProfile.mpAccessToken || undefined,
-        destinationMpUserId: financialProfile.mpUserId,
-        amount: data.amount,
-        idempotencyKey,
-        description: `Repasse TreinoPro: Aula ${data.classId.substring(0, 8)}`,
-      });
-
-      const normalizedResult = {
-        attempted: true,
-        success: result.success,
-        transferId: result.transferId,
-        error: result.error,
-        usedOAuthToken: Boolean(financialProfile.mpAccessToken),
-      };
-
-      await persistExternalPayoutResult(normalizedResult);
-
-      if (result.success) {
-        console.log(
-          `✅ [SPLIT PIX] Repasse de R$${data.amount.toFixed(2)} enviado para personal ${data.personalId} (transferId=${result.transferId})`,
-        );
-        return normalizedResult;
-      } else {
-        console.error(
-          `❌ [SPLIT PIX] Falha no repasse para personal ${data.personalId}: ${result.error}`,
-        );
-        return normalizedResult;
-      }
-    } catch (error) {
-      const result = {
-        attempted: true,
-        success: false,
-        error: error.message,
-        usedOAuthToken: false,
-      };
-      console.error(
-        `❌ [SPLIT PIX] Erro inesperado ao transferir repasse:`,
-        error,
-      );
-      await persistExternalPayoutResult(result);
-      return result;
-    }
+    console.warn(
+      `⚠️ [SPLIT PIX] Repasse externo manual desativado para aula ${data.classId} — saldo mantido na carteira interna do personal ${data.personalId}`,
+    );
+    await persistExternalPayoutResult(result);
+    return result;
   }
 
   // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)

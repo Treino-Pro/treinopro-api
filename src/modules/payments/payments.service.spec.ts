@@ -184,20 +184,10 @@ describe('PaymentsService', () => {
   });
 
   describe('transferPixSplitToPersonal', () => {
-    it('deve usar o token OAuth do personal e persistir o resultado do repasse externo', async () => {
+    it('deve registrar o repasse externo como desativado e manter o saldo na carteira interna', async () => {
       mockDb.query.payments.findFirst.mockResolvedValueOnce({
         id: 'payment-1',
         splitData: {},
-      });
-      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
-        userId: 'personal-1',
-        canReceivePayments: true,
-        mpUserId: '572503321',
-        mpAccessToken: 'APP_USR-oauth-personal',
-      });
-      mockMercadoPagoService.sendMpTransfer.mockResolvedValue({
-        success: true,
-        transferId: 'tx-123',
       });
 
       const setMock = jest.fn().mockReturnThis();
@@ -218,27 +208,22 @@ describe('PaymentsService', () => {
 
       expect(result).toEqual(
         expect.objectContaining({
-          attempted: true,
-          success: true,
-          transferId: 'tx-123',
-          usedOAuthToken: true,
+          attempted: false,
+          success: false,
+          skipped: true,
+          reason: 'disabled_invalid_mp_payout_flow',
+          usedOAuthToken: false,
         }),
       );
-      expect(mockMercadoPagoService.sendMpTransfer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          accessToken: 'APP_USR-oauth-personal',
-          destinationMpUserId: '572503321',
-          amount: 36,
-          idempotencyKey: 'split_class-1_proposal-1',
-        }),
-      );
+      expect(mockMercadoPagoService.sendMpTransfer).not.toHaveBeenCalled();
       expect(setMock).toHaveBeenCalledWith(
         expect.objectContaining({
           splitData: expect.objectContaining({
             externalPayout: expect.objectContaining({
-              success: true,
-              transferId: 'tx-123',
-              usedOAuthToken: true,
+              success: false,
+              skipped: true,
+              reason: 'disabled_invalid_mp_payout_flow',
+              usedOAuthToken: false,
             }),
           }),
         }),
