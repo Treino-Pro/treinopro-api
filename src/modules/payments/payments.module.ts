@@ -14,6 +14,10 @@ import { RefundsService } from './refunds.service';
 import { WebhooksService } from './webhooks.service';
 import { ErrorHandlerService } from './error-handler.service';
 import { PaymentSimulationService } from './payment-simulation.service';
+import {
+  MercadoPagoWithdrawalPayoutProvider,
+  WITHDRAWAL_PAYOUT_PROVIDER,
+} from './withdrawal-payout.provider';
 
 @Module({
   imports: [DatabaseModule, AuthModule, forwardRef(() => NotificationsModule)],
@@ -32,6 +36,11 @@ import { PaymentSimulationService } from './payment-simulation.service';
     WebhooksService,
     ErrorHandlerService,
     PaymentSimulationService,
+    MercadoPagoWithdrawalPayoutProvider,
+    {
+      provide: WITHDRAWAL_PAYOUT_PROVIDER,
+      useExisting: MercadoPagoWithdrawalPayoutProvider,
+    },
   ],
   exports: [
     PaymentsService,
@@ -43,6 +52,7 @@ import { PaymentSimulationService } from './payment-simulation.service';
     WebhooksService,
     ErrorHandlerService,
     PaymentSimulationService,
+    WITHDRAWAL_PAYOUT_PROVIDER,
   ],
 })
 export class PaymentsModule {}

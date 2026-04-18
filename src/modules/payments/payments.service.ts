@@ -26,6 +26,13 @@ import {
 } from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  WITHDRAWAL_PAYOUT_PROVIDER,
+  WithdrawalPayoutPersonalData,
+  WithdrawalPayoutProvider,
+  WithdrawalPayoutResult,
+  WithdrawalTransferMethod,
+} from './withdrawal-payout.provider';
+import {
   CreatePaymentPreferenceDto,
   CreateDisputeDto,
   SubmitEvidenceDto,
@@ -55,6 +62,8 @@ export class PaymentsService {
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly notificationsService: NotificationsService,
+    @Inject(WITHDRAWAL_PAYOUT_PROVIDER)
+    private readonly withdrawalPayoutProvider: WithdrawalPayoutProvider,
   ) {}
 
   // Delegador público para createPixPayment (evita acesso por string de index)
@@ -1695,17 +1704,20 @@ export class PaymentsService {
       }
 
       // Fazer transferência via Mercado Pago
-      const transferResult = await this.mercadoPagoService.transferToPersonal({
+      const payoutResult = await this.withdrawalPayoutProvider.executePayout({
         personalId: transferDto.personalId,
         amount: transferDto.amount,
         description: transferDto.description,
         transferMethod: transferDto.transferMethod,
         personalData: transferDto.personalData,
+        context: {
+          initiatedBy: `admin:${adminId}`,
+        },
       });
 
-      if (!transferResult.success) {
+      if (!payoutResult.success) {
         throw new BadRequestException(
-          `Erro na transferência: ${transferResult.error}`,
+          `Erro na transferência: ${payoutResult.failureReason}`,
         );
       }
 
@@ -1725,19 +1737,20 @@ export class PaymentsService {
         description: `Transferência real: ${transferDto.description}`,
         status: PaymentStatus.CAPTURED,
         metadata: {
-          transferId: transferResult.transferId,
+          transferId: payoutResult.transferId,
+          provider: payoutResult.provider,
           transferMethod: transferDto.transferMethod,
           adminId,
         },
       });
 
       console.log(
-        `✅ [TRANSFER] Transferência processada com sucesso: ${transferResult.transferId}`,
+        `✅ [TRANSFER] Transferência processada com sucesso: ${payoutResult.transferId}`,
       );
 
       return {
         success: true,
-        transferId: transferResult.transferId,
+        transferId: payoutResult.transferId,
       };
     } catch (error) {
       console.error(`❌ [TRANSFER] Erro ao processar transferência:`, error);
@@ -1923,7 +1936,7 @@ export class PaymentsService {
   private preparePersonalDataForTransfer(
     financialProfile: any,
     transferMethod: string,
-  ): any {
+  ): WithdrawalPayoutPersonalData {
     switch (transferMethod) {
       case 'pix':
         return {
@@ -2002,6 +2015,17 @@ export class PaymentsService {
         financialProfile,
         transferMethod,
       );
+      const attemptTimestamp = new Date().toISOString();
+      const currentTransferData =
+        withdrawal.transferData && typeof withdrawal.transferData === 'object'
+          ? withdrawal.transferData
+          : {};
+      const previousPayout =
+        currentTransferData.payout && typeof currentTransferData.payout === 'object'
+          ? currentTransferData.payout
+          : {};
+      const payoutAttemptCount =
+        Number(previousPayout.attemptCount || 0) + 1;
 
       await this.db
         .update(withdrawalRequests)
@@ -2010,18 +2034,34 @@ export class PaymentsService {
           updatedAt: new Date(),
           processedAt: new Date(),
           failureReason: null,
+          transferData: {
+            ...currentTransferData,
+            payout: {
+              ...previousPayout,
+              provider: previousPayout.provider || 'pending_provider',
+              attemptCount: payoutAttemptCount,
+              lastAttemptAt: attemptTimestamp,
+              lastInitiatedBy: options?.initiatedBy || 'admin',
+              lastTransferMethod: transferMethod,
+              lastStatus: 'processing',
+            },
+          },
         })
         .where(eq(withdrawalRequests.id, withdrawalId));
 
-      const transferResult = await this.mercadoPagoService.transferToPersonal({
+      const payoutResult = await this.withdrawalPayoutProvider.executePayout({
         personalId: withdrawal.userId,
         amount: netAmount,
         description: withdrawal.description || 'Saque processado',
         transferMethod,
         personalData,
+        context: {
+          withdrawalId,
+          initiatedBy: options?.initiatedBy || 'admin',
+        },
       });
 
-      if (!transferResult.success) {
+      if (!payoutResult.success) {
         const fallbackStatus = options?.keepPendingOnFailure
           ? 'pending'
           : 'failed';
@@ -2030,8 +2070,23 @@ export class PaymentsService {
           .update(withdrawalRequests)
           .set({
             status: fallbackStatus,
-            failureReason: transferResult.error,
+            failureReason:
+              payoutResult.failureReason || 'Falha ao processar transferência',
             updatedAt: new Date(),
+            transferData: {
+              ...currentTransferData,
+              payout: {
+                ...previousPayout,
+                provider: payoutResult.provider,
+                attemptCount: payoutAttemptCount,
+                lastAttemptAt: attemptTimestamp,
+                lastInitiatedBy: options?.initiatedBy || 'admin',
+                lastTransferMethod: transferMethod,
+                lastStatus: fallbackStatus,
+                failureCode: payoutResult.failureCode,
+                failureReason: payoutResult.failureReason,
+              },
+            },
           })
           .where(eq(withdrawalRequests.id, withdrawalId))
           .returning();
@@ -2045,7 +2100,9 @@ export class PaymentsService {
             : 'Falha ao processar saque',
           adminId: options?.adminId,
           metadata: {
-            error: transferResult.error,
+            error: payoutResult.failureReason,
+            failureCode: payoutResult.failureCode,
+            provider: payoutResult.provider,
             transferMethod,
             initiatedBy: options?.initiatedBy || 'admin',
           },
@@ -2054,7 +2111,7 @@ export class PaymentsService {
         return {
           success: false,
           withdrawal: failedWithdrawal,
-          error: transferResult.error,
+          error: payoutResult.failureReason,
         };
       }
 
@@ -2069,12 +2126,25 @@ export class PaymentsService {
         .set({
           status: 'completed',
           adminNotes: options?.adminNotes,
-          mpTransferId: transferResult.transferId,
-          transactionId: transferResult.transferId,
+          mpTransferId: payoutResult.transferId,
+          transactionId: payoutResult.transferId,
           processedAt: withdrawal.processedAt || new Date(),
           completedAt: new Date(),
           updatedAt: new Date(),
           failureReason: null,
+          transferData: {
+            ...currentTransferData,
+            payout: {
+              ...previousPayout,
+              provider: payoutResult.provider,
+              attemptCount: payoutAttemptCount,
+              lastAttemptAt: attemptTimestamp,
+              lastInitiatedBy: options?.initiatedBy || 'admin',
+              lastTransferMethod: transferMethod,
+              lastStatus: 'completed',
+              externalTransferId: payoutResult.transferId,
+            },
+          },
         })
         .where(eq(withdrawalRequests.id, withdrawalId))
         .returning();
@@ -2088,7 +2158,8 @@ export class PaymentsService {
           : 'Saque processado automaticamente',
         adminId: options?.adminId,
         metadata: {
-          transferId: transferResult.transferId,
+          transferId: payoutResult.transferId,
+          provider: payoutResult.provider,
           transferMethod,
           requestedAmount,
           netAmount,
@@ -2099,7 +2170,7 @@ export class PaymentsService {
       return {
         success: true,
         withdrawal: updatedWithdrawal,
-        transferId: transferResult.transferId,
+        transferId: payoutResult.transferId,
       };
     } catch (error) {
       console.error(`❌ [WITHDRAWAL] Erro ao processar saque ${withdrawalId}:`, error);
@@ -2110,7 +2181,9 @@ export class PaymentsService {
     }
   }
 
-  private normalizeWithdrawalTransferMethod(method: string): 'pix' | 'bank_transfer' | 'mercadopago_balance' {
+  private normalizeWithdrawalTransferMethod(
+    method: string,
+  ): WithdrawalTransferMethod {
     switch (method) {
       case 'mercado_pago':
       case 'mercadopago_balance':

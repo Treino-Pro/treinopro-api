@@ -8,6 +8,7 @@ import { PaymentsService } from './payments.service';
 import { MercadoPagoService } from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentStatus, PaymentType, DisputeStatus } from './dto/payments.dto';
+import { WITHDRAWAL_PAYOUT_PROVIDER } from './withdrawal-payout.provider';
 
 // Mock do banco de dados
 const mockDb = {
@@ -76,6 +77,10 @@ const mockMercadoPagoService = {
   sendMpTransfer: jest.fn(),
 };
 
+const mockWithdrawalPayoutProvider = {
+  executePayout: jest.fn(),
+};
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
 
@@ -86,6 +91,10 @@ describe('PaymentsService', () => {
         { provide: 'DATABASE_CONNECTION', useValue: mockDb },
         { provide: MercadoPagoService, useValue: mockMercadoPagoService },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
+        {
+          provide: WITHDRAWAL_PAYOUT_PROVIDER,
+          useValue: mockWithdrawalPayoutProvider,
+        },
       ],
     }).compile();
 
