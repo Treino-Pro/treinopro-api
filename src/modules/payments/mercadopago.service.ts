@@ -4,7 +4,7 @@ import {
   BadRequestException,
   BadGatewayException,
 } from '@nestjs/common';
-import { randomUUID, createHmac } from 'crypto';
+import { randomUUID } from 'crypto';
 import {
   MercadoPagoConfig,
   Preference,
@@ -1286,53 +1286,23 @@ export class MercadoPagoService {
       }
 
       const body = JSON.stringify(payoutPayload);
-      const headers: any = {
-        Authorization: `Bearer ${accessToken.substring(0, 15)}...`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': data.idempotencyKey,
-      };
-
-      // ✅ LOG: Payload bruto
-      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Raw Body: ${body}`);
-
-      // ✅ ASSINATURA DIGITAL (MANDATÓRIA PARA PAYOUTS EM PRODUÇÃO NO BRASIL)
-      // O header X-Signature deve ser v1=HMAC-SHA256(body, client_secret)
-      const clientSecret = process.env.MP_CLIENT_SECRET;
       
-      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Client Secret configurado: ${!!clientSecret} (Tamanho: ${clientSecret?.length || 0})`);
-
-      if (clientSecret && !isTestEnv) {
-        try {
-          const hmac = createHmac('sha256', clientSecret)
-            .update(body)
-            .digest('hex');
-          
-          const signatureHeader = `v1=${hmac}`;
-          headers['X-Signature'] = signatureHeader;
-          
-          this.logger.log(`🔐 [MP PAYOUT] X-Signature gerada: ${signatureHeader.substring(0, 15)}...`);
-          this.logger.debug(`🔍 [MP PAYOUT DEBUG] HMAC Input: body=${body} | secret_len=${clientSecret.length}`);
-        } catch (signError) {
-          this.logger.error(
-            `❌ [MP PAYOUT] Erro ao gerar X-Signature: ${signError.message}`,
-          );
-        }
-      } else if (!isTestEnv) {
-        this.logger.warn(
-          `⚠️ [MP PAYOUT] MP_CLIENT_SECRET não configurado. O repasse pode falhar com 'Invalid signature'.`,
-        );
-      }
-
-      this.logger.log(`📤 [MP PAYOUT] Enviando POST para /v1/payouts...`);
-
-      // Criar headers reais para o fetch (sem máscara)
+      // ✅ HEADERS MANDATÓRIOS PARA PAYOUTS
       const fetchHeaders: any = {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'X-Idempotency-Key': data.idempotencyKey,
+        // ✅ X-Enforce-Signature: Define se a assinatura RSA é obrigatória.
+        // Como não temos chaves RSA (4096 bits) configuradas no painel do MP, 
+        // devemos enviar como 'false' para evitar erro 400 "Invalid signature".
+        'X-Enforce-Signature': 'false',
       };
-      if (headers['X-Signature'])
-        fetchHeaders['X-Signature'] = headers['X-Signature'];
+
+      // ✅ LOG: Payload e Headers (mascarados)
+      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Raw Body: ${body}`);
+      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Headers: ${JSON.stringify({ ...fetchHeaders, Authorization: 'Bearer ***' })}`);
+
+      this.logger.log(`📤 [MP PAYOUT] Enviando POST para /v1/payouts...`);
 
       const response = await fetch('https://api.mercadopago.com/v1/payouts', {
         method: 'POST',
