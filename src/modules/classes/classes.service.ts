@@ -380,9 +380,7 @@ export class ClassesService {
       });
       const minimumCompletionAt = rawClassData?.minimumCompletionAt
         ? new Date(rawClassData.minimumCompletionAt)
-        : new Date(
-            (classData.startedAt as Date).getTime() + minCompletionMs,
-          );
+        : new Date((classData.startedAt as Date).getTime() + minCompletionMs);
 
       if (now < minimumCompletionAt) {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
@@ -458,16 +456,14 @@ export class ClassesService {
             'Aula concluída',
           );
 
-          let externalPayoutResult:
-            | {
-                attempted: boolean;
-                success: boolean;
-                skipped?: boolean;
-                reason?: string;
-                transferId?: string;
-                error?: string;
-              }
-            | null = null;
+          let externalPayoutResult: {
+            attempted: boolean;
+            success: boolean;
+            skipped?: boolean;
+            reason?: string;
+            transferId?: string;
+            error?: string;
+          } | null = null;
 
           if (payment.proposalId) {
             externalPayoutResult = await this.triggerPixProposalSplit(
@@ -918,7 +914,8 @@ export class ClassesService {
           classData.time
         }`,
       );
-      const cancellationWindowHours = FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS;
+      const cancellationWindowHours =
+        FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS;
       const cancellationDeadline = new Date(
         classDateTime.getTime() - cancellationWindowHours * 60 * 60 * 1000,
       );
@@ -1259,9 +1256,12 @@ export class ClassesService {
     );
 
     // Calcular deadlines
-    const cancellationWindowMs = FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
-    const startWindowBeforeMs = FeatureFlags.CLASS_START_WINDOW_BEFORE_MINUTES * 60 * 1000;
-    const startWindowAfterMs = FeatureFlags.CLASS_START_WINDOW_AFTER_MINUTES * 60 * 1000;
+    const cancellationWindowMs =
+      FeatureFlags.CLASS_CANCELLATION_WINDOW_HOURS * 60 * 60 * 1000;
+    const startWindowBeforeMs =
+      FeatureFlags.CLASS_START_WINDOW_BEFORE_MINUTES * 60 * 1000;
+    const startWindowAfterMs =
+      FeatureFlags.CLASS_START_WINDOW_AFTER_MINUTES * 60 * 1000;
     const cancellationDeadline = new Date(
       classDateTime.getTime() - cancellationWindowMs,
     ); // configurável, padrão 2h antes
@@ -1294,12 +1294,11 @@ export class ClassesService {
     let canComplete = false;
 
     if (classData.status === ClassStatus.ACTIVE && rawClass?.startedAt) {
-      const timelineMinMs = FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000;
+      const timelineMinMs =
+        FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000;
       const minAt = rawClass.minimumCompletionAt
         ? new Date(rawClass.minimumCompletionAt)
-        : new Date(
-            new Date(rawClass.startedAt).getTime() + timelineMinMs,
-          );
+        : new Date(new Date(rawClass.startedAt).getTime() + timelineMinMs);
       minimumCompletionAt = minAt;
       const remainingMs = Math.max(0, minAt.getTime() - now.getTime());
       remainingToCompleteSeconds = Math.ceil(remainingMs / 1000);
@@ -1595,7 +1594,8 @@ export class ClassesService {
 
     const startTime = new Date();
     const minimumCompletionAt = new Date(
-      startTime.getTime() + FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000,
+      startTime.getTime() +
+        FeatureFlags.CLASS_MIN_COMPLETION_MINUTES * 60 * 1000,
     );
     const durationMs = classData.duration * 60 * 1000;
 
@@ -1919,9 +1919,14 @@ export class ClassesService {
 
     // Quando o aluno confirma a ausência, a aula é completada e o pagamento
     // deve ser capturado e repassado ao personal trainer.
-    if (resolveDto.resolution === ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE) {
+    if (
+      resolveDto.resolution === ClassDisputeStatus.STUDENT_CONFIRMED_ABSENCE
+    ) {
       try {
-        let payment = await this.findPaymentForClass(classId, classData.proposalId);
+        let payment = await this.findPaymentForClass(
+          classId,
+          classData.proposalId,
+        );
         if (payment) {
           payment = await this.ensurePaymentLinkedToClass(
             payment,
@@ -1929,7 +1934,10 @@ export class ClassesService {
             classData.personalId,
           );
         }
-        if (payment && (payment.status === 'authorized' || payment.status === 'pending')) {
+        if (
+          payment &&
+          (payment.status === 'authorized' || payment.status === 'pending')
+        ) {
           await this.paymentsService.capturePaymentAfterClass(
             classId,
             'Disputa resolvida: aluno confirmou ausência',

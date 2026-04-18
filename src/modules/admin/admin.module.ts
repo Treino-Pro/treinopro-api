@@ -10,7 +10,13 @@ import { GamificationModule } from '../gamification/gamification.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, PaymentsModule, GamificationModule, NotificationsModule],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    PaymentsModule,
+    GamificationModule,
+    NotificationsModule,
+  ],
   controllers: [AdminController, AdminMigrationController, PanelAuthController],
   providers: [AdminService],
 })

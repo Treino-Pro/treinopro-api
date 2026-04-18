@@ -1,6 +1,8 @@
-function extractTrainingDateParts(
-  trainingDate: Date | string,
-): { year: number; monthIndex: number; day: number } {
+function extractTrainingDateParts(trainingDate: Date | string): {
+  year: number;
+  monthIndex: number;
+  day: number;
+} {
   if (typeof trainingDate === 'string') {
     const match = trainingDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {

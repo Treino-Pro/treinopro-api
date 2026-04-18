@@ -287,8 +287,7 @@ export class InAppNotificationService {
     userId: string,
     classData: any,
   ): Promise<InAppNotification> {
-    const actorName =
-      classData.actorName || classData.partnerName || 'Alguém';
+    const actorName = classData.actorName || classData.partnerName || 'Alguém';
     const refundMessage = classData.refundInfo ? ' Reembolso processado.' : '';
 
     return this.createNotification(

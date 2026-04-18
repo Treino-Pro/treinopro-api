@@ -88,10 +88,7 @@ export class PaymentsService {
   }
 
   // Delegador para reembolso direto pelo ID numérico do MP (PIX de propostas)
-  async createRefundByMpId(
-    mpPaymentId: string,
-    reason?: string,
-  ): Promise<any> {
+  async createRefundByMpId(mpPaymentId: string, reason?: string): Promise<any> {
     return this.mercadoPagoService.createRefund(mpPaymentId, { reason });
   }
 
@@ -1960,7 +1957,8 @@ export class PaymentsService {
       case 'mercadopago_balance':
         return {
           mpAccountId: financialProfile.mpUserId,
-          accessToken: financialProfile.mpAccessToken,
+          // ✅ NÃO enviamos o accessToken do personal para operações de payout (saque)
+          // por motivos de segurança e porque o MP exige o token da plataforma para repasses.
         };
       default:
         throw new Error('Método de transferência inválido');
@@ -1994,7 +1992,10 @@ export class PaymentsService {
         throw new NotFoundException('Solicitação de saque não encontrada');
       }
 
-      if (withdrawal.status !== 'pending' && withdrawal.status !== 'processing') {
+      if (
+        withdrawal.status !== 'pending' &&
+        withdrawal.status !== 'processing'
+      ) {
         throw new BadRequestException('Solicitação já foi processada');
       }
 
@@ -2021,11 +2022,11 @@ export class PaymentsService {
           ? withdrawal.transferData
           : {};
       const previousPayout =
-        currentTransferData.payout && typeof currentTransferData.payout === 'object'
+        currentTransferData.payout &&
+        typeof currentTransferData.payout === 'object'
           ? currentTransferData.payout
           : {};
-      const payoutAttemptCount =
-        Number(previousPayout.attemptCount || 0) + 1;
+      const payoutAttemptCount = Number(previousPayout.attemptCount || 0) + 1;
 
       await this.db
         .update(withdrawalRequests)
@@ -2094,7 +2095,9 @@ export class PaymentsService {
         await this.createWithdrawalHistory({
           withdrawalId,
           userId: withdrawal.userId,
-          action: options?.keepPendingOnFailure ? 'auto_failed_pending' : 'failed',
+          action: options?.keepPendingOnFailure
+            ? 'auto_failed_pending'
+            : 'failed',
           description: options?.keepPendingOnFailure
             ? 'Tentativa automática falhou e o saque permaneceu pendente para análise manual'
             : 'Falha ao processar saque',
@@ -2173,7 +2176,10 @@ export class PaymentsService {
         transferId: payoutResult.transferId,
       };
     } catch (error) {
-      console.error(`❌ [WITHDRAWAL] Erro ao processar saque ${withdrawalId}:`, error);
+      console.error(
+        `❌ [WITHDRAWAL] Erro ao processar saque ${withdrawalId}:`,
+        error,
+      );
       return {
         success: false,
         error: error.message,

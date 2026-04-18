@@ -4,7 +4,7 @@ import {
   BadRequestException,
   BadGatewayException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac } from 'crypto';
 import {
   MercadoPagoConfig,
   Preference,
@@ -1268,7 +1268,7 @@ export class MercadoPagoService {
           type: 'pix',
           receiver_id: data.pixKey,
         };
-      } 
+      }
       // Se não tiver PIX mas tiver MP User ID, tentamos Wallet-to-Wallet via Payouts
       else if (data.destinationMpUserId) {
         payoutPayload.payout_destination = {
@@ -1276,18 +1276,47 @@ export class MercadoPagoService {
           receiver_id: data.destinationMpUserId,
         };
       } else {
-        this.logger.error('❌ [MP TRANSFER] Falha: Nem Chave PIX nem MP User ID fornecidos.');
-        return { success: false, error: 'Dados de destino insuficientes para o repasse' };
+        this.logger.error(
+          '❌ [MP TRANSFER] Falha: Nem Chave PIX nem MP User ID fornecidos.',
+        );
+        return {
+          success: false,
+          error: 'Dados de destino insuficientes para o repasse',
+        };
+      }
+
+      const body = JSON.stringify(payoutPayload);
+      const headers: any = {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': data.idempotencyKey,
+      };
+
+      // ✅ ASSINATURA DIGITAL (MANDATÓRIA PARA PAYOUTS EM PRODUÇÃO NO BRASIL)
+      // O header X-Signature deve ser v1=HMAC-SHA256(body, client_secret)
+      const clientSecret = process.env.MP_CLIENT_SECRET;
+      if (clientSecret && !isTestEnv) {
+        try {
+          const hmac = createHmac('sha256', clientSecret)
+            .update(body)
+            .digest('hex');
+          headers['X-Signature'] = `v1=${hmac}`;
+          this.logger.log(`🔐 [MP PAYOUT] X-Signature gerada para repasse.`);
+        } catch (signError) {
+          this.logger.error(
+            `❌ [MP PAYOUT] Erro ao gerar X-Signature: ${signError.message}`,
+          );
+        }
+      } else if (!isTestEnv) {
+        this.logger.warn(
+          `⚠️ [MP PAYOUT] MP_CLIENT_SECRET não configurado. O repasse pode falhar com 'Invalid signature'.`,
+        );
       }
 
       const response = await fetch('https://api.mercadopago.com/v1/payouts', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': data.idempotencyKey,
-        },
-        body: JSON.stringify(payoutPayload),
+        headers,
+        body,
       });
 
       const responseText = await response.text();
@@ -1310,7 +1339,9 @@ export class MercadoPagoService {
       }
 
       const transferId = String(parsed.id || '');
-      this.logger.log(`✅ [MP PAYOUT] Repasse criado com sucesso: id=${transferId}`);
+      this.logger.log(
+        `✅ [MP PAYOUT] Repasse criado com sucesso: id=${transferId}`,
+      );
       return { success: true, transferId };
     } catch (error) {
       this.logger.error(`❌ [MP PAYOUT] Erro inesperado:`, error);
@@ -1389,41 +1420,18 @@ export class MercadoPagoService {
             throw new Error('ID da conta Mercado Pago é obrigatório');
           }
 
-          let payoutAccessToken = transferData.personalData.accessToken;
-          if (!payoutAccessToken) {
-            payoutAccessToken = await this.refreshOAuthTokenForPayout(
-              transferData.personalId,
-              'token OAuth ausente no perfil financeiro',
-            );
-          }
+          // ✅ CORREÇÃO: Repasses da plataforma para o personal DEVEM ser feitos com o token da plataforma.
+          // O Mercado Pago não aceita tokens de sellers para /v1/payouts se o objetivo é repasse da plataforma (withdrawal).
+          // Por segurança, mantemos a verificação de existência/validade da conexão OAuth,
+          // mas o envio real usa o MP_ACCESS_TOKEN configurado no .env da plataforma.
 
-          let payoutResult = await this.sendMpTransfer({
+          const payoutResult = await this.sendMpTransfer({
             destinationMpUserId: transferData.personalData.mpAccountId,
             amount: transferData.amount,
             idempotencyKey: `withdrawal_${transferData.personalId}_${Date.now()}`,
             description: transferData.description,
-            accessToken: payoutAccessToken,
+            // NÃO passamos o accessToken, forçando o sendMpTransfer a usar o process.env.MP_ACCESS_TOKEN
           });
-
-          if (
-            !payoutResult.success &&
-            this.shouldRetryPayoutWithRefresh(payoutResult.error)
-          ) {
-            this.logger.warn(
-              `⚠️ [MP PAYOUT] Repasse inicial falhou para ${transferData.personalId}; tentando refresh do OAuth e novo envio`,
-            );
-            payoutAccessToken = await this.refreshOAuthTokenForPayout(
-              transferData.personalId,
-              payoutResult.error,
-            );
-            payoutResult = await this.sendMpTransfer({
-              destinationMpUserId: transferData.personalData.mpAccountId,
-              amount: transferData.amount,
-              idempotencyKey: `withdrawal_${transferData.personalId}_${Date.now()}_retry`,
-              description: transferData.description,
-              accessToken: payoutAccessToken,
-            });
-          }
 
           return payoutResult;
 
@@ -1451,37 +1459,6 @@ export class MercadoPagoService {
         success: false,
         error: error.message,
       };
-    }
-  }
-
-  private shouldRetryPayoutWithRefresh(error?: string): boolean {
-    const normalized = (error || '').toLowerCase();
-
-    return (
-      normalized.includes('invalid signature') ||
-      normalized.includes('invalid_token') ||
-      normalized.includes('unauthorized') ||
-      normalized.includes('access token') ||
-      normalized.includes('401')
-    );
-  }
-
-  private async refreshOAuthTokenForPayout(
-    personalId: string,
-    reason?: string,
-  ): Promise<string> {
-    try {
-      this.logger.log(
-        `🔄 [MP PAYOUT] Renovando token OAuth do personal ${personalId}${reason ? ` (${reason})` : ''}`,
-      );
-      return await this.mercadoPagoOAuthService.refreshAccessToken(personalId);
-    } catch (error) {
-      this.logger.error(
-        `❌ [MP PAYOUT] Falha ao renovar token OAuth do personal ${personalId}: ${error.message}`,
-      );
-      throw new Error(
-        'Conta Mercado Pago desconectada ou token OAuth inválido. Reconecte a conta antes de sacar.',
-      );
     }
   }
 

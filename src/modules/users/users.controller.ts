@@ -466,14 +466,20 @@ export class UsersController {
       );
     }
 
-    return this.usersService.saveFcmToken(userId, body.token, body.platform, body.deviceInfo);
+    return this.usersService.saveFcmToken(
+      userId,
+      body.token,
+      body.platform,
+      body.deviceInfo,
+    );
   }
 
   @Delete(':id/fcm-token')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Remover token FCM do usuário (logout)',
-    description: 'Remove o token FCM do dispositivo ao fazer logout, evitando notificações para usuários deslogados.',
+    description:
+      'Remove o token FCM do dispositivo ao fazer logout, evitando notificações para usuários deslogados.',
   })
   @ApiParam({ name: 'id', description: 'ID do usuário' })
   @ApiQuery({ name: 'token', description: 'Token FCM a remover' })
@@ -487,7 +493,9 @@ export class UsersController {
     @Request() req: any,
   ) {
     if (req.user.sub !== userId) {
-      throw new ForbiddenException('Você só pode remover seu próprio token FCM');
+      throw new ForbiddenException(
+        'Você só pode remover seu próprio token FCM',
+      );
     }
     if (!token) {
       throw new BadRequestException('Token FCM não informado');

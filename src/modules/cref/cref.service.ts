@@ -188,7 +188,10 @@ export class CrefService {
       return this.processConfefResponse(response.data, crefNumber);
     } catch (error) {
       this.logger.error(`💥 [CREF] Erro na consulta CONFEF: ${error.message}`);
-      throw new CrefTechnicalErrorException('Falha na consulta ao CONFEF', error);
+      throw new CrefTechnicalErrorException(
+        'Falha na consulta ao CONFEF',
+        error,
+      );
     }
   }
 

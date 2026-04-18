@@ -1173,7 +1173,11 @@ describe('ClassesService', () => {
         status: ClassStatus.ACTIVE,
         startedAt,
       };
-      const updatedClass = { ...mockClass, status: ClassStatus.COMPLETED, completedAt: new Date() };
+      const updatedClass = {
+        ...mockClass,
+        status: ClassStatus.COMPLETED,
+        completedAt: new Date(),
+      };
 
       mockDb.query.classes.findFirst
         .mockResolvedValueOnce(mockClass)
@@ -1230,9 +1234,9 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
-      await expect(service.cancelClass('class-cancel-env', 'student-1')).rejects.toThrow(
-        /3 hora\(s\)/,
-      );
+      await expect(
+        service.cancelClass('class-cancel-env', 'student-1'),
+      ).rejects.toThrow(/3 hora\(s\)/);
     });
 
     it('janela padrão (2h) menciona "2 hora(s)" na mensagem de erro', async () => {
@@ -1249,9 +1253,9 @@ describe('ClassesService', () => {
 
       mockDb.query.classes.findFirst.mockResolvedValue(mockClass);
 
-      await expect(service.cancelClass('class-default-window', 'student-1')).rejects.toThrow(
-        /2 hora\(s\)/,
-      );
+      await expect(
+        service.cancelClass('class-default-window', 'student-1'),
+      ).rejects.toThrow(/2 hora\(s\)/);
     });
   });
 

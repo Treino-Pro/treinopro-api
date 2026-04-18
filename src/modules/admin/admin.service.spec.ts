@@ -243,7 +243,10 @@ describe('AdminService', () => {
       // Act
       const result = await service.reviewPersonalApproval(
         personalId,
-        { status: 'rejected', notes: 'CREF não encontrado após contato com CONFEF.' },
+        {
+          status: 'rejected',
+          notes: 'CREF não encontrado após contato com CONFEF.',
+        },
         reviewerId,
       );
 
@@ -400,7 +403,9 @@ describe('AdminService', () => {
       mockDb.select.mockReturnValue(mockSelectChainFor(classRow));
 
       await expect(
-        service.resolveClassDispute(classId, { resolution: 'resolved_for_personal' }),
+        service.resolveClassDispute(classId, {
+          resolution: 'resolved_for_personal',
+        }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -408,7 +413,9 @@ describe('AdminService', () => {
       mockDb.select.mockReturnValue(mockSelectChainFor(null));
 
       await expect(
-        service.resolveClassDispute(classId, { resolution: 'resolved_for_personal' }),
+        service.resolveClassDispute(classId, {
+          resolution: 'resolved_for_personal',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
   });

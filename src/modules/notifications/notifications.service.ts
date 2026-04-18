@@ -224,13 +224,16 @@ export class NotificationsService {
           'skipped',
           reason,
         );
-        this.logger.warn(`⚠️ Push de teste não entregue para ${userId}: ${reason}`);
+        this.logger.warn(
+          `⚠️ Push de teste não entregue para ${userId}: ${reason}`,
+        );
         return { delivered: false, reason };
       }
 
       const tokens = await this.getUserPushTokens(userId);
       if (tokens.length === 0) {
-        const reason = 'Usuário sem token FCM salvo (users.fcmToken/user_push_tokens)';
+        const reason =
+          'Usuário sem token FCM salvo (users.fcmToken/user_push_tokens)';
         await this.saveNotificationRecord(
           userId,
           'push',
@@ -239,15 +242,20 @@ export class NotificationsService {
           'skipped',
           reason,
         );
-        this.logger.warn(`⚠️ Push de teste não entregue para ${userId}: ${reason}`);
+        this.logger.warn(
+          `⚠️ Push de teste não entregue para ${userId}: ${reason}`,
+        );
         return { delivered: false, reason };
       }
 
-      const response = await this.firebaseNotificationService.sendToUser(userId, {
-        title,
-        body,
-        data: this.normalizePushData(data),
-      });
+      const response = await this.firebaseNotificationService.sendToUser(
+        userId,
+        {
+          title,
+          body,
+          data: this.normalizePushData(data),
+        },
+      );
 
       const delivered = Boolean(response);
       const reason = delivered
@@ -671,9 +679,7 @@ export class NotificationsService {
         return Array.from(new Set<string>(tokens));
       }
 
-      this.logger.warn(
-        `⚠️ Usuário ${userId} não possui token FCM ativo`,
-      );
+      this.logger.warn(`⚠️ Usuário ${userId} não possui token FCM ativo`);
       return [];
     } catch (error) {
       this.logger.error(

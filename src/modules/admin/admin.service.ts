@@ -474,7 +474,9 @@ export class AdminService {
         try {
           await fs.access(absolutePath);
           fileExists = true;
-          this.logger.log(`✅ Arquivo encontrado via fallback local: ${absolutePath}`);
+          this.logger.log(
+            `✅ Arquivo encontrado via fallback local: ${absolutePath}`,
+          );
         } catch {
           fileExists = false;
         }
@@ -604,10 +606,7 @@ export class AdminService {
     reviewerId: string,
   ) {
     const personal = await this.db.query.users.findFirst({
-      where: and(
-        eq(users.id, personalId),
-        eq(users.userType, 'personal'),
-      ),
+      where: and(eq(users.id, personalId), eq(users.userType, 'personal')),
       columns: { id: true, approvalStatus: true, email: true },
     });
 
@@ -890,7 +889,9 @@ export class AdminService {
           classId,
           'Disputa resolvida a favor do personal - no-show do aluno',
         );
-        this.logger.log(`✅ [ADMIN_DISPUTE] Repasse ao personal processado para aula ${classId}`);
+        this.logger.log(
+          `✅ [ADMIN_DISPUTE] Repasse ao personal processado para aula ${classId}`,
+        );
         settlementOk = true;
       } else {
         // No-show do personal: reembolsar integralmente ao aluno
@@ -902,11 +903,15 @@ export class AdminService {
             payment.id,
             'Disputa resolvida a favor do aluno - no-show do personal',
           );
-          this.logger.log(`✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`);
+          this.logger.log(
+            `✅ [ADMIN_DISPUTE] Reembolso ao aluno processado para aula ${classId}`,
+          );
           settlementOk = true;
         } else {
           settlementError = `Pagamento não encontrado para a aula ${classId}, reembolso não pôde ser processado.`;
-          this.logger.error(`[ADMIN_DISPUTE] Falha de settlement: ${settlementError}`);
+          this.logger.error(
+            `[ADMIN_DISPUTE] Falha de settlement: ${settlementError}`,
+          );
         }
 
         // Incrementar strike do personal e registrar aviso formal
@@ -924,17 +929,22 @@ export class AdminService {
 
         // Fix 7: Notificação formal ao personal sobre resolução da disputa
         try {
-          await this.firebaseNotificationService.sendToUser(classRow.personalId, {
-            title: '⚠️ Disputa de no-show resolvida',
-            body: 'Uma disputa foi resolvida contra você. Seu histórico foi atualizado. Consulte o suporte para detalhes.',
-            data: {
-              type: 'dispute_resolved_against_personal',
-              classId,
-              resolution: 'resolved_for_student',
+          await this.firebaseNotificationService.sendToUser(
+            classRow.personalId,
+            {
+              title: '⚠️ Disputa de no-show resolvida',
+              body: 'Uma disputa foi resolvida contra você. Seu histórico foi atualizado. Consulte o suporte para detalhes.',
+              data: {
+                type: 'dispute_resolved_against_personal',
+                classId,
+                resolution: 'resolved_for_student',
+              },
             },
-          });
+          );
         } catch (notifErr: any) {
-          this.logger.warn(`[ADMIN_DISPUTE] Falha ao enviar notificação ao personal ${classRow.personalId}: ${notifErr?.message}`);
+          this.logger.warn(
+            `[ADMIN_DISPUTE] Falha ao enviar notificação ao personal ${classRow.personalId}: ${notifErr?.message}`,
+          );
         }
       }
     } catch (err: any) {
@@ -942,7 +952,7 @@ export class AdminService {
       settlementError = err?.message;
       this.logger.error(
         `❌ [ADMIN_DISPUTE] ATENÇÃO: Settlement financeiro falhou para aula ${classId}. ` +
-        `Resolução: ${resolution}. Erro: ${err?.message}. INTERVENÇÃO MANUAL NECESSÁRIA.`,
+          `Resolução: ${resolution}. Erro: ${err?.message}. INTERVENÇÃO MANUAL NECESSÁRIA.`,
       );
     }
 
@@ -970,7 +980,12 @@ export class AdminService {
       status: newClassStatus,
       resolvedAt: new Date().toISOString(),
       settlementProcessed: settlementOk,
-      ...(settlementError ? { settlementWarning: 'Pagamento não processado automaticamente. Intervenção manual necessária.' } : {}),
+      ...(settlementError
+        ? {
+            settlementWarning:
+              'Pagamento não processado automaticamente. Intervenção manual necessária.',
+          }
+        : {}),
     };
   }
 

@@ -869,10 +869,14 @@ export class ClassDisputeDto {
   evidenceDeadline: Date;
 
   // Campos de geolocalização/presença
-  @ApiPropertyOptional({ description: 'Reporter registrou snapshot de presença' })
+  @ApiPropertyOptional({
+    description: 'Reporter registrou snapshot de presença',
+  })
   reporterHasSnapshot?: boolean;
 
-  @ApiPropertyOptional({ description: 'Reportado registrou snapshot de presença' })
+  @ApiPropertyOptional({
+    description: 'Reportado registrou snapshot de presença',
+  })
   reportedHasSnapshot?: boolean;
 
   @ApiPropertyOptional({ description: 'Data do snapshot do reporter' })

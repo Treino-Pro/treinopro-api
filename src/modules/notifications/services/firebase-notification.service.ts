@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { ConfigService } from '@nestjs/config';
 import { Inject } from '@nestjs/common';
-import { users, userPushTokens, inAppNotifications } from '../../../database/schema';
+import {
+  users,
+  userPushTokens,
+  inAppNotifications,
+} from '../../../database/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { NonceService } from './nonce.service';
 
@@ -231,7 +235,9 @@ export class FirebaseNotificationService {
         );
       return Math.min(Number(result[0]?.count || 0) + 1, 99); // +1 para incluir esta notificação, cap em 99
     } catch (error) {
-      this.logger.warn(`⚠️ Erro ao buscar badge count para ${userId}: ${error.message}`);
+      this.logger.warn(
+        `⚠️ Erro ao buscar badge count para ${userId}: ${error.message}`,
+      );
       return 1; // fallback seguro
     }
   }
@@ -241,7 +247,8 @@ export class FirebaseNotificationService {
    */
   private getThreadId(data?: Record<string, string>): string | undefined {
     if (!data) return undefined;
-    if (data.type === 'new_message' && data.classId) return `chat_${data.classId}`;
+    if (data.type === 'new_message' && data.classId)
+      return `chat_${data.classId}`;
     if (data.proposalId) return `proposta_${data.proposalId}`;
     if (data.classId) return `aula_${data.classId}`;
     if (data.type) return `type_${data.type}`;
@@ -590,14 +597,14 @@ export class FirebaseNotificationService {
       const response = await this.sendEachWithChunking(messages);
       let firstSuccess: string | null = null;
 
-        for (let idx = 0; idx < response.responses.length; idx++) {
-          const resp = response.responses[idx];
-          if (resp.success) {
-            if (!firstSuccess) firstSuccess = resp.messageId ?? null;
-          } else {
-            await this.handleSendError(resp.error, userId, tokens[idx]);
-          }
+      for (let idx = 0; idx < response.responses.length; idx++) {
+        const resp = response.responses[idx];
+        if (resp.success) {
+          if (!firstSuccess) firstSuccess = resp.messageId ?? null;
+        } else {
+          await this.handleSendError(resp.error, userId, tokens[idx]);
         }
+      }
 
       this.logger.log(
         `📱 Multi-device: ${response.successCount}/${tokens.length} enviados para ${userId}`,

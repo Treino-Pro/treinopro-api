@@ -269,15 +269,28 @@ export class AdminController {
     description:
       'Retorna personals com approval_status = pending_review aguardando análise manual',
   })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Página' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Itens por página' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Página',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Itens por página',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista paginada de personals pendentes retornada com sucesso',
     schema: {
       type: 'object',
       properties: {
-        items: { type: 'array', items: { $ref: getSchemaPath(PendingPersonalItemDto) } },
+        items: {
+          type: 'array',
+          items: { $ref: getSchemaPath(PendingPersonalItemDto) },
+        },
         total: { type: 'number', example: 5 },
         page: { type: 'number', example: 1 },
         limit: { type: 'number', example: 20 },
@@ -286,14 +299,24 @@ export class AdminController {
     },
   })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async listPendingPersonals(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-  ): Promise<{ items: PendingPersonalItemDto[]; total: number; page: number; limit: number; totalPages: number }> {
+  ): Promise<{
+    items: PendingPersonalItemDto[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
     const filters: { page?: number; limit?: number } = {};
     if (page) filters.page = Math.max(1, parseInt(page, 10) || 1);
-    if (limit) filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    if (limit)
+      filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     return this.adminService.listPendingPersonals(filters);
   }
 
@@ -308,7 +331,10 @@ export class AdminController {
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   @ApiResponse({ status: 404, description: 'Personal não encontrado' })
   @ApiResponse({ status: 401, description: 'Token JWT inválido ou expirado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado - apenas administradores' })
+  @ApiResponse({
+    status: 403,
+    description: 'Acesso negado - apenas administradores',
+  })
   async reviewPersonalApproval(
     @Param('id') id: string,
     @Body() body: ReviewPersonalApprovalDto,
@@ -936,7 +962,8 @@ export class AdminController {
   @Get('classes')
   @ApiOperation({
     summary: 'Listar todas as aulas',
-    description: 'Retorna lista paginada de todas as aulas com detalhes de aluno e personal',
+    description:
+      'Retorna lista paginada de todas as aulas com detalhes de aluno e personal',
   })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })

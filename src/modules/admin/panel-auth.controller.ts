@@ -29,13 +29,16 @@ const BLOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutos
 
 // Limpa entradas expiradas a cada 1h para não vazar memória indefinidamente
 const ipAttempts = new Map<string, IpRecord>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, rec] of ipAttempts) {
-    if (rec.blockedUntil < now && rec.attempts === 0) ipAttempts.delete(ip);
-    // Entradas bloqueadas são removidas quando o block expirar na próxima requisição
-  }
-}, 60 * 60 * 1000);
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [ip, rec] of ipAttempts) {
+      if (rec.blockedUntil < now && rec.attempts === 0) ipAttempts.delete(ip);
+      // Entradas bloqueadas são removidas quando o block expirar na próxima requisição
+    }
+  },
+  60 * 60 * 1000,
+);
 
 /** Comparação em tempo constante para evitar timing attacks. */
 function safeEqual(a: string, b: string): boolean {
@@ -85,8 +88,12 @@ export class PanelAuthController {
     const adminPassword = process.env.ADMIN_PANEL_PASSWORD ?? '';
 
     if (!adminEmail || !adminPassword) {
-      this.logger.error('[PanelAuth] ADMIN_PANEL_EMAIL ou ADMIN_PANEL_PASSWORD não configurados');
-      throw new UnauthorizedException('Painel administrativo não configurado no servidor');
+      this.logger.error(
+        '[PanelAuth] ADMIN_PANEL_EMAIL ou ADMIN_PANEL_PASSWORD não configurados',
+      );
+      throw new UnauthorizedException(
+        'Painel administrativo não configurado no servidor',
+      );
     }
 
     const emailOk = safeEqual(body.email ?? '', adminEmail);

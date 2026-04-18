@@ -170,7 +170,9 @@ describe('GamificationService', () => {
       mockDb.select.mockReturnValueOnce({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
-            limit: jest.fn().mockResolvedValue([{ userType: 'student', id: userId }]),
+            limit: jest
+              .fn()
+              .mockResolvedValue([{ userType: 'student', id: userId }]),
           }),
         }),
       });

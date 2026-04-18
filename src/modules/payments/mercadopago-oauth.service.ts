@@ -55,7 +55,11 @@ export class MercadoPagoOAuthService {
   private assertOAuthConfig(options?: { requireSecret?: boolean }): void {
     const requireSecret = options?.requireSecret ?? false;
 
-    if (!this.clientId || !this.redirectUri || (requireSecret && !this.clientSecret)) {
+    if (
+      !this.clientId ||
+      !this.redirectUri ||
+      (requireSecret && !this.clientSecret)
+    ) {
       this.logger.error(
         `[OAUTH] Configuração inválida: client_id=${Boolean(this.clientId)} redirect_uri=${Boolean(this.redirectUri)} client_secret=${Boolean(this.clientSecret)}`,
       );
@@ -137,7 +141,9 @@ export class MercadoPagoOAuthService {
 
     // Validação mínima de formato do state (hex 64 chars)
     if (!/^[a-f0-9]{64}$/.test(state)) {
-      this.logger.warn(`[OAUTH] State com formato inválido: ${state.substring(0, 16)}...`);
+      this.logger.warn(
+        `[OAUTH] State com formato inválido: ${state.substring(0, 16)}...`,
+      );
       throw new BadRequestException('State inválido.');
     }
 
@@ -147,7 +153,9 @@ export class MercadoPagoOAuthService {
     });
 
     if (!profile) {
-      this.logger.warn(`[OAUTH] State não encontrado ou já consumido: ${state.substring(0, 16)}...`);
+      this.logger.warn(
+        `[OAUTH] State não encontrado ou já consumido: ${state.substring(0, 16)}...`,
+      );
       throw new BadRequestException(
         'State inválido ou expirado. Inicie o fluxo novamente.',
       );
@@ -161,9 +169,12 @@ export class MercadoPagoOAuthService {
 
     // Verificar expiração temporal do state (TTL)
     if (profile.mpOauthStateCreatedAt) {
-      const stateAge = Date.now() - new Date(profile.mpOauthStateCreatedAt).getTime();
+      const stateAge =
+        Date.now() - new Date(profile.mpOauthStateCreatedAt).getTime();
       if (stateAge > STATE_TTL_MS) {
-        this.logger.warn(`[OAUTH] State expirado (${Math.round(stateAge / 1000)}s) para user ${profile.userId}`);
+        this.logger.warn(
+          `[OAUTH] State expirado (${Math.round(stateAge / 1000)}s) para user ${profile.userId}`,
+        );
         throw new BadRequestException(
           'Sessão de autorização expirada (>10 min). Inicie o fluxo novamente.',
         );
@@ -218,12 +229,9 @@ export class MercadoPagoOAuthService {
     // Buscar dados do usuário MP para confirmar email
     let mpEmail = '';
     try {
-      const userResponse = await fetch(
-        'https://api.mercadopago.com/users/me',
-        {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        },
-      );
+      const userResponse = await fetch('https://api.mercadopago.com/users/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
       if (userResponse.ok) {
         const userData = (await userResponse.json()) as { email: string };
         mpEmail = userData.email || '';
@@ -232,9 +240,7 @@ export class MercadoPagoOAuthService {
       this.logger.warn('[OAUTH] Não foi possível buscar email do usuário MP');
     }
 
-    const tokenExpiresAt = new Date(
-      Date.now() + tokenData.expires_in * 1000,
-    );
+    const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
     // Salvar tokens no perfil financeiro (state já foi invalidado antes da troca)
     await this.db
@@ -400,9 +406,7 @@ export class MercadoPagoOAuthService {
       expires_in: number;
     };
 
-    const tokenExpiresAt = new Date(
-      Date.now() + tokenData.expires_in * 1000,
-    );
+    const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
     // Token rotation: MP retorna novo refresh_token a cada refresh — salvar ambos
     await this.db

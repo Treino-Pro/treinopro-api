@@ -719,7 +719,11 @@ describe('PaymentsService', () => {
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        returning: jest.fn().mockResolvedValue([{ ...pixPayment, status: PaymentStatus.CAPTURED }]),
+        returning: jest
+          .fn()
+          .mockResolvedValue([
+            { ...pixPayment, status: PaymentStatus.CAPTURED },
+          ]),
       });
 
       jest.spyOn(service, 'getUserWallet').mockResolvedValue({
@@ -736,7 +740,9 @@ describe('PaymentsService', () => {
       jest.spyOn(service, 'updateWallet').mockResolvedValue({} as any);
       mockMercadoPagoService.capturePayment.mockResolvedValue({});
 
-      await expect(service.capturePaymentAfterClass(classId)).resolves.not.toThrow();
+      await expect(
+        service.capturePaymentAfterClass(classId),
+      ).resolves.not.toThrow();
 
       expect(mockDb.query.payments.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.any(Object) }),

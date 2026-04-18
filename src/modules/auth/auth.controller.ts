@@ -166,7 +166,10 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verificar se um email já está cadastrado' })
-  @ApiResponse({ status: 200, description: 'Verificação realizada com sucesso' })
+  @ApiResponse({
+    status: 200,
+    description: 'Verificação realizada com sucesso',
+  })
   async checkEmail(@Body() dto: CheckEmailDto) {
     return this.authService.checkEmail(dto.email);
   }

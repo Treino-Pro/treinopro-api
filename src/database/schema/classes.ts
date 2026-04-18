@@ -64,7 +64,9 @@ export const classes = pgTable('classes', {
 
   // Confirmação de início por código 4 dígitos
   startConfirmationCodeHash: text('start_confirmation_code_hash'),
-  startConfirmationCodeExpiresAt: timestamp('start_confirmation_code_expires_at'),
+  startConfirmationCodeExpiresAt: timestamp(
+    'start_confirmation_code_expires_at',
+  ),
   startConfirmationAttempts: integer('start_confirmation_attempts').default(0),
 
   // Regra de 45 minutos
@@ -82,9 +84,20 @@ export const classes = pgTable('classes', {
 });
 
 // Enum para role no snapshot
-export const presenceRoleEnum = pgEnum('presence_role', ['student', 'personal']);
-export const captureSourceEnum = pgEnum('capture_source', ['foreground', 'resume', 'background_task']);
-export const appStateEnum = pgEnum('app_state_snapshot', ['foreground', 'background', 'resumed']);
+export const presenceRoleEnum = pgEnum('presence_role', [
+  'student',
+  'personal',
+]);
+export const captureSourceEnum = pgEnum('capture_source', [
+  'foreground',
+  'resume',
+  'background_task',
+]);
+export const appStateEnum = pgEnum('app_state_snapshot', [
+  'foreground',
+  'background',
+  'resumed',
+]);
 
 // Tabela de snapshots de presença por aula (1 por participante por aula — unique enforced)
 export const classPresenceSnapshots = pgTable(
@@ -107,24 +120,26 @@ export const classPresenceSnapshots = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => ({
-    classUserUnique: unique('class_presence_snapshots_class_id_user_id_unique').on(
-      table.classId,
-      table.userId,
-    ),
+    classUserUnique: unique(
+      'class_presence_snapshots_class_id_user_id_unique',
+    ).on(table.classId, table.userId),
   }),
 );
 
 // Relations
-export const classPresenceSnapshotsRelations = relations(classPresenceSnapshots, ({ one }) => ({
-  class: one(classes, {
-    fields: [classPresenceSnapshots.classId],
-    references: [classes.id],
+export const classPresenceSnapshotsRelations = relations(
+  classPresenceSnapshots,
+  ({ one }) => ({
+    class: one(classes, {
+      fields: [classPresenceSnapshots.classId],
+      references: [classes.id],
+    }),
+    user: one(users, {
+      fields: [classPresenceSnapshots.userId],
+      references: [users.id],
+    }),
   }),
-  user: one(users, {
-    fields: [classPresenceSnapshots.userId],
-    references: [users.id],
-  }),
-}));
+);
 
 // Relations
 export const classesRelations = relations(classes, ({ one, many }) => ({

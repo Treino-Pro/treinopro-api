@@ -27,8 +27,7 @@ export class LiveActivityNotificationService {
   private readonly keyId: string;
   private readonly authKeyPath: string;
   private readonly bundleId = 'com.treinopro.oficial';
-  private readonly apnsTopic =
-    'com.treinopro.oficial.push-type.liveactivity';
+  private readonly apnsTopic = 'com.treinopro.oficial.push-type.liveactivity';
 
   constructor(
     private readonly configService: ConfigService,
@@ -113,7 +112,9 @@ export class LiveActivityNotificationService {
           resolve(value);
         }
         // Fechar conexão de forma segura (ignorar erro se já fechada)
-        try { client.close(); } catch (_) {}
+        try {
+          client.close();
+        } catch (_) {}
       };
 
       client.on('error', (err) => {
@@ -159,7 +160,9 @@ export class LiveActivityNotificationService {
           );
           finish(true);
         } else {
-          this.logger.warn(`APNs response status: ${status} for token ${token.substring(0, 8)}...`);
+          this.logger.warn(
+            `APNs response status: ${status} for token ${token.substring(0, 8)}...`,
+          );
           // finish(false) will be called in req.on('end')
         }
       });
@@ -209,7 +212,9 @@ export class LiveActivityNotificationService {
           resolved = true;
           resolve(value);
         }
-        try { client.close(); } catch (_) {}
+        try {
+          client.close();
+        } catch (_) {}
       };
 
       client.on('error', (err) => {

@@ -502,10 +502,7 @@ export class PaymentsController {
         data: withdrawal,
       };
     } catch (error) {
-      console.error(
-        `❌ [PERSONAL_WITHDRAWAL] Erro ao solicitar saque:`,
-        error,
-      );
+      console.error(`❌ [PERSONAL_WITHDRAWAL] Erro ao solicitar saque:`, error);
       throw new BadRequestException(
         error?.message || 'Erro ao solicitar saque',
       );
@@ -681,7 +678,9 @@ export class PaymentsController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
-    console.log(`🔗 [MP_OAUTH] Callback recebido com state=${state?.substring(0, 8)}...`);
+    console.log(
+      `🔗 [MP_OAUTH] Callback recebido com state=${state?.substring(0, 8)}...`,
+    );
 
     try {
       const result = await this.mercadoPagoOAuthService.handleCallback(
@@ -712,7 +711,9 @@ export class PaymentsController {
       };
     } catch (error) {
       console.error(`❌ [MP_OAUTH] Erro ao buscar status:`, error);
-      throw new BadRequestException('Erro ao buscar status da conta Mercado Pago');
+      throw new BadRequestException(
+        'Erro ao buscar status da conta Mercado Pago',
+      );
     }
   }
 

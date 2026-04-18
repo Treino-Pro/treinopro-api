@@ -428,7 +428,9 @@ export class ProposalsService {
         (isSimulated && !(allowSimulated && isTestEnv))
       ) {
         // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
-        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
+        await this.db
+          .delete(payments)
+          .where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         const reason = isSimulated
           ? 'Pagamento em simulação (sandbox) não permite criar proposta'
@@ -686,7 +688,9 @@ export class ProposalsService {
         (isSimulated && !(allowSimulated && isTestEnv))
       ) {
         // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
-        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
+        await this.db
+          .delete(payments)
+          .where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
         const reason = isSimulated
           ? 'Pagamento em simulação (sandbox) não permite criar proposta'
@@ -815,12 +819,17 @@ export class ProposalsService {
                 `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar recontratação (proposalId=${proposal.id}). Registros preservados para auditoria.`,
                 refundErr,
               );
-              const friendlyMessage = this.extractErrorMessage(error, 'Erro no pagamento');
+              const friendlyMessage = this.extractErrorMessage(
+                error,
+                'Erro no pagamento',
+              );
               throw new BadRequestException(friendlyMessage);
             }
           }
           // Remover pagamentos (FK) e depois a proposta
-          await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
+          await this.db
+            .delete(payments)
+            .where(eq(payments.proposalId, proposal.id));
           await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
           console.log(
             '🗑️ [PROPOSALS SERVICE] Proposta de recontratação removida por falha no pagamento:',
@@ -1229,7 +1238,10 @@ export class ProposalsService {
 
       // Propostas com valor > 0 só podem ser aceitas após confirmação de pagamento.
       const proposalPrice = parseFloat(proposal.price ?? '0');
-      if (proposalPrice > 0 && !this.isPaymentConfirmedStatus(proposal.paymentStatus)) {
+      if (
+        proposalPrice > 0 &&
+        !this.isPaymentConfirmedStatus(proposal.paymentStatus)
+      ) {
         throw new BadRequestException(
           'O pagamento desta proposta ainda não foi confirmado.',
         );
@@ -2087,8 +2099,10 @@ export class ProposalsService {
         );
       } else {
         try {
-          const resolvedPayment =
-            await this.resolveAutomaticRefundPayment(proposalId, paymentId);
+          const resolvedPayment = await this.resolveAutomaticRefundPayment(
+            proposalId,
+            paymentId,
+          );
 
           if (resolvedPayment.localPayment && !resolvedPayment.mpPaymentId) {
             console.log(
@@ -2102,7 +2116,9 @@ export class ProposalsService {
             const mpPayment = await this.paymentsService.getMpPayment(
               resolvedPayment.mpPaymentId,
             );
-            const mpStatus = String(mpPayment?.status ?? 'unknown').toLowerCase();
+            const mpStatus = String(
+              mpPayment?.status ?? 'unknown',
+            ).toLowerCase();
 
             if (
               mpStatus === 'pending' ||
@@ -2528,7 +2544,8 @@ export class ProposalsService {
         // Registrar pagamento PIX na tabela payments para que os webhooks e a
         // lógica de captura pós-aula consigam localizar o registro por proposalId.
         // Se o INSERT falhar, propagar erro — sem registro interno não é seguro prosseguir.
-        const pixPaymentStatus = pixResult.status === 'approved' ? 'authorized' : 'pending';
+        const pixPaymentStatus =
+          pixResult.status === 'approved' ? 'authorized' : 'pending';
         await this.db.insert(payments).values({
           proposalId,
           studentId: userData.id,
@@ -2539,7 +2556,9 @@ export class ProposalsService {
           status: pixPaymentStatus,
           type: 'class_payment',
         });
-        console.log(`💾 [PROPOSALS] Registro PIX inserido na tabela payments (proposalId=${proposalId}, status=${pixPaymentStatus})`);
+        console.log(
+          `💾 [PROPOSALS] Registro PIX inserido na tabela payments (proposalId=${proposalId}, status=${pixPaymentStatus})`,
+        );
 
         const pixResponse = {
           success: true,
@@ -2609,7 +2628,9 @@ export class ProposalsService {
         status: 'pending',
         type: 'class_payment',
       });
-      console.log(`💾 [PROPOSALS] Registro de checkout MP inserido em payments (proposalId=${proposalId})`);
+      console.log(
+        `💾 [PROPOSALS] Registro de checkout MP inserido em payments (proposalId=${proposalId})`,
+      );
 
       const response = {
         success: true,
@@ -3386,7 +3407,9 @@ export class ProposalsService {
         }
 
         // Remover pagamentos vinculados (FK) antes de deletar a proposta
-        await this.db.delete(payments).where(eq(payments.proposalId, proposal.id));
+        await this.db
+          .delete(payments)
+          .where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
 
         // Notificar o aluno sobre a expiração via WebSocket

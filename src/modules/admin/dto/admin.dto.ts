@@ -25,7 +25,8 @@ export class ReviewPersonalApprovalDto {
 
   @ApiPropertyOptional({
     description: 'Notas administrativas sobre a decisão',
-    example: 'Documentação verificada manualmente. CREF confirmado por ligação.',
+    example:
+      'Documentação verificada manualmente. CREF confirmado por ligação.',
   })
   @IsOptional()
   @IsString()
@@ -54,10 +55,15 @@ export class PendingPersonalItemDto {
   @ApiPropertyOptional({ description: 'URL da imagem do CREF' })
   crefImageUrl?: string;
 
-  @ApiProperty({ description: 'Status de aprovação', enum: ['pending_review', 'approved', 'rejected'] })
+  @ApiProperty({
+    description: 'Status de aprovação',
+    enum: ['pending_review', 'approved', 'rejected'],
+  })
   approvalStatus: string;
 
-  @ApiPropertyOptional({ description: 'Notas administrativas sobre a pendência' })
+  @ApiPropertyOptional({
+    description: 'Notas administrativas sobre a pendência',
+  })
   adminNotes?: string;
 
   @ApiProperty({ description: 'Data de criação da conta' })

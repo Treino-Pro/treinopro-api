@@ -351,7 +351,9 @@ export class NotificationsController {
     status: 200,
     description: 'Todas as notificações removidas com sucesso',
   })
-  async clearAllNotifications(@Request() req: any): Promise<{ message: string }> {
+  async clearAllNotifications(
+    @Request() req: any,
+  ): Promise<{ message: string }> {
     await this.notificationsService.clearAllNotifications(req.user.sub);
     return { message: 'Todas as notificações removidas com sucesso' };
   }

@@ -2,10 +2,7 @@ import { buildTrainingStartDate, isProposalExpired } from './proposals.utils';
 
 describe('proposals.utils', () => {
   it('preserva a data de calendario do ISO ao combinar com trainingTime', () => {
-    const result = buildTrainingStartDate(
-      '2026-04-18T00:43:00.000Z',
-      '00:43',
-    );
+    const result = buildTrainingStartDate('2026-04-18T00:43:00.000Z', '00:43');
 
     expect(result.getFullYear()).toBe(2026);
     expect(result.getMonth()).toBe(3);

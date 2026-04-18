@@ -64,12 +64,18 @@ const mockJobsService = {
 
 // Mocks dos serviços auxiliares necessários para compilar o módulo
 const mockChatGateway = {
-  server: { to: jest.fn().mockReturnValue({ emit: jest.fn() }), emit: jest.fn() },
+  server: {
+    to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+    emit: jest.fn(),
+  },
 };
 const mockProposalsGateway = {
   emitToUser: jest.fn(),
   notifyPersonal: jest.fn(),
-  server: { to: jest.fn().mockReturnValue({ emit: jest.fn() }), emit: jest.fn() },
+  server: {
+    to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+    emit: jest.fn(),
+  },
 };
 const mockNonceService = {
   validateNonce: jest.fn().mockReturnValue(true),
@@ -85,7 +91,10 @@ describe('ProposalsService', () => {
       providers: [
         ProposalsService,
         { provide: 'DATABASE_CONNECTION', useValue: mockDb },
-        { provide: StudentPaymentMethodsService, useValue: mockStudentPaymentService },
+        {
+          provide: StudentPaymentMethodsService,
+          useValue: mockStudentPaymentService,
+        },
         { provide: PaymentsService, useValue: mockPaymentsService },
         { provide: JobsService, useValue: mockJobsService },
         { provide: ChatGateway, useValue: mockChatGateway },
@@ -144,7 +153,9 @@ describe('ProposalsService', () => {
                 classSelectCallCount += 1;
                 // 1ª chamada = conflito pessoal, 2ª = aula existente para proposta
                 const result =
-                  classSelectCallCount === 1 ? classesForConflict : classesForProposalId;
+                  classSelectCallCount === 1
+                    ? classesForConflict
+                    : classesForProposalId;
                 return {
                   then: (resolve: any) => resolve(result),
                   limit: () => Promise.resolve(result),
@@ -153,19 +164,34 @@ describe('ProposalsService', () => {
               if (table === users) {
                 return {
                   then: (resolve: any) =>
-                    resolve([opts.student ?? { id: opts.proposal.studentId, name: 'Aluno' }]),
+                    resolve([
+                      opts.student ?? {
+                        id: opts.proposal.studentId,
+                        name: 'Aluno',
+                      },
+                    ]),
                   limit: () =>
-                    Promise.resolve([opts.student ?? { id: opts.proposal.studentId, name: 'Aluno' }]),
+                    Promise.resolve([
+                      opts.student ?? {
+                        id: opts.proposal.studentId,
+                        name: 'Aluno',
+                      },
+                    ]),
                 };
               }
-              return { then: (r: any) => r([]), limit: () => Promise.resolve([]) };
+              return {
+                then: (r: any) => r([]),
+                limit: () => Promise.resolve([]),
+              };
             }),
           }),
         })),
         update: jest.fn().mockReturnValue({
           set: jest.fn().mockReturnValue({
             where: jest.fn().mockReturnValue({
-              returning: jest.fn().mockResolvedValue([{ ...opts.proposal, status: 'matched' }]),
+              returning: jest
+                .fn()
+                .mockResolvedValue([{ ...opts.proposal, status: 'matched' }]),
             }),
           }),
         }),
@@ -218,7 +244,12 @@ describe('ProposalsService', () => {
       };
 
       mockDb.transaction = jest.fn().mockImplementation(async (cb: any) =>
-        cb(buildTx({ proposal: pendingProposal, classesForConflict: [conflictingClass] })),
+        cb(
+          buildTx({
+            proposal: pendingProposal,
+            classesForConflict: [conflictingClass],
+          }),
+        ),
       );
 
       await expect(
@@ -258,7 +289,12 @@ describe('ProposalsService', () => {
       };
 
       mockDb.transaction = jest.fn().mockImplementation(async (cb: any) =>
-        cb(buildTx({ proposal: pendingProposal, classesForConflict: [nonConflictingClass] })),
+        cb(
+          buildTx({
+            proposal: pendingProposal,
+            classesForConflict: [nonConflictingClass],
+          }),
+        ),
       );
 
       const result = await service.acceptProposal(proposalId, personalId);
@@ -282,7 +318,9 @@ describe('ProposalsService', () => {
     });
 
     it('retorna true para authorized', () => {
-      expect((service as any).isPaymentConfirmedStatus('authorized')).toBe(true);
+      expect((service as any).isPaymentConfirmedStatus('authorized')).toBe(
+        true,
+      );
     });
 
     it('retorna true para approved', () => {
@@ -299,22 +337,24 @@ describe('ProposalsService', () => {
       select: jest.fn().mockReturnValue({
         from: jest.fn().mockReturnValue({
           where: jest.fn().mockReturnValue({
-            limit: jest.fn().mockResolvedValue([{
-              id: 'p-test',
-              status: 'pending',
-              paymentStatus: null,
-              targetPersonalId: null,
-              studentId: 'student-1',
-              trainingDate: new Date('2025-09-17'),
-              trainingTime: '10:00',
-              durationMinutes: 60,
-              locationName: 'Academia X',
-              locationAddress: 'Rua Y',
-              modalityName: 'Musculação',
-              price: '100.00',
-              additionalNotes: null,
-              ...overrides,
-            }]),
+            limit: jest.fn().mockResolvedValue([
+              {
+                id: 'p-test',
+                status: 'pending',
+                paymentStatus: null,
+                targetPersonalId: null,
+                studentId: 'student-1',
+                trainingDate: new Date('2025-09-17'),
+                trainingTime: '10:00',
+                durationMinutes: 60,
+                locationName: 'Academia X',
+                locationAddress: 'Rua Y',
+                modalityName: 'Musculação',
+                price: '100.00',
+                additionalNotes: null,
+                ...overrides,
+              },
+            ]),
           }),
         }),
       }),
@@ -325,33 +365,42 @@ describe('ProposalsService', () => {
     });
 
     it('deve lançar BadRequestException quando paymentStatus é null (não pago)', async () => {
-      mockDb.transaction = jest.fn().mockImplementation(async (cb: any) =>
-        cb(buildProposalTx({ paymentStatus: null })),
-      );
+      mockDb.transaction = jest
+        .fn()
+        .mockImplementation(async (cb: any) =>
+          cb(buildProposalTx({ paymentStatus: null })),
+        );
 
-      await expect(service.acceptProposal('p-test', 'personal-1')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.acceptProposal('p-test', 'personal-1'),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('deve incluir mensagem informando que pagamento não foi confirmado', async () => {
-      mockDb.transaction = jest.fn().mockImplementation(async (cb: any) =>
-        cb(buildProposalTx({ paymentStatus: null })),
-      );
+      mockDb.transaction = jest
+        .fn()
+        .mockImplementation(async (cb: any) =>
+          cb(buildProposalTx({ paymentStatus: null })),
+        );
 
-      await expect(service.acceptProposal('p-test', 'personal-1')).rejects.toThrow(
-        'O pagamento desta proposta ainda não foi confirmado.',
-      );
+      await expect(
+        service.acceptProposal('p-test', 'personal-1'),
+      ).rejects.toThrow('O pagamento desta proposta ainda não foi confirmado.');
     });
 
     it('deve rejeitar mesmo em recontratação (targetPersonalId presente) com pagamento não confirmado', async () => {
       mockDb.transaction = jest.fn().mockImplementation(async (cb: any) =>
-        cb(buildProposalTx({ paymentStatus: 'pending', targetPersonalId: 'personal-1' })),
+        cb(
+          buildProposalTx({
+            paymentStatus: 'pending',
+            targetPersonalId: 'personal-1',
+          }),
+        ),
       );
 
-      await expect(service.acceptProposal('p-test', 'personal-1')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.acceptProposal('p-test', 'personal-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -370,14 +419,16 @@ describe('ProposalsService', () => {
     const proposalId = 'proposal-pix-001';
 
     beforeEach(() => {
-      (mockPaymentsService as any).createPixPayment = jest.fn().mockResolvedValue({
-        paymentId: 'mp-pix-123',
-        status: 'pending',
-        qrCode: 'qr-code-data',
-        qrCodeBase64: 'base64-data',
-        ticketUrl: 'https://ticket.pix',
-        expiresAt: null,
-      });
+      (mockPaymentsService as any).createPixPayment = jest
+        .fn()
+        .mockResolvedValue({
+          paymentId: 'mp-pix-123',
+          status: 'pending',
+          qrCode: 'qr-code-data',
+          qrCodeBase64: 'base64-data',
+          ticketUrl: 'https://ticket.pix',
+          expiresAt: null,
+        });
       mockDb.insert.mockReturnValue({
         values: jest.fn().mockResolvedValue([{ id: 'pay-inserted' }]),
       });
@@ -385,7 +436,10 @@ describe('ProposalsService', () => {
 
     it('deve chamar db.insert após criar QR Code PIX', async () => {
       await (service as any).createProposalPaymentPreference(
-        pixDto, userData, trainingDate, proposalId,
+        pixDto,
+        userData,
+        trainingDate,
+        proposalId,
       );
 
       expect(mockDb.insert).toHaveBeenCalled();
@@ -396,7 +450,10 @@ describe('ProposalsService', () => {
       mockDb.insert.mockReturnValue({ values: mockValues });
 
       await (service as any).createProposalPaymentPreference(
-        pixDto, userData, trainingDate, proposalId,
+        pixDto,
+        userData,
+        trainingDate,
+        proposalId,
       );
 
       expect(mockValues).toHaveBeenCalledWith(
@@ -414,7 +471,10 @@ describe('ProposalsService', () => {
       mockDb.insert.mockReturnValue({ values: mockValues });
 
       await (service as any).createProposalPaymentPreference(
-        pixDto, userData, trainingDate, proposalId,
+        pixDto,
+        userData,
+        trainingDate,
+        proposalId,
       );
 
       expect(mockValues).toHaveBeenCalledWith(
@@ -423,19 +483,24 @@ describe('ProposalsService', () => {
     });
 
     it('deve inserir status authorized quando PIX é aprovado imediatamente (modo teste)', async () => {
-      (mockPaymentsService as any).createPixPayment = jest.fn().mockResolvedValue({
-        paymentId: 'mp-pix-456',
-        status: 'approved',
-        qrCode: 'qr',
-        qrCodeBase64: 'b64',
-        ticketUrl: null,
-        expiresAt: null,
-      });
+      (mockPaymentsService as any).createPixPayment = jest
+        .fn()
+        .mockResolvedValue({
+          paymentId: 'mp-pix-456',
+          status: 'approved',
+          qrCode: 'qr',
+          qrCodeBase64: 'b64',
+          ticketUrl: null,
+          expiresAt: null,
+        });
       const mockValues = jest.fn().mockResolvedValue([]);
       mockDb.insert.mockReturnValue({ values: mockValues });
 
       await (service as any).createProposalPaymentPreference(
-        pixDto, userData, trainingDate, proposalId,
+        pixDto,
+        userData,
+        trainingDate,
+        proposalId,
       );
 
       expect(mockValues).toHaveBeenCalledWith(
@@ -445,7 +510,10 @@ describe('ProposalsService', () => {
 
     it('deve retornar dados do PIX com método e paymentId', async () => {
       const result = await (service as any).createProposalPaymentPreference(
-        pixDto, userData, trainingDate, proposalId,
+        pixDto,
+        userData,
+        trainingDate,
+        proposalId,
       );
 
       expect(result.method).toBe('pix');

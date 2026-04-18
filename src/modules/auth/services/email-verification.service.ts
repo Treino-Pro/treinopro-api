@@ -54,18 +54,22 @@ export class EmailVerificationService {
 
     // Enviar email com código
     try {
-      await this.emailService.sendTemplateEmail(normalizedEmail, 'email-verification', {
-        firstName: firstName,
-        code: verificationCode,
-        expiresAt: expiresAt.toLocaleString('pt-BR', {
-          timeZone: 'America/Sao_Paulo',
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      });
+      await this.emailService.sendTemplateEmail(
+        normalizedEmail,
+        'email-verification',
+        {
+          firstName: firstName,
+          code: verificationCode,
+          expiresAt: expiresAt.toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        },
+      );
     } catch (error) {
       console.error(
         `❌ [EMAIL_VERIFICATION] Erro ao enviar email para ${normalizedEmail}:`,
@@ -109,18 +113,22 @@ export class EmailVerificationService {
 
     // Enviar email com template específico de recuperação de senha
     try {
-      await this.emailService.sendTemplateEmail(normalizedEmail, 'password-reset', {
-        firstName: firstName,
-        code: verificationCode,
-        expiresAt: expiresAt.toLocaleString('pt-BR', {
-          timeZone: 'America/Sao_Paulo',
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      });
+      await this.emailService.sendTemplateEmail(
+        normalizedEmail,
+        'password-reset',
+        {
+          firstName: firstName,
+          code: verificationCode,
+          expiresAt: expiresAt.toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        },
+      );
     } catch (error) {
       console.error(
         `❌ [EMAIL_VERIFICATION] Erro ao enviar email de recuperação para ${normalizedEmail}:`,

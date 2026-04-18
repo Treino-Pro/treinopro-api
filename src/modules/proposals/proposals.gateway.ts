@@ -141,20 +141,20 @@ export class ProposalsGateway
         try {
           const pushMessageId =
             await this.firebaseNotificationService.sendProposalNotification(
-            personalId,
-            {
-              id: proposalData.proposal.id,
-              studentName:
-                proposalData.student.name ||
-                `${proposalData.student.firstName} ${proposalData.student.lastName}`,
-              location: proposalData.proposal.locationName || '',
-              time: proposalData.proposal.trainingTime || '',
-              date: trainingDateStr,
-              modality: proposalData.proposal.modalityName || '',
-              price: proposalData.proposal.price || 0,
-              expiresIn: 30 * 60, // segundos (30min)
-            },
-          );
+              personalId,
+              {
+                id: proposalData.proposal.id,
+                studentName:
+                  proposalData.student.name ||
+                  `${proposalData.student.firstName} ${proposalData.student.lastName}`,
+                location: proposalData.proposal.locationName || '',
+                time: proposalData.proposal.trainingTime || '',
+                date: trainingDateStr,
+                modality: proposalData.proposal.modalityName || '',
+                price: proposalData.proposal.price || 0,
+                expiresIn: 30 * 60, // segundos (30min)
+              },
+            );
           if (pushMessageId) {
             this.logger.log(
               `Notificação push enviada para personal ${personalId} (messageId=${pushMessageId})`,
@@ -211,7 +211,7 @@ export class ProposalsGateway
           personalPhoto:
             proposalData.personal.photo ||
             proposalData.personal.profileImageUrl,
-            location: proposalData.proposal.locationName,
+          location: proposalData.proposal.locationName,
           classId: proposalData.proposal.classId,
         },
       );

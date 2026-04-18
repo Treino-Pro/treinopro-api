@@ -286,7 +286,9 @@ export class AuthService {
           birthDate: new Date(birthDate),
           userType,
           documentType,
-          documentNumber: documentNumber ? documentNumber.replace(/\D/g, '') : null,
+          documentNumber: documentNumber
+            ? documentNumber.replace(/\D/g, '')
+            : null,
           documentImageId,
           cref,
           crefUf: userType === 'personal' && crefParsed ? crefParsed.uf : null,

@@ -30,14 +30,14 @@ describe('Auth Integration Tests', () => {
       ],
       controllers: [HealthController],
     })
-    .overrideProvider('CACHE_MANAGER')
-    .useValue({
-      get: jest.fn(),
-      set: jest.fn(),
-      del: jest.fn(),
-      reset: jest.fn(),
-    })
-    .compile();
+      .overrideProvider('CACHE_MANAGER')
+      .useValue({
+        get: jest.fn(),
+        set: jest.fn(),
+        del: jest.fn(),
+        reset: jest.fn(),
+      })
+      .compile();
 
     app = moduleRef.createNestApplication();
 
@@ -69,7 +69,7 @@ describe('Auth Integration Tests', () => {
     } catch (e) {
       console.log('ℹ️ [AUTH TEST] Erro ao fechar client:', e.message);
     }
-    
+
     await app.close();
     await moduleRef.close();
   });

@@ -67,7 +67,9 @@ describe('MercadoPagoOAuthService', () => {
 
       const result = await service.startOAuth('user-1');
 
-      expect(result.authUrl).toContain('https://auth.mercadopago.com.br/authorization');
+      expect(result.authUrl).toContain(
+        'https://auth.mercadopago.com.br/authorization',
+      );
       expect(result.authUrl).toContain('client_id=test-client-id');
       expect(result.authUrl).toContain('state=');
       expect(result.state).toMatch(/^[a-f0-9]{64}$/);
@@ -114,15 +116,15 @@ describe('MercadoPagoOAuthService', () => {
     });
 
     it('deve rejeitar callback sem code', async () => {
-      await expect(
-        service.handleCallback('', 'valid-state'),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.handleCallback('', 'valid-state')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('deve rejeitar callback sem state', async () => {
-      await expect(
-        service.handleCallback('valid-code', ''),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.handleCallback('valid-code', '')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('deve rejeitar state com formato inválido (não hex 64)', async () => {

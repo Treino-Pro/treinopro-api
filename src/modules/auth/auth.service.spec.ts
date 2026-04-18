@@ -371,7 +371,8 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('refreshToken');
 
       // Verificar que a inserção foi chamada com approvalStatus = 'approved'
-      const insertValues = mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
+      const insertValues =
+        mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
       expect(insertValues.approvalStatus).toBe('approved');
     });
 
@@ -416,7 +417,8 @@ describe('AuthService', () => {
       expect(result.user.approvalStatus).toBe('pending_review');
 
       // Verificar que inserção inclui approval_status=pending_review e adminNotes
-      const insertValues = mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
+      const insertValues =
+        mockDb.insert.mock.results[0].value.values.mock.calls[0][0];
       expect(insertValues.approvalStatus).toBe('pending_review');
       expect(insertValues.adminNotes).toContain('Aprovação manual necessária');
     });
