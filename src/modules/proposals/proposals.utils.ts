@@ -1,16 +1,37 @@
+function extractTrainingDateParts(
+  trainingDate: Date | string,
+): { year: number; monthIndex: number; day: number } {
+  if (typeof trainingDate === 'string') {
+    const match = trainingDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return {
+        year: Number(match[1]),
+        monthIndex: Number(match[2]) - 1,
+        day: Number(match[3]),
+      };
+    }
+  }
+
+  const parsed = new Date(trainingDate);
+  return {
+    year: parsed.getUTCFullYear(),
+    monthIndex: parsed.getUTCMonth(),
+    day: parsed.getUTCDate(),
+  };
+}
+
 export function buildTrainingStartDate(
   trainingDate: Date | string,
   trainingTime?: string,
 ): Date {
-  const base = new Date(trainingDate);
   try {
+    const { year, monthIndex, day } = extractTrainingDateParts(trainingDate);
     const [hhStr, mmStr] = String(trainingTime ?? '00:00').split(':');
     const hh = Number(hhStr ?? 0);
     const mm = Number(mmStr ?? 0);
-    base.setHours(hh, mm, 0, 0);
-    return base;
+    return new Date(year, monthIndex, day, hh, mm, 0, 0);
   } catch (_) {
-    return base; // fallback: apenas a data
+    return new Date(trainingDate); // fallback: apenas a data
   }
 }
 

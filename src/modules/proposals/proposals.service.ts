@@ -39,6 +39,7 @@ import {
   ProposalListResponseDto,
   ProposalStatus,
 } from './dto/proposals.dto';
+import { buildTrainingStartDate } from './proposals.utils';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -1342,9 +1343,10 @@ export class ProposalsService {
 
         // Calcular janela de tempo da proposta aceita
         // Combinar data com horário (formato HH:MM)
-        const [hours, minutes] = proposal.trainingTime.split(':').map(Number);
-        const proposedStart = new Date(proposedTrainingDate);
-        proposedStart.setHours(hours, minutes, 0, 0);
+        const proposedStart = buildTrainingStartDate(
+          proposal.trainingDate,
+          proposal.trainingTime,
+        );
         const proposedEnd = new Date(
           proposedStart.getTime() +
             (proposal.durationMinutes || 60) * 60 * 1000,
@@ -1358,9 +1360,7 @@ export class ProposalsService {
         // Verificar conflitos com aulas do personal
         const hasClassConflict = existingClasses.some((cls: any) => {
           // Combinar data da aula com horário
-          const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
-          const classStart = new Date(cls.date);
-          classStart.setHours(clsHours, clsMinutes, 0, 0);
+          const classStart = buildTrainingStartDate(cls.date, cls.time);
           const classEnd = new Date(
             classStart.getTime() + (cls.duration || 60) * 60 * 1000,
           );
@@ -1390,11 +1390,10 @@ export class ProposalsService {
 
         // Verificar conflitos com propostas do aluno
         const hasProposalConflict = existingProposals.some((prop: any) => {
-          const [propHours, propMinutes] = prop.trainingTime
-            .split(':')
-            .map(Number);
-          const propStart = new Date(prop.trainingDate);
-          propStart.setHours(propHours, propMinutes, 0, 0);
+          const propStart = buildTrainingStartDate(
+            prop.trainingDate,
+            prop.trainingTime,
+          );
           const propEnd = new Date(
             propStart.getTime() + (prop.durationMinutes || 60) * 60 * 1000,
           );
@@ -3158,11 +3157,7 @@ export class ProposalsService {
         .orderBy(desc(proposals.createdAt));
 
       const debugInfo = pendingProposals.map((p: any) => {
-        const start = new Date(p.trainingDate);
-        const [hhStr, mmStr] = String(p.trainingTime ?? '00:00').split(':');
-        const hh = Number(hhStr ?? 0);
-        const mm = Number(mmStr ?? 0);
-        start.setHours(hh, mm, 0, 0);
+        const start = buildTrainingStartDate(p.trainingDate, p.trainingTime);
 
         return {
           id: p.id,
@@ -3337,11 +3332,7 @@ export class ProposalsService {
 
       const expiredProposals = candidates.filter((p: any) => {
         try {
-          const start = new Date(p.trainingDate);
-          const [hhStr, mmStr] = String(p.trainingTime ?? '00:00').split(':');
-          const hh = Number(hhStr ?? 0);
-          const mm = Number(mmStr ?? 0);
-          start.setHours(hh, mm, 0, 0);
+          const start = buildTrainingStartDate(p.trainingDate, p.trainingTime);
 
           const isExpired = start.getTime() < now.getTime();
 
@@ -3473,9 +3464,7 @@ export class ProposalsService {
       }
 
       // Calcular janela de tempo da proposta
-      const [hours, minutes] = proposalTime.split(':').map(Number);
-      const proposalStart = new Date(dateObj);
-      proposalStart.setHours(hours, minutes, 0, 0);
+      const proposalStart = buildTrainingStartDate(dateObj, proposalTime);
       const proposalEnd = new Date(
         proposalStart.getTime() + (proposalDuration || 60) * 60 * 1000,
       );
@@ -3486,9 +3475,7 @@ export class ProposalsService {
 
       // Verificar sobreposição com aulas existentes
       for (const cls of existingClasses) {
-        const [clsHours, clsMinutes] = cls.time.split(':').map(Number);
-        const classStart = new Date(cls.date);
-        classStart.setHours(clsHours, clsMinutes, 0, 0);
+        const classStart = buildTrainingStartDate(cls.date, cls.time);
         const classEnd = new Date(
           classStart.getTime() + (cls.duration || 60) * 60 * 1000,
         );
