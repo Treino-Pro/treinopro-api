@@ -478,201 +478,15 @@ export class ProposalsService {
         student,
       );
 
-      // ===== NOTIFICAR PERSONALS (FCM INDEPENDENTE DE WEBSOCKET) =====
-      try {
+      // ===== NOTIFICAR PERSONALS (APENAS SE PAGAMENTO CONFIRMADO) =====
+      if (this.isPaymentConfirmedStatus(paymentResult.status)) {
+        // Notificar personals próximos (FCM e WebSocket)
+        // O método notifyNearbyPersonals já lida com filtros de online, raio e conflitos.
+        await this.notifyNearbyPersonals(proposalResponse, student);
+      } else {
         console.log(
-          `🔍 [PROPOSALS] Proposta: data=${proposalResponse.trainingDate}, hora=${proposalResponse.trainingTime}, duração=${proposalResponse.durationMinutes}min`,
+          `⏳ [PROPOSALS] Proposta ${proposal.id} criada sem envio imediato aos personals (aguardando confirmação de pagamento: ${paymentResult.status})`,
         );
-
-        // 1. Buscar personals conectados (para WebSocket em foreground)
-        const connectedPersonals = this.chatGateway.getConnectedPersonals();
-        console.log(
-          `📢 [PROPOSALS] ${connectedPersonals.length} personals conectados via WebSocket`,
-        );
-
-        // 2. CRÍTICO: Buscar TODOS os personals ativos, online e com token em user_push_tokens
-        // Isso permite que FCM funcione mesmo quando app está em background (WebSocket desconectado)
-        // ✅ FILTRO: Apenas personals que estão ONLINE e têm token ativo receberão FCM
-        const allPersonalsWithFcm = await this.db
-          .selectDistinct({
-            id: users.id,
-            firstName: users.firstName,
-            lastName: users.lastName,
-          })
-          .from(users)
-          .innerJoin(userPushTokens, eq(userPushTokens.userId, users.id))
-          .where(
-            and(
-              eq(users.userType, 'personal'),
-              eq(users.status, 'active'),
-              eq(users.isPersonalOnline, true), // ✅ Apenas personals online
-              eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
-            ),
-          );
-
-        console.log(
-          `📱 [PROPOSALS] Encontrados ${allPersonalsWithFcm.length} personals com token FCM no banco`,
-        );
-
-        // 3. Separar: conectados (WebSocket) vs todos (FCM)
-        const nearbyPersonalsForFCM: string[] = []; // TODOS para FCM
-        const nearbyPersonalsForWS: string[] = []; // Apenas conectados para WebSocket
-
-        // 4. Processar TODOS os personals com fcmToken (do banco)
-        for (const personal of allPersonalsWithFcm) {
-          try {
-            const personalId = personal.id;
-
-            console.log(
-              `🔍 [PROPOSALS] Verificando conflito para personal ${personalId}...`,
-            );
-
-            // Verificar se o personal tem conflito de horário
-            const hasConflict = await this.checkPersonalScheduleConflict(
-              personalId,
-              proposalResponse.trainingDate,
-              proposalResponse.trainingTime,
-              proposalResponse.durationMinutes,
-            );
-
-            if (hasConflict) {
-              console.log(
-                `⏰ [PROPOSALS] Personal ${personalId} tem conflito de horário, NÃO enviando proposta`,
-              );
-              continue; // Pular este personal
-            }
-
-            // Verificar se proposta está dentro do raio de atendimento do personal
-            const proposalCoords =
-              this.extractProposalCoordinates(proposalResponse);
-
-            // ✅ CRÍTICO: Se proposta não tem coordenadas, NÃO enviar FCM
-            if (!proposalCoords.lat || !proposalCoords.lng) {
-              console.log(
-                `⚠️ [PROPOSALS] Proposta ${proposalResponse.id} não tem coordenadas (locationLat/locationLng), NÃO enviando notificação FCM para personal ${personalId}`,
-              );
-              console.log(
-                `📍 [PROPOSALS] locationName: ${proposalResponse.locationName || 'null'}, locationAddress: ${proposalResponse.locationAddress || 'null'}`,
-              );
-              continue; // Pular este personal
-            }
-
-            // Buscar localização do personal do banco
-            const [personalData] = await this.db
-              .select({
-                serviceLocationLat: users.serviceLocationLat,
-                serviceLocationLng: users.serviceLocationLng,
-                serviceRadiusKm: users.serviceRadiusKm,
-              })
-              .from(users)
-              .where(eq(users.id, personalId))
-              .limit(1);
-
-            if (
-              personalData?.serviceLocationLat &&
-              personalData?.serviceLocationLng &&
-              personalData?.serviceRadiusKm
-            ) {
-              const personalLat = parseFloat(personalData.serviceLocationLat);
-              const personalLng = parseFloat(personalData.serviceLocationLng);
-              const radiusKm = parseFloat(personalData.serviceRadiusKm);
-
-              // Calcular distância usando Haversine
-              const distanceKm = this.calculateDistanceKm(
-                personalLat,
-                personalLng,
-                proposalCoords.lat!,
-                proposalCoords.lng!,
-              );
-
-              if (distanceKm > radiusKm) {
-                console.log(
-                  `📍 [PROPOSALS] Personal ${personalId} está fora do raio (${distanceKm.toFixed(2)}km > ${radiusKm}km), NÃO enviando notificação`,
-                );
-                continue; // Pular este personal
-              }
-
-              console.log(
-                `✅ [PROPOSALS] Personal ${personalId} está dentro do raio (${distanceKm.toFixed(2)}km <= ${radiusKm}km)`,
-              );
-            } else {
-              // Se personal não tem localização definida, não enviar (por segurança)
-              console.log(
-                `⚠️ [PROPOSALS] Personal ${personalId} não tem localização/raio definido, NÃO enviando notificação`,
-              );
-              continue;
-            }
-
-            // Adicionar para FCM (dentro do raio e sem conflito)
-            nearbyPersonalsForFCM.push(personalId);
-            console.log(
-              `✅ [PROPOSALS] Personal ${personalId} DENTRO do raio e sem conflito, será notificado via FCM`,
-            );
-
-            // Se estiver conectado, também enviar via WebSocket (foreground)
-            const isConnected = connectedPersonals.some(
-              (p) => p.userId === personalId,
-            );
-            if (isConnected) {
-              const connection = connectedPersonals.find(
-                (p) => p.userId === personalId,
-              );
-              if (connection) {
-                this.chatGateway.server
-                  .to(connection.socketId)
-                  .emit('new_proposal', {
-                    action: 'proposal_created',
-                    proposal: proposalResponse,
-                    student: {
-                      id: student?.id,
-                      name: student?.name,
-                      profileImageUrl: student?.profileImageUrl,
-                    },
-                    timestamp: new Date(),
-                  });
-                nearbyPersonalsForWS.push(personalId);
-                console.log(
-                  `📡 [PROPOSALS] Personal ${personalId} também recebeu via WebSocket (foreground)`,
-                );
-              }
-            }
-          } catch (error) {
-            console.error(
-              `❌ [PROPOSALS] Erro ao verificar conflito para personal ${personal.id}:`,
-              error,
-            );
-            // Em caso de erro, não adicionar para não enviar notificação incorreta
-          }
-        }
-
-        // 5. Enviar notificações Firebase para TODOS os personals (conectados OU não)
-        // CRÍTICO: FCM deve funcionar independente de WebSocket estar conectado
-        if (nearbyPersonalsForFCM.length > 0) {
-          console.log(
-            `🔥 [PROPOSALS] Enviando FCM para ${nearbyPersonalsForFCM.length} personals (independente de conexão WebSocket)`,
-          );
-          await this.proposalsGateway.sendProposalCreated({
-            proposal: proposalResponse,
-            student: {
-              id: student?.id,
-              name: student?.name,
-              firstName: student?.firstName,
-              lastName: student?.lastName,
-              profileImageUrl: student?.profileImageUrl,
-            },
-            nearbyPersonals: nearbyPersonalsForFCM, // TODOS, não apenas conectados
-          });
-        } else {
-          console.log(
-            `⚠️ [PROPOSALS] Nenhum personal sem conflito encontrado para receber notificação`,
-          );
-        }
-      } catch (error) {
-        console.error(
-          '❌ [PROPOSALS] Erro ao emitir evento new_proposal:',
-          error,
-        );
-        // Não falhar a operação por causa de problemas de WebSocket
       }
 
       return {
@@ -2074,6 +1888,34 @@ export class ProposalsService {
 
         console.log(
           `📡 [PROPOSALS] Recontratação ${proposalId} liberada para personal ${currentProposal.targetPersonalId} após confirmação de pagamento (${paymentStatus})`,
+        );
+      }
+
+      // Proposta Geral: quando pagamento for confirmado, notificar personals próximos.
+      if (
+        !currentProposal.targetPersonalId &&
+        !wasConfirmed &&
+        this.isPaymentConfirmedStatus(paymentStatus)
+      ) {
+        const [student] = await this.db
+          .select()
+          .from(users)
+          .where(eq(users.id, currentProposal.studentId))
+          .limit(1);
+
+        const proposalResponse = await this.mapToResponseDto(
+          {
+            ...currentProposal,
+            paymentStatus,
+          },
+          student,
+        );
+
+        // Notificar personals próximos (FCM e WebSocket broadcast)
+        await this.notifyNearbyPersonals(proposalResponse, student);
+
+        console.log(
+          `📡 [PROPOSALS] Proposta ${proposalId} liberada para personals próximos após confirmação de pagamento (${paymentStatus})`,
         );
       }
 
@@ -3756,5 +3598,166 @@ export class ProposalsService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c; // Distância em km
+  }
+
+  /**
+   * Notifica personals próximos sobre uma nova proposta (FCM e WebSocket)
+   * Apenas personals online, sem conflito de horário e dentro do raio são notificados.
+   */
+  private async notifyNearbyPersonals(
+    proposalResponse: any,
+    student: any,
+  ): Promise<void> {
+    try {
+      console.log(
+        `🔍 [PROPOSALS] Iniciando notificação de personals próximos para proposta ${proposalResponse.id}`,
+      );
+      console.log(
+        `🔍 [PROPOSALS] Dados: data=${proposalResponse.trainingDate}, hora=${proposalResponse.trainingTime}, duração=${proposalResponse.durationMinutes}min`,
+      );
+
+      // 1. Buscar personals conectados (para WebSocket em foreground)
+      const connectedPersonals = this.chatGateway.getConnectedPersonals();
+      console.log(
+        `📢 [PROPOSALS] ${connectedPersonals.length} personals conectados via WebSocket`,
+      );
+
+      // 2. CRÍTICO: Buscar TODOS os personals ativos, online e com token em user_push_tokens
+      // ✅ FILTRO: Apenas personals que estão ONLINE e têm token ativo receberão FCM
+      const allPersonalsWithFcm = await this.db
+        .selectDistinct({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        })
+        .from(users)
+        .innerJoin(userPushTokens, eq(userPushTokens.userId, users.id))
+        .where(
+          and(
+            eq(users.userType, 'personal'),
+            eq(users.status, 'active'),
+            eq(users.isPersonalOnline, true), // ✅ Apenas personals online
+            eq(users.approvalStatus, 'approved' as any), // ✅ Apenas personals aprovados
+          ),
+        );
+
+      console.log(
+        `📱 [PROPOSALS] Encontrados ${allPersonalsWithFcm.length} personals com token FCM no banco`,
+      );
+
+      // 3. Separar: conectados (WebSocket) vs todos (FCM)
+      const nearbyPersonalsForFCM: string[] = []; // TODOS para FCM
+
+      // 4. Processar TODOS os personals com fcmToken (do banco)
+      for (const personal of allPersonalsWithFcm) {
+        try {
+          const personalId = personal.id;
+
+          // Verificar conflito de horário
+          const hasConflict = await this.checkPersonalScheduleConflict(
+            personalId,
+            proposalResponse.trainingDate,
+            proposalResponse.trainingTime,
+            proposalResponse.durationMinutes,
+          );
+
+          if (hasConflict) {
+            continue; // Pular este personal
+          }
+
+          // Verificar se proposta está dentro do raio de atendimento
+          const proposalCoords =
+            this.extractProposalCoordinates(proposalResponse);
+
+          if (!proposalCoords.lat || !proposalCoords.lng) {
+            continue; // Pular se sem coordenadas
+          }
+
+          // Buscar localização do personal
+          const [personalData] = await this.db
+            .select({
+              serviceLocationLat: users.serviceLocationLat,
+              serviceLocationLng: users.serviceLocationLng,
+              serviceRadiusKm: users.serviceRadiusKm,
+            })
+            .from(users)
+            .where(eq(users.id, personalId))
+            .limit(1);
+
+          if (
+            personalData?.serviceLocationLat &&
+            personalData?.serviceLocationLng &&
+            personalData?.serviceRadiusKm
+          ) {
+            const distanceKm = this.calculateDistanceKm(
+              parseFloat(personalData.serviceLocationLat),
+              parseFloat(personalData.serviceLocationLng),
+              proposalCoords.lat!,
+              proposalCoords.lng!,
+            );
+
+            if (distanceKm > parseFloat(personalData.serviceRadiusKm)) {
+              continue; // Fora do raio
+            }
+          } else {
+            continue; // Sem localização/raio definido
+          }
+
+          // Adicionar para FCM
+          nearbyPersonalsForFCM.push(personalId);
+
+          // Se estiver conectado, também enviar via WebSocket (foreground)
+          const connection = connectedPersonals.find(
+            (p) => p.userId === personalId,
+          );
+          if (connection) {
+            this.chatGateway.server
+              .to(connection.socketId)
+              .emit('new_proposal', {
+                action: 'proposal_created',
+                proposal: proposalResponse,
+                student: {
+                  id: student?.id,
+                  name: student?.name,
+                  profileImageUrl: student?.profileImageUrl,
+                },
+                timestamp: new Date(),
+              });
+          }
+        } catch (error) {
+          console.error(
+            `❌ [PROPOSALS] Erro ao verificar conflito para personal ${personal.id}:`,
+            error,
+          );
+        }
+      }
+
+      // 5. Enviar notificações Firebase (FCM)
+      if (nearbyPersonalsForFCM.length > 0) {
+        console.log(
+          `🔥 [PROPOSALS] Enviando FCM para ${nearbyPersonalsForFCM.length} personals`,
+        );
+        await this.proposalsGateway.sendProposalCreated({
+          proposal: proposalResponse,
+          student: {
+            id: student?.id,
+            name: student?.name,
+            firstName: student?.firstName,
+            lastName: student?.lastName,
+            profileImageUrl: student?.profileImageUrl,
+          },
+          nearbyPersonals: nearbyPersonalsForFCM,
+        });
+      } else {
+        console.log(
+          `⚠️ [PROPOSALS] Nenhum personal qualificado encontrado para receber notificação`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        '❌ [PROPOSALS] Erro ao notificar personals próximos:',
+        error,
+      );
+    }
   }
 }

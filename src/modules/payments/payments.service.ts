@@ -801,14 +801,67 @@ export class PaymentsService {
       throw new NotFoundException('Pagamento não encontrado');
     }
 
-    if (payment.status === PaymentStatus.REFUNDED) {
-      throw new BadRequestException('Pagamento já foi reembolsado');
+    if (
+      payment.status === PaymentStatus.REFUNDED ||
+      payment.status === PaymentStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'Pagamento já foi reembolsado ou cancelado',
+      );
     }
 
     // Reembolsar no Mercado Pago se tiver mpPaymentId
     if (payment.mpPaymentId) {
-      await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
-      console.log(`🔄 Reembolso processado no MP: ${payment.mpPaymentId}`);
+      let mpStatus: string | undefined;
+
+      try {
+        console.log(
+          `[MercadoPagoService] Buscando status real do pagamento MP: ${payment.mpPaymentId}`,
+        );
+        // Buscar status real no Mercado Pago para decidir entre reembolso ou cancelamento
+        const mpPayment = await this.mercadoPagoService.getPayment(
+          payment.mpPaymentId,
+        );
+        mpStatus = mpPayment?.status;
+      } catch (error) {
+        console.error(
+          `❌ Erro ao consultar status MP para ${payment.mpPaymentId}:`,
+          error,
+        );
+        // Se falhar a consulta, não podemos assumir se é reembolso ou cancelamento.
+        // Tentamos o reembolso padrão como último recurso (pode falhar se for authorized).
+        throw new BadRequestException(
+          `Não foi possível verificar o status do pagamento no Mercado Pago. Erro: ${error.message}`,
+        );
+      }
+
+      if (mpStatus === 'authorized' || mpStatus === 'pending') {
+        // Se apenas autorizado (custódia) ou pendente, cancelar a autorização
+        console.log(
+          `ℹ️ Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Cancelando autorização em vez de reembolsar.`,
+        );
+        await this.mercadoPagoService.cancelPayment(payment.mpPaymentId);
+        console.log(`🔄 Autorização cancelada no MP: ${payment.mpPaymentId}`);
+      } else if (mpStatus === 'approved') {
+        // Se aprovado, realizar o reembolso normal
+        console.log(
+          `ℹ️ Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Processando reembolso.`,
+        );
+        await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
+        console.log(`🔄 Reembolso processado no MP: ${payment.mpPaymentId}`);
+      } else if (mpStatus === 'cancelled' || mpStatus === 'refunded') {
+        console.log(
+          `ℹ️ Pagamento MP ${payment.mpPaymentId} já está em estado terminal: ${mpStatus}`,
+        );
+      } else {
+        console.warn(
+          `⚠️ Status do pagamento MP ${payment.mpPaymentId} é '${mpStatus}'. Tentando reembolso padrão.`,
+        );
+        await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
+        console.log(
+          `🔄 Reembolso (fallback) processado no MP: ${payment.mpPaymentId}`,
+        );
+      }
     }
 
     // Atualizar status
