@@ -4,7 +4,7 @@ import {
   BadRequestException,
   BadGatewayException,
 } from '@nestjs/common';
-import { randomUUID, createHmac } from 'crypto';
+import { randomUUID } from 'crypto';
 import {
   MercadoPagoConfig,
   Preference,
@@ -1259,58 +1259,23 @@ export class MercadoPagoService {
 
       const payoutPayload: any = {
         amount: Number(data.amount.toFixed(2)),
-        description: 'Saque TreinoPro', // ✅ Evitar caracteres especiais na assinatura
+        description: 'Saque TreinoPro',
+        payout_destination: {
+          type: 'mercadopago_account',
+          receiver_id: data.destinationMpUserId,
+        },
       };
 
-      // Se tiver chave PIX, usamos PIX Payout
-      if (data.pixKey) {
-        payoutPayload.payout_destination = {
-          type: 'pix',
-          receiver_id: data.pixKey,
-        };
-      }
-      // Se não tiver PIX mas tiver MP User ID, tentamos Wallet-to-Wallet via Payouts
-      else if (data.destinationMpUserId) {
-        payoutPayload.payout_destination = {
-          type: 'mercadopago_account', // Transferência interna entre carteiras
-          receiver_id: data.destinationMpUserId,
-        };
-      } else {
-        this.logger.error(
-          '❌ [MP TRANSFER] Falha: Nem Chave PIX nem MP User ID fornecidos.',
-        );
-        return {
-          success: false,
-          error: 'Dados de destino insuficientes para o repasse',
-        };
-      }
-
       const body = JSON.stringify(payoutPayload);
-      const clientSecret = process.env.MP_CLIENT_SECRET;
       
       const fetchHeaders: any = {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'X-Idempotency-Key': data.idempotencyKey,
-        'X-Enforce-Signature': 'true', // ✅ Voltar para true para validar a assinatura
       };
-
-      // ✅ TENTAR ASSINATURA HMAC-SHA256 v1 (Alguns endpoints de Payout aceitam se configurado)
-      if (clientSecret) {
-        try {
-          const hmac = createHmac('sha256', clientSecret)
-            .update(body)
-            .digest('hex');
-          fetchHeaders['X-Signature'] = `v1=${hmac}`;
-          this.logger.log(`🔐 [MP PAYOUT] X-Signature (HMAC) gerada: v1=${hmac.substring(0, 10)}...`);
-        } catch (signError) {
-          this.logger.error(`❌ [MP PAYOUT] Erro ao gerar HMAC: ${signError.message}`);
-        }
-      }
 
       // ✅ LOG: Payload e Headers (mascarados)
       this.logger.debug(`🔍 [MP PAYOUT DEBUG] Raw Body: ${body}`);
-      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Secret: ${clientSecret ? clientSecret.substring(0, 4) + '...' : 'ausente'}`);
       this.logger.debug(`🔍 [MP PAYOUT DEBUG] Headers: ${JSON.stringify({ ...fetchHeaders, Authorization: 'Bearer ***' })}`);
 
       this.logger.log(`📤 [MP PAYOUT] Enviando POST para /v1/payouts...`);
