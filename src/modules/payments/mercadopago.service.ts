@@ -4,7 +4,7 @@ import {
   BadRequestException,
   BadGatewayException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac } from 'crypto';
 import {
   MercadoPagoConfig,
   Preference,
@@ -1259,7 +1259,7 @@ export class MercadoPagoService {
 
       const payoutPayload: any = {
         amount: Number(data.amount.toFixed(2)),
-        description: data.description || 'Repasse de aula TreinoPro',
+        description: 'Saque TreinoPro', // ✅ Evitar caracteres especiais na assinatura
       };
 
       // Se tiver chave PIX, usamos PIX Payout
@@ -1286,20 +1286,31 @@ export class MercadoPagoService {
       }
 
       const body = JSON.stringify(payoutPayload);
+      const clientSecret = process.env.MP_CLIENT_SECRET;
       
-      // ✅ HEADERS MANDATÓRIOS PARA PAYOUTS
       const fetchHeaders: any = {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'X-Idempotency-Key': data.idempotencyKey,
-        // ✅ X-Enforce-Signature: Define se a assinatura RSA é obrigatória.
-        // Como não temos chaves RSA (4096 bits) configuradas no painel do MP, 
-        // devemos enviar como 'false' para evitar erro 400 "Invalid signature".
-        'X-Enforce-Signature': 'false',
+        'X-Enforce-Signature': 'true', // ✅ Voltar para true para validar a assinatura
       };
+
+      // ✅ TENTAR ASSINATURA HMAC-SHA256 v1 (Alguns endpoints de Payout aceitam se configurado)
+      if (clientSecret) {
+        try {
+          const hmac = createHmac('sha256', clientSecret)
+            .update(body)
+            .digest('hex');
+          fetchHeaders['X-Signature'] = `v1=${hmac}`;
+          this.logger.log(`🔐 [MP PAYOUT] X-Signature (HMAC) gerada: v1=${hmac.substring(0, 10)}...`);
+        } catch (signError) {
+          this.logger.error(`❌ [MP PAYOUT] Erro ao gerar HMAC: ${signError.message}`);
+        }
+      }
 
       // ✅ LOG: Payload e Headers (mascarados)
       this.logger.debug(`🔍 [MP PAYOUT DEBUG] Raw Body: ${body}`);
+      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Secret: ${clientSecret ? clientSecret.substring(0, 4) + '...' : 'ausente'}`);
       this.logger.debug(`🔍 [MP PAYOUT DEBUG] Headers: ${JSON.stringify({ ...fetchHeaders, Authorization: 'Bearer ***' })}`);
 
       this.logger.log(`📤 [MP PAYOUT] Enviando POST para /v1/payouts...`);
