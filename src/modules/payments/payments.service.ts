@@ -123,8 +123,10 @@ export class PaymentsService {
       const idempotencyKey = `split_${data.classId}_${data.proposalId}`;
       const result = await this.mercadoPagoService.sendMpTransfer({
         destinationMpUserId: financialProfile.mpUserId,
+        pixKey: financialProfile.pixKey,
         amount: data.amount,
         idempotencyKey,
+        description: `Repasse TreinoPro: Aula ${data.classId.substring(0, 8)}`,
       });
 
       if (result.success) {
