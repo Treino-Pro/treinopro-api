@@ -1254,54 +1254,61 @@ export class MercadoPagoService {
         `💸 [MP PAYOUT] Iniciando repasse de R$${data.amount} para ${data.pixKey ? `PIX: ${data.pixKey}` : `MP User: ${data.destinationMpUserId}`}`,
       );
 
-      // Se tiver chave PIX, usamos o endpoint de Payouts que é o padrão para repasses no Brasil
+      const payoutPayload: any = {
+        amount: Number(data.amount.toFixed(2)),
+        description: data.description || 'Repasse de aula TreinoPro',
+      };
+
+      // Se tiver chave PIX, usamos PIX Payout
       if (data.pixKey) {
-        const payoutPayload = {
-          amount: Number(data.amount.toFixed(2)),
-          payout_destination: {
-            type: 'pix',
-            receiver_id: data.pixKey,
-          },
-          description: data.description || 'Repasse de aula TreinoPro',
+        payoutPayload.payout_destination = {
+          type: 'pix',
+          receiver_id: data.pixKey,
         };
-
-        const response = await fetch('https://api.mercadopago.com/v1/payouts', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-Idempotency-Key': data.idempotencyKey,
-          },
-          body: JSON.stringify(payoutPayload),
-        });
-
-        const responseText = await response.text();
-        let parsed: any = {};
-        try {
-          parsed = JSON.parse(responseText);
-        } catch {
-          parsed = { message: responseText };
-        }
-
-        if (!response.ok) {
-          this.logger.error(
-            `❌ [MP PAYOUT] Falha HTTP ${response.status}:`,
-            parsed,
-          );
-          return {
-            success: false,
-            error: parsed?.message || `HTTP ${response.status}`,
-          };
-        }
-
-        const transferId = String(parsed.id || '');
-        this.logger.log(`✅ [MP PAYOUT] Repasse PIX criado: id=${transferId}`);
-        return { success: true, transferId };
+      } 
+      // Se não tiver PIX mas tiver MP User ID, tentamos Wallet-to-Wallet via Payouts
+      else if (data.destinationMpUserId) {
+        payoutPayload.payout_destination = {
+          type: 'mercadopago_account', // Transferência interna entre carteiras
+          receiver_id: data.destinationMpUserId,
+        };
+      } else {
+        this.logger.error('❌ [MP TRANSFER] Falha: Nem Chave PIX nem MP User ID fornecidos.');
+        return { success: false, error: 'Dados de destino insuficientes para o repasse' };
       }
 
-      // Fallback para o comportamento anterior (que estava dando 404, mas mantido como referência de tipo)
-      this.logger.error('❌ [MP TRANSFER] Falha: Chave PIX não fornecida para o repasse.');
-      return { success: false, error: 'Chave PIX obrigatória para repasse via Payouts' };
+      const response = await fetch('https://api.mercadopago.com/v1/payouts', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': data.idempotencyKey,
+        },
+        body: JSON.stringify(payoutPayload),
+      });
+
+      const responseText = await response.text();
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        parsed = { message: responseText };
+      }
+
+      if (!response.ok) {
+        this.logger.error(
+          `❌ [MP PAYOUT] Falha HTTP ${response.status}:`,
+          parsed,
+        );
+        return {
+          success: false,
+          error: parsed?.message || `HTTP ${response.status}`,
+        };
+      }
+
+      const transferId = String(parsed.id || '');
+      this.logger.log(`✅ [MP PAYOUT] Repasse criado com sucesso: id=${transferId}`);
+      return { success: true, transferId };
     } catch (error) {
       this.logger.error(`❌ [MP PAYOUT] Erro inesperado:`, error);
       return { success: false, error: error.message };
