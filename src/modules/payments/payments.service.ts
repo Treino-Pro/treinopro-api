@@ -2131,10 +2131,20 @@ export class PaymentsService {
     adminId?: string;
     metadata?: any;
   }): Promise<void> {
+    const normalizedAdminId =
+      data.adminId && this.isUuid(data.adminId) ? data.adminId : undefined;
+
     await this.db.insert(withdrawalHistory).values({
       ...data,
+      adminId: normalizedAdminId,
       createdAt: new Date(),
     });
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
   }
 
   private formatWithdrawalResponse(withdrawal: any): WithdrawalResponseDto {

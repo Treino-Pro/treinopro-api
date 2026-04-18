@@ -1385,11 +1385,12 @@ export class MercadoPagoService {
           if (!transferData.personalData.mpAccountId) {
             throw new Error('ID da conta Mercado Pago é obrigatório');
           }
-          transferRequest.payment_method_id = 'mercadopago_balance';
-          transferRequest.payer = {
-            email: transferData.personalData.mpAccountId,
-          };
-          break;
+          return await this.sendMpTransfer({
+            destinationMpUserId: transferData.personalData.mpAccountId,
+            amount: transferData.amount,
+            idempotencyKey: `withdrawal_${transferData.personalId}_${Date.now()}`,
+            description: transferData.description,
+          });
 
         default:
           throw new Error('Método de transferência inválido');
