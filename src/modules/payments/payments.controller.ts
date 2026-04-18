@@ -21,6 +21,7 @@ import { MercadoPagoService } from './mercadopago.service';
 import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { PaymentsService } from './payments.service';
 import { FinancialProfileService } from './financial-profile.service';
+import { WithdrawalRequestDto } from './dto/financial-profile.dto';
 import { PaymentStatus } from './dto/payments.dto';
 import { db } from '../../database/connection';
 import { users } from '../../database/schema';
@@ -475,6 +476,39 @@ export class PaymentsController {
         error,
       );
       throw new BadRequestException('Erro ao buscar transações da carteira');
+    }
+  }
+
+  @Post('personal/wallet/withdraw')
+  @UseGuards(JwtAuthGuard)
+  async requestPersonalWithdrawal(
+    @Request() req,
+    @Body() withdrawalDto: WithdrawalRequestDto,
+  ) {
+    const userId = req.user.sub;
+
+    console.log(
+      `💸 [PERSONAL_WITHDRAWAL] Solicitando saque para personal ${userId}`,
+    );
+
+    try {
+      const withdrawal = await this.financialProfileService.requestWithdrawal(
+        userId,
+        withdrawalDto,
+      );
+
+      return {
+        success: true,
+        data: withdrawal,
+      };
+    } catch (error) {
+      console.error(
+        `❌ [PERSONAL_WITHDRAWAL] Erro ao solicitar saque:`,
+        error,
+      );
+      throw new BadRequestException(
+        error?.message || 'Erro ao solicitar saque',
+      );
     }
   }
 
