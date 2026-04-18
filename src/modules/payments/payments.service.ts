@@ -1685,7 +1685,7 @@ export class PaymentsService {
 
       // Verificar se personal tem perfil financeiro configurado
       const financialProfile = await this.db.query.financialProfiles.findFirst({
-        where: eq(users.id, transferDto.personalId),
+        where: eq(financialProfiles.userId, transferDto.personalId),
       });
 
       if (!financialProfile || !financialProfile.canReceivePayments) {
@@ -1947,6 +1947,7 @@ export class PaymentsService {
       case 'mercadopago_balance':
         return {
           mpAccountId: financialProfile.mpUserId,
+          accessToken: financialProfile.mpAccessToken,
         };
       default:
         throw new Error('Método de transferência inválido');

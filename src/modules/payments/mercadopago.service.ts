@@ -15,6 +15,7 @@ import {
 } from 'mercadopago';
 import { ErrorHandlerService } from './error-handler.service';
 import { PaymentSimulationService } from './payment-simulation.service';
+import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import fetch from 'node-fetch';
 
 export interface CreatePreferenceData {
@@ -52,6 +53,7 @@ export class MercadoPagoService {
   constructor(
     private readonly errorHandler: ErrorHandlerService,
     private readonly paymentSimulation: PaymentSimulationService,
+    private readonly mercadoPagoOAuthService: MercadoPagoOAuthService,
   ) {
     // Configurar cliente do Mercado Pago
     const accessToken = process.env.MP_ACCESS_TOKEN || '';
@@ -1333,6 +1335,7 @@ export class MercadoPagoService {
         accountType: string;
       };
       mpAccountId?: string;
+      accessToken?: string;
     };
   }): Promise<{
     success: boolean;
@@ -1385,12 +1388,44 @@ export class MercadoPagoService {
           if (!transferData.personalData.mpAccountId) {
             throw new Error('ID da conta Mercado Pago é obrigatório');
           }
-          return await this.sendMpTransfer({
+
+          let payoutAccessToken = transferData.personalData.accessToken;
+          if (!payoutAccessToken) {
+            payoutAccessToken = await this.refreshOAuthTokenForPayout(
+              transferData.personalId,
+              'token OAuth ausente no perfil financeiro',
+            );
+          }
+
+          let payoutResult = await this.sendMpTransfer({
             destinationMpUserId: transferData.personalData.mpAccountId,
             amount: transferData.amount,
             idempotencyKey: `withdrawal_${transferData.personalId}_${Date.now()}`,
             description: transferData.description,
+            accessToken: payoutAccessToken,
           });
+
+          if (
+            !payoutResult.success &&
+            this.shouldRetryPayoutWithRefresh(payoutResult.error)
+          ) {
+            this.logger.warn(
+              `⚠️ [MP PAYOUT] Repasse inicial falhou para ${transferData.personalId}; tentando refresh do OAuth e novo envio`,
+            );
+            payoutAccessToken = await this.refreshOAuthTokenForPayout(
+              transferData.personalId,
+              payoutResult.error,
+            );
+            payoutResult = await this.sendMpTransfer({
+              destinationMpUserId: transferData.personalData.mpAccountId,
+              amount: transferData.amount,
+              idempotencyKey: `withdrawal_${transferData.personalId}_${Date.now()}_retry`,
+              description: transferData.description,
+              accessToken: payoutAccessToken,
+            });
+          }
+
+          return payoutResult;
 
         default:
           throw new Error('Método de transferência inválido');
@@ -1416,6 +1451,37 @@ export class MercadoPagoService {
         success: false,
         error: error.message,
       };
+    }
+  }
+
+  private shouldRetryPayoutWithRefresh(error?: string): boolean {
+    const normalized = (error || '').toLowerCase();
+
+    return (
+      normalized.includes('invalid signature') ||
+      normalized.includes('invalid_token') ||
+      normalized.includes('unauthorized') ||
+      normalized.includes('access token') ||
+      normalized.includes('401')
+    );
+  }
+
+  private async refreshOAuthTokenForPayout(
+    personalId: string,
+    reason?: string,
+  ): Promise<string> {
+    try {
+      this.logger.log(
+        `🔄 [MP PAYOUT] Renovando token OAuth do personal ${personalId}${reason ? ` (${reason})` : ''}`,
+      );
+      return await this.mercadoPagoOAuthService.refreshAccessToken(personalId);
+    } catch (error) {
+      this.logger.error(
+        `❌ [MP PAYOUT] Falha ao renovar token OAuth do personal ${personalId}: ${error.message}`,
+      );
+      throw new Error(
+        'Conta Mercado Pago desconectada ou token OAuth inválido. Reconecte a conta antes de sacar.',
+      );
     }
   }
 
