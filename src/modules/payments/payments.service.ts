@@ -17,6 +17,7 @@ import {
 import {
   withdrawalRequests,
   withdrawalHistory,
+  financialProfiles,
 } from '../../database/schema/payments';
 import {
   MercadoPagoService,
@@ -1752,94 +1753,22 @@ export class PaymentsService {
     approveDto: ApproveWithdrawalDto,
     adminId: string,
   ): Promise<WithdrawalResponseDto> {
-    try {
-      console.log(`✅ [ADMIN] Aprovando saque ${approveDto.withdrawalId}`);
+    console.log(`✅ [ADMIN] Aprovando saque ${approveDto.withdrawalId}`);
 
-      // Buscar solicitação de saque
-      const withdrawal = await this.db.query.withdrawalRequests.findFirst({
-        where: eq(withdrawalRequests.id, approveDto.withdrawalId),
-        with: {
-          user: true,
-        },
-      });
+    const result = await this.processWithdrawalPayout(approveDto.withdrawalId, {
+      transferMethodOverride: approveDto.transferMethod,
+      adminId,
+      adminNotes: approveDto.adminNotes,
+      keepPendingOnFailure: false,
+    });
 
-      if (!withdrawal) {
-        throw new NotFoundException('Solicitação de saque não encontrada');
-      }
-
-      if (withdrawal.status !== 'pending') {
-        throw new BadRequestException('Solicitação já foi processada');
-      }
-
-      // Buscar perfil financeiro do personal
-      const financialProfile = await this.db.query.financialProfiles.findFirst({
-        where: eq(users.id, withdrawal.userId),
-      });
-
-      if (!financialProfile) {
-        throw new BadRequestException('Perfil financeiro não encontrado');
-      }
-
-      // Preparar dados para transferência
-      const transferMethod = approveDto.transferMethod || withdrawal.method;
-      const personalData = this.preparePersonalDataForTransfer(
-        financialProfile,
-        transferMethod,
+    if (!result.success || !result.withdrawal) {
+      throw new BadRequestException(
+        result.error || 'Erro ao processar transferência do saque',
       );
-
-      // Processar transferência real
-      const transferResult = await this.processRealTransfer(
-        {
-          personalId: withdrawal.userId,
-          amount: parseFloat(withdrawal.amount),
-          description: withdrawal.description || 'Saque aprovado',
-          transferMethod,
-          personalData,
-        },
-        adminId,
-      );
-
-      if (!transferResult.success) {
-        throw new BadRequestException(
-          `Erro na transferência: ${transferResult.error}`,
-        );
-      }
-
-      // Atualizar status da solicitação
-      const [updatedWithdrawal] = await this.db
-        .update(withdrawalRequests)
-        .set({
-          status: 'approved',
-          adminNotes: approveDto.adminNotes,
-          mpTransferId: transferResult.transferId,
-          processedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(withdrawalRequests.id, approveDto.withdrawalId))
-        .returning();
-
-      // Criar histórico
-      await this.createWithdrawalHistory({
-        withdrawalId: withdrawal.id,
-        userId: withdrawal.userId,
-        action: 'approved',
-        description: 'Saque aprovado e transferência processada',
-        adminId,
-        metadata: {
-          transferId: transferResult.transferId,
-          transferMethod,
-        },
-      });
-
-      console.log(
-        `✅ [ADMIN] Saque aprovado e transferência processada: ${transferResult.transferId}`,
-      );
-
-      return this.formatWithdrawalResponse(updatedWithdrawal);
-    } catch (error) {
-      console.error(`❌ [ADMIN] Erro ao aprovar saque:`, error);
-      throw error;
     }
+
+    return this.formatWithdrawalResponse(result.withdrawal);
   }
 
   // Rejeitar solicitação de saque (admin)
@@ -2002,12 +1931,193 @@ export class PaymentsService {
         };
       case 'bank_transfer':
         return {
-          bankAccount: financialProfile.bankAccount,
+          bankAccount:
+            financialProfile.bankCode &&
+            financialProfile.accountNumber &&
+            financialProfile.agency
+              ? {
+                  bank: financialProfile.bankName || financialProfile.bankCode,
+                  agency: financialProfile.agency,
+                  account: financialProfile.accountNumber,
+                  accountType: financialProfile.accountType,
+                }
+              : undefined,
         };
+      case 'mercado_pago':
       case 'mercadopago_balance':
         return {
-          mpAccountId: financialProfile.mercadoPagoAccount?.accountId,
+          mpAccountId: financialProfile.mpUserId,
         };
+      default:
+        throw new Error('Método de transferência inválido');
+    }
+  }
+
+  async processWithdrawalPayout(
+    withdrawalId: string,
+    options?: {
+      transferMethodOverride?: string;
+      adminId?: string;
+      adminNotes?: string;
+      initiatedBy?: string;
+      keepPendingOnFailure?: boolean;
+    },
+  ): Promise<{
+    success: boolean;
+    withdrawal?: any;
+    error?: string;
+    transferId?: string;
+  }> {
+    try {
+      const withdrawal = await this.db.query.withdrawalRequests.findFirst({
+        where: eq(withdrawalRequests.id, withdrawalId),
+        with: {
+          user: true,
+        },
+      });
+
+      if (!withdrawal) {
+        throw new NotFoundException('Solicitação de saque não encontrada');
+      }
+
+      if (withdrawal.status !== 'pending' && withdrawal.status !== 'processing') {
+        throw new BadRequestException('Solicitação já foi processada');
+      }
+
+      const financialProfile = await this.db.query.financialProfiles.findFirst({
+        where: eq(financialProfiles.userId, withdrawal.userId),
+      });
+
+      if (!financialProfile) {
+        throw new BadRequestException('Perfil financeiro não encontrado');
+      }
+
+      const requestedAmount = parseFloat(withdrawal.amount);
+      const netAmount = parseFloat(withdrawal.netAmount);
+      const transferMethod = this.normalizeWithdrawalTransferMethod(
+        options?.transferMethodOverride || withdrawal.method,
+      );
+      const personalData = this.preparePersonalDataForTransfer(
+        financialProfile,
+        transferMethod,
+      );
+
+      await this.db
+        .update(withdrawalRequests)
+        .set({
+          status: 'processing',
+          updatedAt: new Date(),
+          processedAt: new Date(),
+          failureReason: null,
+        })
+        .where(eq(withdrawalRequests.id, withdrawalId));
+
+      const transferResult = await this.mercadoPagoService.transferToPersonal({
+        personalId: withdrawal.userId,
+        amount: netAmount,
+        description: withdrawal.description || 'Saque processado',
+        transferMethod,
+        personalData,
+      });
+
+      if (!transferResult.success) {
+        const fallbackStatus = options?.keepPendingOnFailure
+          ? 'pending'
+          : 'failed';
+
+        const [failedWithdrawal] = await this.db
+          .update(withdrawalRequests)
+          .set({
+            status: fallbackStatus,
+            failureReason: transferResult.error,
+            updatedAt: new Date(),
+          })
+          .where(eq(withdrawalRequests.id, withdrawalId))
+          .returning();
+
+        await this.createWithdrawalHistory({
+          withdrawalId,
+          userId: withdrawal.userId,
+          action: options?.keepPendingOnFailure ? 'auto_failed_pending' : 'failed',
+          description: options?.keepPendingOnFailure
+            ? 'Tentativa automática falhou e o saque permaneceu pendente para análise manual'
+            : 'Falha ao processar saque',
+          adminId: options?.adminId,
+          metadata: {
+            error: transferResult.error,
+            transferMethod,
+            initiatedBy: options?.initiatedBy || 'admin',
+          },
+        });
+
+        return {
+          success: false,
+          withdrawal: failedWithdrawal,
+          error: transferResult.error,
+        };
+      }
+
+      const wallet = await this.getUserWallet(withdrawal.userId);
+      await this.updateWallet(withdrawal.userId, {
+        pendingBalance: wallet.pendingBalance - requestedAmount,
+        totalWithdrawn: wallet.totalWithdrawn + requestedAmount,
+      });
+
+      const [updatedWithdrawal] = await this.db
+        .update(withdrawalRequests)
+        .set({
+          status: 'completed',
+          adminNotes: options?.adminNotes,
+          mpTransferId: transferResult.transferId,
+          transactionId: transferResult.transferId,
+          processedAt: withdrawal.processedAt || new Date(),
+          completedAt: new Date(),
+          updatedAt: new Date(),
+          failureReason: null,
+        })
+        .where(eq(withdrawalRequests.id, withdrawalId))
+        .returning();
+
+      await this.createWithdrawalHistory({
+        withdrawalId,
+        userId: withdrawal.userId,
+        action: options?.adminId ? 'approved' : 'auto_completed',
+        description: options?.adminId
+          ? 'Saque aprovado e pago pelo painel admin'
+          : 'Saque processado automaticamente',
+        adminId: options?.adminId,
+        metadata: {
+          transferId: transferResult.transferId,
+          transferMethod,
+          requestedAmount,
+          netAmount,
+          initiatedBy: options?.initiatedBy || 'admin',
+        },
+      });
+
+      return {
+        success: true,
+        withdrawal: updatedWithdrawal,
+        transferId: transferResult.transferId,
+      };
+    } catch (error) {
+      console.error(`❌ [WITHDRAWAL] Erro ao processar saque ${withdrawalId}:`, error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  private normalizeWithdrawalTransferMethod(method: string): 'pix' | 'bank_transfer' | 'mercadopago_balance' {
+    switch (method) {
+      case 'mercado_pago':
+      case 'mercadopago_balance':
+        return 'mercadopago_balance';
+      case 'pix':
+        return 'pix';
+      case 'bank_transfer':
+        return 'bank_transfer';
       default:
         throw new Error('Método de transferência inválido');
     }

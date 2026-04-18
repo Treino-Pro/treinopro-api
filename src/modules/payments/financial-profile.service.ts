@@ -9,6 +9,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import {
   financialProfiles,
   withdrawalRequests,
+  withdrawalHistory,
   userWallets,
   users,
 } from '../../database/schema';
@@ -24,10 +25,14 @@ import {
   PaymentMethod,
   AccountType,
 } from './dto/financial-profile.dto';
+import { PaymentsService } from './payments.service';
 
 @Injectable()
 export class FinancialProfileService {
-  constructor(@Inject('DATABASE_CONNECTION') private db: any) {}
+  constructor(
+    @Inject('DATABASE_CONNECTION') private db: any,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   // Buscar perfil financeiro do usuário
   async getFinancialProfile(
@@ -281,8 +286,16 @@ export class FinancialProfileService {
     userId: string,
     withdrawalDto: WithdrawalRequestDto,
   ): Promise<WithdrawalHistoryDto> {
-    // Verificar perfil financeiro
-    const profile = await this.getFinancialProfile(userId);
+    // Verificar perfil financeiro bruto para usar os dados reais na transferência
+    const rawProfile = await this.db.query.financialProfiles.findFirst({
+      where: eq(financialProfiles.userId, userId),
+    });
+
+    if (!rawProfile) {
+      throw new NotFoundException('Perfil financeiro não encontrado');
+    }
+
+    const profile = this.formatProfileResponse(rawProfile);
     if (!profile.canReceivePayments) {
       throw new BadRequestException(
         'Perfil financeiro incompleto. Configure seus dados primeiro.',
@@ -335,6 +348,21 @@ export class FinancialProfileService {
       })
       .returning();
 
+    await this.db.insert(withdrawalHistory).values({
+      withdrawalId: withdrawalRequest.id,
+      userId,
+      action: 'requested',
+      description: 'Saque solicitado pelo aplicativo',
+      metadata: {
+        method: withdrawalDto.method,
+        amount: requestedAmount,
+        fee,
+        netAmount,
+        requestedAt: new Date().toISOString(),
+      },
+      createdAt: new Date(),
+    });
+
     // Atualizar saldo da carteira (reservar o valor)
     await this.db
       .update(userWallets)
@@ -347,7 +375,41 @@ export class FinancialProfileService {
       })
       .where(eq(userWallets.userId, userId));
 
-    return this.formatWithdrawalResponse(withdrawalRequest);
+    const transferMethod =
+      withdrawalDto.method === PaymentMethod.MERCADO_PAGO
+        ? 'mercadopago_balance'
+        : withdrawalDto.method === PaymentMethod.BANK_TRANSFER
+          ? 'bank_transfer'
+          : 'bank_transfer';
+
+    const autoResult = await this.paymentsService.processWithdrawalPayout(
+      withdrawalRequest.id,
+      {
+        transferMethodOverride: transferMethod,
+        initiatedBy: 'system:auto_withdrawal',
+        keepPendingOnFailure: true,
+      },
+    );
+
+    if (autoResult.success && autoResult.withdrawal) {
+      return {
+        ...this.formatWithdrawalResponse(autoResult.withdrawal),
+        autoProcessed: true,
+      } as WithdrawalHistoryDto & { autoProcessed: boolean };
+    }
+
+    const pendingWithdrawal = await this.db.query.withdrawalRequests.findFirst({
+      where: eq(withdrawalRequests.id, withdrawalRequest.id),
+    });
+
+    return {
+      ...this.formatWithdrawalResponse(pendingWithdrawal || withdrawalRequest),
+      autoProcessed: false,
+      pendingManualApproval: true,
+    } as WithdrawalHistoryDto & {
+      autoProcessed: boolean;
+      pendingManualApproval: boolean;
+    };
   }
 
   // Calcular taxa de saque

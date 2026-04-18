@@ -222,6 +222,7 @@
     <button class="nav-btn active" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="nav-btn" onclick="switchTab('users')">Usuários</button>
     <button class="nav-btn" onclick="switchTab('classes')">Aulas</button>
+    <button class="nav-btn" onclick="switchTab('withdrawals')">Saques</button>
     <button class="nav-btn" onclick="switchTab('disputes')">Disputas</button>
   </div>
 
@@ -270,6 +271,25 @@
       </div>
 
       <div id="classes-content"><div class="loading">Carregando...</div></div>
+    </div>
+
+    <!-- ===== SAQUES ===== -->
+    <div class="section" id="sec-withdrawals">
+      <div class="section-title">Saques</div>
+      <div class="section-sub">Acompanhe solicitações pendentes e aprove ou rejeite transferências manuais.</div>
+
+      <div style="display:flex;gap:12px;margin-bottom:20px">
+        <select id="withdrawal-status-filter" class="select" onchange="loadWithdrawals()">
+          <option value="pending">Pendentes</option>
+          <option value="processing">Em processamento</option>
+          <option value="completed">Concluídos</option>
+          <option value="failed">Falhos</option>
+          <option value="cancelled">Cancelados</option>
+        </select>
+        <button class="btn btn-ghost" onclick="loadWithdrawals()">Atualizar</button>
+      </div>
+
+      <div id="withdrawals-content"><div class="loading">Carregando...</div></div>
     </div>
 
     <!-- ===== DISPUTAS ===== -->
@@ -411,7 +431,7 @@
   function switchTab(tab) {
     currentTab = tab;
     document.querySelectorAll('.nav-btn').forEach((b, i) => {
-      const tabs = ['dashboard', 'users', 'classes', 'disputes'];
+      const tabs = ['dashboard', 'users', 'classes', 'withdrawals', 'disputes'];
       b.classList.toggle('active', tabs[i] === tab);
     });
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -420,6 +440,7 @@
     if (tab === 'dashboard') loadDashboard();
     if (tab === 'users') loadUsers();
     if (tab === 'classes') loadClasses();
+    if (tab === 'withdrawals') loadWithdrawals();
     if (tab === 'disputes') loadDisputes();
   }
 
@@ -670,6 +691,94 @@
     if (s === 'active') return 'review';
     if (s === 'no_show_dispute') return 'pending';
     return 'pending';
+  }
+
+  // ===== WITHDRAWALS =====
+  async function loadWithdrawals() {
+    const contentEl = document.getElementById('withdrawals-content');
+    contentEl.innerHTML = '<div class="loading">Carregando...</div>';
+
+    const status = document.getElementById('withdrawal-status-filter').value;
+    const { ok, data } = await api(`/admin/withdrawals?status=${encodeURIComponent(status)}&limit=100`);
+    if (!ok) { contentEl.innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro'}</div>`; return; }
+
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (!items.length) {
+      contentEl.innerHTML = '<div class="card"><div class="empty">Nenhum saque encontrado para este filtro.</div></div>';
+      return;
+    }
+
+    const rows = items.map(w => `
+      <tr>
+        <td><code style="font-size:11px;color:var(--text-muted)">${(w.id || '').slice(0,8)}…</code></td>
+        <td>
+          <div style="font-weight:600">${w.user?.name || '—'}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${w.user?.email || '—'}</div>
+        </td>
+        <td>R$ ${Number(w.amount || 0).toFixed(2)}</td>
+        <td>R$ ${Number(w.netAmount || 0).toFixed(2)}</td>
+        <td>${w.method || '—'}</td>
+        <td><span class="badge badge-${withdrawalBadge(w.status)}">${w.status || '—'}</span></td>
+        <td><div style="max-width:220px;font-size:12px;color:var(--text-muted)">${w.rejectionReason || w.adminNotes || '—'}</div></td>
+        <td>
+          <div class="actions">
+            ${w.status === 'pending' ? `
+              <button class="btn btn-success" onclick="approveWithdrawal('${w.id}')">Aprovar</button>
+              <button class="btn btn-danger" onclick="rejectWithdrawal('${w.id}')">Rejeitar</button>
+            ` : '—'}
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    contentEl.innerHTML = `
+      <div class="card">
+        <table>
+          <thead><tr><th>ID</th><th>Usuário</th><th>Valor</th><th>Líquido</th><th>Método</th><th>Status</th><th>Observações</th><th>Ação</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function withdrawalBadge(status) {
+    if (status === 'completed') return 'approved';
+    if (status === 'failed' || status === 'cancelled') return 'rejected';
+    if (status === 'processing') return 'review';
+    return 'pending';
+  }
+
+  async function approveWithdrawal(id) {
+    const adminNotes = prompt('Notas administrativas para aprovação (opcional):', '') ?? '';
+    const { ok, data } = await api(`/admin/withdrawals/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ adminNotes, transferMethod: 'mercadopago_balance' }),
+    });
+
+    if (!ok) {
+      alert(data?.message || 'Erro ao aprovar saque');
+      return;
+    }
+
+    loadWithdrawals();
+  }
+
+  async function rejectWithdrawal(id) {
+    const reason = prompt('Motivo da rejeição:', '');
+    if (!reason) return;
+
+    const adminNotes = prompt('Notas adicionais (opcional):', '') ?? '';
+    const { ok, data } = await api(`/admin/withdrawals/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, adminNotes }),
+    });
+
+    if (!ok) {
+      alert(data?.message || 'Erro ao rejeitar saque');
+      return;
+    }
+
+    loadWithdrawals();
   }
 
   // Resolve a URL da imagem. Prioriza o endpoint autenticado /admin/files/:id
