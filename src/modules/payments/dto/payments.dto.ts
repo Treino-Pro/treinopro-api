@@ -766,9 +766,10 @@ export class ApproveWithdrawalDto {
   @ApiProperty({
     description: 'ID da solicitação de saque',
     example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
   })
+  @IsOptional()
   @IsUUID()
-  @IsNotEmpty()
   withdrawalId: string;
 
   @ApiProperty({
@@ -793,9 +794,10 @@ export class RejectWithdrawalDto {
   @ApiProperty({
     description: 'ID da solicitação de saque',
     example: '123e4567-e89b-12d3-a456-426614174000',
+    required: false,
   })
+  @IsOptional()
   @IsUUID()
-  @IsNotEmpty()
   withdrawalId: string;
 
   @ApiProperty({
