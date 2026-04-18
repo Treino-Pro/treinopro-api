@@ -458,6 +458,25 @@ export class ClassesService {
             'Aula concluída',
           );
 
+          let externalPayoutResult:
+            | {
+                attempted: boolean;
+                success: boolean;
+                skipped?: boolean;
+                reason?: string;
+                transferId?: string;
+                error?: string;
+              }
+            | null = null;
+
+          if (payment.proposalId) {
+            externalPayoutResult = await this.triggerPixProposalSplit(
+              id,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
+
           // Enviar notificação push e in-app para personal sobre repasse
           const personalAmount = Number(payment.personalAmount || 0);
 
@@ -498,15 +517,30 @@ export class ClassesService {
             );
           }
 
-          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
-          // Para propostas pagas via PIX, o split não é automático no MP e deve
-          // ser disparado manualmente via MP Transfers após a aula.
-          if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
-              id,
-              payment.proposalId,
-              classData.personalId,
-            );
+          if (
+            externalPayoutResult?.attempted &&
+            !externalPayoutResult.success
+          ) {
+            try {
+              await this.notificationsService.sendInAppNotification(
+                userId,
+                'generic',
+                {
+                  type: 'external_payout_pending',
+                  classId: id,
+                  amount: personalAmount.toFixed(2),
+                  message:
+                    'O saldo foi liberado na sua carteira TreinoPro, mas o repasse externo ao Mercado Pago ficou pendente.',
+                  externalPayoutError:
+                    externalPayoutResult.error || 'unknown_error',
+                },
+              );
+            } catch (error) {
+              console.error(
+                '❌ [COMPLETE_CLASS] Erro ao notificar pendência de repasse externo:',
+                error,
+              );
+            }
           }
         } else if (payment.status === 'captured') {
           // Já capturado: split e carteira devem ter sido aplicados no fluxo de pagamentos (webhook/capture)
@@ -1036,7 +1070,14 @@ export class ClassesService {
     classId: string,
     proposalId: string,
     personalId: string,
-  ): Promise<void> {
+  ): Promise<{
+    attempted: boolean;
+    success: boolean;
+    skipped?: boolean;
+    reason?: string;
+    transferId?: string;
+    error?: string;
+  } | null> {
     try {
       const proposal = await this.db.query.proposals.findFirst({
         where: eq(proposals.id, proposalId),
@@ -1050,7 +1091,12 @@ export class ClassesService {
 
       if (!proposal) {
         console.log(`⚠️ [SPLIT PIX] Proposta ${proposalId} não encontrada`);
-        return;
+        return {
+          attempted: false,
+          success: false,
+          skipped: true,
+          reason: 'proposal_not_found',
+        };
       }
 
       const { paymentId, paymentStatus, price } = proposal;
@@ -1061,7 +1107,12 @@ export class ClassesService {
         console.log(
           `⚠️ [SPLIT PIX] Proposta ${proposalId} sem pagamento PIX confirmado (status=${paymentStatus}, paymentId=${paymentId}) — split pulado`,
         );
-        return;
+        return {
+          attempted: false,
+          success: false,
+          skipped: true,
+          reason: 'payment_not_confirmed',
+        };
       }
 
       const isSimulated =
@@ -1072,7 +1123,12 @@ export class ClassesService {
         console.log(
           `🧪 [SPLIT PIX] Pagamento simulado (${paymentId}) — split externo pulado`,
         );
-        return;
+        return {
+          attempted: false,
+          success: false,
+          skipped: true,
+          reason: 'simulated_payment',
+        };
       }
 
       const platformFeePercentage =
@@ -1086,7 +1142,7 @@ export class ClassesService {
         `💸 [SPLIT PIX] Aula ${classId}: repassando R$${personalAmount} ao personal ${personalId}`,
       );
 
-      await this.paymentsService.transferPixSplitToPersonal({
+      return await this.paymentsService.transferPixSplitToPersonal({
         personalId,
         amount: personalAmount,
         classId,
@@ -1097,7 +1153,11 @@ export class ClassesService {
         `❌ [SPLIT PIX] Erro ao acionar repasse PIX para proposta ${proposalId}:`,
         error,
       );
-      // Não propagar — não deve bloquear a conclusão da aula
+      return {
+        attempted: true,
+        success: false,
+        error: error.message,
+      };
     }
   }
 

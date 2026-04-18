@@ -21,6 +21,9 @@ const mockDb = {
       insert: jest.fn(),
       update: jest.fn(),
     },
+    financialProfiles: {
+      findFirst: jest.fn(),
+    },
     paymentDisputes: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -70,6 +73,7 @@ const mockMercadoPagoService = {
   capturePayment: jest.fn().mockResolvedValue({}),
   refundPayment: jest.fn().mockResolvedValue({}),
   cancelPayment: jest.fn().mockResolvedValue({}),
+  sendMpTransfer: jest.fn(),
 };
 
 describe('PaymentsService', () => {
@@ -176,6 +180,100 @@ describe('PaymentsService', () => {
       await expect(
         service.createPaymentPreference(createDto, 'personal-1'),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('transferPixSplitToPersonal', () => {
+    it('deve usar o token OAuth do personal e persistir o resultado do repasse externo', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValueOnce({
+        id: 'payment-1',
+        splitData: {},
+      });
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        userId: 'personal-1',
+        canReceivePayments: true,
+        mpUserId: '572503321',
+        mpAccessToken: 'APP_USR-oauth-personal',
+      });
+      mockMercadoPagoService.sendMpTransfer.mockResolvedValue({
+        success: true,
+        transferId: 'tx-123',
+      });
+
+      const setMock = jest.fn().mockReturnThis();
+      const whereMock = jest.fn().mockReturnThis();
+      const returningMock = jest.fn().mockResolvedValue([]);
+      mockDb.update.mockReturnValueOnce({
+        set: setMock,
+        where: whereMock,
+        returning: returningMock,
+      });
+
+      const result = await service.transferPixSplitToPersonal({
+        personalId: 'personal-1',
+        amount: 36,
+        classId: 'class-1',
+        proposalId: 'proposal-1',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          attempted: true,
+          success: true,
+          transferId: 'tx-123',
+          usedOAuthToken: true,
+        }),
+      );
+      expect(mockMercadoPagoService.sendMpTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accessToken: 'APP_USR-oauth-personal',
+          destinationMpUserId: '572503321',
+          amount: 36,
+          idempotencyKey: 'split_class-1_proposal-1',
+        }),
+      );
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          splitData: expect.objectContaining({
+            externalPayout: expect.objectContaining({
+              success: true,
+              transferId: 'tx-123',
+              usedOAuthToken: true,
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('deve pular novo envio quando o repasse externo já foi concluído', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValueOnce({
+        id: 'payment-1',
+        splitData: {
+          externalPayout: {
+            success: true,
+            transferId: 'tx-existing',
+            usedOAuthToken: true,
+          },
+        },
+      });
+
+      const result = await service.transferPixSplitToPersonal({
+        personalId: 'personal-1',
+        amount: 36,
+        classId: 'class-1',
+        proposalId: 'proposal-1',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          attempted: false,
+          success: true,
+          skipped: true,
+          reason: 'already_succeeded',
+          transferId: 'tx-existing',
+        }),
+      );
+      expect(mockMercadoPagoService.sendMpTransfer).not.toHaveBeenCalled();
     });
   });
 

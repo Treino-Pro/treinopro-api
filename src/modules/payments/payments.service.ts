@@ -106,7 +106,69 @@ export class PaymentsService {
     amount: number;
     classId: string;
     proposalId: string;
-  }): Promise<void> {
+  }): Promise<{
+    attempted: boolean;
+    success: boolean;
+    skipped?: boolean;
+    reason?: string;
+    transferId?: string;
+    error?: string;
+    usedOAuthToken?: boolean;
+  }> {
+    const paymentRecord = await this.db.query.payments.findFirst({
+      where: (payment: any, { eq }: any) =>
+        eq(payment.proposalId, data.proposalId),
+      columns: {
+        id: true,
+        splitData: true,
+      },
+    });
+
+    const persistExternalPayoutResult = async (result: Record<string, any>) => {
+      if (!paymentRecord?.id) return;
+
+      const currentSplitData =
+        paymentRecord.splitData && typeof paymentRecord.splitData === 'object'
+          ? paymentRecord.splitData
+          : {};
+      const previousExternalPayout =
+        currentSplitData.externalPayout &&
+        typeof currentSplitData.externalPayout === 'object'
+          ? currentSplitData.externalPayout
+          : {};
+
+      await this.db
+        .update(payments)
+        .set({
+          splitData: {
+            ...currentSplitData,
+            externalPayout: {
+              ...previousExternalPayout,
+              ...result,
+              classId: data.classId,
+              proposalId: data.proposalId,
+              personalId: data.personalId,
+              amount: Number(data.amount.toFixed(2)),
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(payments.id, paymentRecord.id));
+    };
+
+    const existingExternalPayout = paymentRecord?.splitData?.externalPayout;
+    if (existingExternalPayout?.success) {
+      return {
+        attempted: false,
+        success: true,
+        skipped: true,
+        reason: 'already_succeeded',
+        transferId: existingExternalPayout.transferId,
+        usedOAuthToken: Boolean(existingExternalPayout.usedOAuthToken),
+      };
+    }
+
     try {
       const financialProfile =
         await this.db.query.financialProfiles.findFirst({
@@ -114,36 +176,65 @@ export class PaymentsService {
         });
 
       if (!financialProfile?.canReceivePayments || !financialProfile.mpUserId) {
+        const result = {
+          attempted: false,
+          success: false,
+          skipped: true,
+          reason: 'missing_mp_account',
+          error:
+            'Personal não tem conta Mercado Pago OAuth vinculada para repasse externo',
+          usedOAuthToken: false,
+        };
         console.warn(
           `⚠️ [SPLIT PIX] Personal ${data.personalId} não tem conta MP vinculada — repasse externo pulado (carteira interna mantida)`,
         );
-        return;
+        await persistExternalPayoutResult(result);
+        return result;
       }
 
       const idempotencyKey = `split_${data.classId}_${data.proposalId}`;
       const result = await this.mercadoPagoService.sendMpTransfer({
+        accessToken: financialProfile.mpAccessToken || undefined,
         destinationMpUserId: financialProfile.mpUserId,
-        pixKey: financialProfile.pixKey,
         amount: data.amount,
         idempotencyKey,
         description: `Repasse TreinoPro: Aula ${data.classId.substring(0, 8)}`,
       });
 
+      const normalizedResult = {
+        attempted: true,
+        success: result.success,
+        transferId: result.transferId,
+        error: result.error,
+        usedOAuthToken: Boolean(financialProfile.mpAccessToken),
+      };
+
+      await persistExternalPayoutResult(normalizedResult);
+
       if (result.success) {
         console.log(
           `✅ [SPLIT PIX] Repasse de R$${data.amount.toFixed(2)} enviado para personal ${data.personalId} (transferId=${result.transferId})`,
         );
+        return normalizedResult;
       } else {
         console.error(
           `❌ [SPLIT PIX] Falha no repasse para personal ${data.personalId}: ${result.error}`,
         );
+        return normalizedResult;
       }
     } catch (error) {
+      const result = {
+        attempted: true,
+        success: false,
+        error: error.message,
+        usedOAuthToken: false,
+      };
       console.error(
         `❌ [SPLIT PIX] Erro inesperado ao transferir repasse:`,
         error,
       );
-      // Não propagar erro — não deve bloquear a conclusão da aula
+      await persistExternalPayoutResult(result);
+      return result;
     }
   }
 

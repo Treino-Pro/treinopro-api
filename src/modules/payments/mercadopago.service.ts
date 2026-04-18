@@ -1235,8 +1235,9 @@ export class MercadoPagoService {
     amount: number;
     idempotencyKey: string;
     description?: string;
+    accessToken?: string;
   }): Promise<{ success: boolean; transferId?: string; error?: string }> {
-    const accessToken = process.env.MP_ACCESS_TOKEN;
+    const accessToken = data.accessToken || process.env.MP_ACCESS_TOKEN;
     if (!accessToken) {
       return { success: false, error: 'MP_ACCESS_TOKEN não configurado' };
     }
@@ -1251,7 +1252,7 @@ export class MercadoPagoService {
 
     try {
       this.logger.log(
-        `💸 [MP PAYOUT] Iniciando repasse de R$${data.amount} para ${data.pixKey ? `PIX: ${data.pixKey}` : `MP User: ${data.destinationMpUserId}`}`,
+        `💸 [MP PAYOUT] Iniciando repasse de R$${data.amount} para ${data.pixKey ? `PIX: ${data.pixKey}` : `MP User: ${data.destinationMpUserId}`} (${data.accessToken ? 'OAuth seller token' : 'app token'})`,
       );
 
       const payoutPayload: any = {
