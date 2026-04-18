@@ -459,7 +459,7 @@ export class ClassesService {
           );
 
           // Enviar notificação push e in-app para personal sobre repasse
-          const personalAmount = payment.personalAmount || 0;
+          const personalAmount = Number(payment.personalAmount || 0);
 
           // 1. Push Notification
           try {
@@ -497,11 +497,30 @@ export class ClassesService {
               error,
             );
           }
+
+          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
+          // Para propostas pagas via PIX, o split não é automático no MP e deve
+          // ser disparado manualmente via MP Transfers após a aula.
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              id,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
         } else if (payment.status === 'captured') {
           // Já capturado: split e carteira devem ter sido aplicados no fluxo de pagamentos (webhook/capture)
           console.log(
             'ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário',
           );
+          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              id,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
         } else {
           console.log(
             '⚠️ [COMPLETE_CLASS] Pagamento com status inesperado para repasse:',
@@ -712,10 +731,27 @@ export class ClassesService {
           console.log(
             '✅ [TIMER_EXPIRATION] Pagamento capturado e split aplicado via PaymentsService',
           );
+
+          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              classId,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
         } else if (payment.status === 'captured') {
           console.log(
             'ℹ️ [TIMER_EXPIRATION] Pagamento já capturado - nenhum repasse adicional necessário',
           );
+          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              classId,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
         }
       } else {
         console.log(
@@ -1838,6 +1874,24 @@ export class ClassesService {
             classId,
             'Disputa resolvida: aluno confirmou ausência',
           );
+
+          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              classId,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
+        } else if (payment && payment.status === 'captured') {
+          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          if (payment.proposalId) {
+            await this.triggerPixProposalSplit(
+              classId,
+              payment.proposalId,
+              classData.personalId,
+            );
+          }
         } else if (!payment && classData.proposalId) {
           await this.triggerPixProposalSplit(
             classId,

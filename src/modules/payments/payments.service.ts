@@ -956,14 +956,36 @@ export class PaymentsService {
     if (payment.mpPaymentId) {
       try {
         console.log(
-          '💳 [CAPTURE_AFTER_CLASS] Capturando pagamento no Mercado Pago:',
+          '💳 [CAPTURE_AFTER_CLASS] Buscando status real do pagamento no Mercado Pago:',
           payment.mpPaymentId,
         );
-        await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
-        console.log(
-          `✅ [CAPTURE_AFTER_CLASS] Captura processada no MP: ${payment.mpPaymentId}`,
+        const mpPayment = await this.mercadoPagoService.getPayment(
+          payment.mpPaymentId,
         );
-        mpCaptureSuccess = true;
+        const mpStatus = mpPayment?.status;
+
+        if (mpStatus === 'authorized' || mpStatus === 'pending') {
+          console.log(
+            '💳 [CAPTURE_AFTER_CLASS] Capturando pagamento no Mercado Pago:',
+            payment.mpPaymentId,
+          );
+          await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
+          console.log(
+            `✅ [CAPTURE_AFTER_CLASS] Captura processada no MP: ${payment.mpPaymentId}`,
+          );
+          mpCaptureSuccess = true;
+        } else if (mpStatus === 'approved') {
+          console.log(
+            `ℹ️ [CAPTURE_AFTER_CLASS] Pagamento MP ${payment.mpPaymentId} já está como 'approved'. Pulando captura.`,
+          );
+          mpCaptureSuccess = true;
+        } else {
+          console.warn(
+            `⚠️ [CAPTURE_AFTER_CLASS] Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Tentando captura padrão.`,
+          );
+          await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
+          mpCaptureSuccess = true;
+        }
       } catch (error) {
         console.error(
           `❌ [CAPTURE_AFTER_CLASS] Falha ao capturar no MP: ${error.message}`,
