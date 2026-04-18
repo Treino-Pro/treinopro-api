@@ -1287,21 +1287,31 @@ export class MercadoPagoService {
 
       const body = JSON.stringify(payoutPayload);
       const headers: any = {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken.substring(0, 15)}...`,
         'Content-Type': 'application/json',
         'X-Idempotency-Key': data.idempotencyKey,
       };
 
+      // ✅ LOG: Payload bruto
+      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Raw Body: ${body}`);
+
       // ✅ ASSINATURA DIGITAL (MANDATÓRIA PARA PAYOUTS EM PRODUÇÃO NO BRASIL)
       // O header X-Signature deve ser v1=HMAC-SHA256(body, client_secret)
       const clientSecret = process.env.MP_CLIENT_SECRET;
+      
+      this.logger.debug(`🔍 [MP PAYOUT DEBUG] Client Secret configurado: ${!!clientSecret} (Tamanho: ${clientSecret?.length || 0})`);
+
       if (clientSecret && !isTestEnv) {
         try {
           const hmac = createHmac('sha256', clientSecret)
             .update(body)
             .digest('hex');
-          headers['X-Signature'] = `v1=${hmac}`;
-          this.logger.log(`🔐 [MP PAYOUT] X-Signature gerada para repasse.`);
+          
+          const signatureHeader = `v1=${hmac}`;
+          headers['X-Signature'] = signatureHeader;
+          
+          this.logger.log(`🔐 [MP PAYOUT] X-Signature gerada: ${signatureHeader.substring(0, 15)}...`);
+          this.logger.debug(`🔍 [MP PAYOUT DEBUG] HMAC Input: body=${body} | secret_len=${clientSecret.length}`);
         } catch (signError) {
           this.logger.error(
             `❌ [MP PAYOUT] Erro ao gerar X-Signature: ${signError.message}`,
@@ -1313,9 +1323,20 @@ export class MercadoPagoService {
         );
       }
 
+      this.logger.log(`📤 [MP PAYOUT] Enviando POST para /v1/payouts...`);
+
+      // Criar headers reais para o fetch (sem máscara)
+      const fetchHeaders: any = {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': data.idempotencyKey,
+      };
+      if (headers['X-Signature'])
+        fetchHeaders['X-Signature'] = headers['X-Signature'];
+
       const response = await fetch('https://api.mercadopago.com/v1/payouts', {
         method: 'POST',
-        headers,
+        headers: fetchHeaders,
         body,
       });
 
