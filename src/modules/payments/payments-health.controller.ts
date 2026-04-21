@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
 import { ErrorHandlerService } from './error-handler.service';
 import { MercadoPagoService } from './mercadopago.service';
+import { StripeConnectService } from './stripe-connect.service';
 
 @Controller('payments/health')
 export class PaymentsHealthController {
@@ -9,6 +10,7 @@ export class PaymentsHealthController {
     private readonly webhooksService: WebhooksService,
     private readonly errorHandler: ErrorHandlerService,
     private readonly mercadoPagoService: MercadoPagoService,
+    private readonly stripeConnectService: StripeConnectService,
   ) {}
 
   @Get()
@@ -49,6 +51,18 @@ export class PaymentsHealthController {
   @Get('errors')
   async getErrorStats() {
     return this.errorHandler.getErrorStats();
+  }
+
+  @Get('stripe')
+  async getStripeHealth() {
+    return {
+      status: this.stripeConnectService.isConfigured()
+        ? 'healthy'
+        : 'unhealthy',
+      provider: 'stripe',
+      configured: this.stripeConnectService.isConfigured(),
+      lastCheck: new Date().toISOString(),
+    };
   }
 
   @Post('webhooks/:webhookId/retry')

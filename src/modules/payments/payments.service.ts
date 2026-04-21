@@ -76,6 +76,8 @@ export class PaymentsService {
     payerLastName?: string;
     payerCpf?: string;
     notificationUrl?: string;
+    sellerAccessToken?: string;
+    marketplaceFee?: number;
   }): Promise<{
     paymentId: string;
     status: string;
@@ -264,6 +266,7 @@ export class PaymentsService {
         classId: createDto.classId,
         studentId: userId,
         personalId: classData.personalId,
+        provider: 'mercado_pago',
         totalAmount: createDto.totalAmount.toString(),
         platformFee: platformFee.toString(),
         personalAmount: personalAmount.toString(),
@@ -1770,6 +1773,7 @@ export class PaymentsService {
       adminId,
       adminNotes: approveDto.adminNotes,
       keepPendingOnFailure: false,
+      skipPayoutProvider: true,
     });
 
     if (!result.success || !result.withdrawal) {
@@ -1973,6 +1977,11 @@ export class PaymentsService {
       adminNotes?: string;
       initiatedBy?: string;
       keepPendingOnFailure?: boolean;
+      /**
+       * Quando true, ignora a chamada ao provedor de payout (ex: admin que já
+       * transferiu manualmente ou pagamento já foi split via marketplace).
+       */
+      skipPayoutProvider?: boolean;
     },
   ): Promise<{
     success: boolean;
@@ -2050,17 +2059,29 @@ export class PaymentsService {
         })
         .where(eq(withdrawalRequests.id, withdrawalId));
 
-      const payoutResult = await this.withdrawalPayoutProvider.executePayout({
-        personalId: withdrawal.userId,
-        amount: netAmount,
-        description: withdrawal.description || 'Saque processado',
-        transferMethod,
-        personalData,
-        context: {
-          withdrawalId,
-          initiatedBy: options?.initiatedBy || 'admin',
-        },
-      });
+      let payoutResult: WithdrawalPayoutResult;
+
+      if (options?.skipPayoutProvider) {
+        // Admin aprovou manualmente (já transferiu via MP/banco) ou pagamento foi
+        // split e o dinheiro já está na conta do personal — sem chamada de API.
+        payoutResult = {
+          success: true,
+          provider: 'manual',
+          externalStatus: 'completed',
+        };
+      } else {
+        payoutResult = await this.withdrawalPayoutProvider.executePayout({
+          personalId: withdrawal.userId,
+          amount: netAmount,
+          description: withdrawal.description || 'Saque processado',
+          transferMethod,
+          personalData,
+          context: {
+            withdrawalId,
+            initiatedBy: options?.initiatedBy || 'admin',
+          },
+        });
+      }
 
       if (!payoutResult.success) {
         const fallbackStatus = options?.keepPendingOnFailure

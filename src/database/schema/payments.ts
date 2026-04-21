@@ -62,6 +62,13 @@ export const payments = pgTable('payments', {
   // Dados do Mercado Pago
   mpPaymentId: varchar('mp_payment_id', { length: 255 }), // ID do pagamento no MP
   mpPreferenceId: varchar('mp_preference_id', { length: 255 }), // ID da preferência
+  provider: varchar('provider', { length: 50 }),
+  stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }),
+  stripeChargeId: varchar('stripe_charge_id', { length: 255 }),
+  stripeTransferGroup: varchar('stripe_transfer_group', { length: 255 }),
+  stripeLatestChargeId: varchar('stripe_latest_charge_id', { length: 255 }),
+  stripeRefundId: varchar('stripe_refund_id', { length: 255 }),
+  processingModel: varchar('processing_model', { length: 100 }),
 
   // Valores
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
@@ -143,6 +150,12 @@ export const paymentTransactions = pgTable('payment_transactions', {
   // Dados do Mercado Pago
   mpTransactionId: varchar('mp_transaction_id', { length: 255 }),
   mpOperationId: varchar('mp_operation_id', { length: 255 }),
+  stripeTransferId: varchar('stripe_transfer_id', { length: 255 }),
+  stripeBalanceTransactionId: varchar('stripe_balance_transaction_id', {
+    length: 255,
+  }),
+  stripeRefundId: varchar('stripe_refund_id', { length: 255 }),
+  stripeDisputeId: varchar('stripe_dispute_id', { length: 255 }),
 
   // Status
   status: paymentStatusEnum('status').notNull(),
@@ -226,6 +239,14 @@ export const financialProfiles = pgTable('financial_profiles', {
   mpOauthState: varchar('mp_oauth_state', { length: 255 }).unique(), // State anti-CSRF (unique → índice automático)
   mpOauthStateCreatedAt: timestamp('mp_oauth_state_created_at'), // Quando o state foi gerado (TTL)
   mpIsVerified: boolean('mp_is_verified').default(false),
+  stripeAccountId: varchar('stripe_account_id', { length: 255 }),
+  stripeAccountMode: varchar('stripe_account_mode', { length: 100 }),
+  stripeOnboardingCompleted: boolean('stripe_onboarding_completed').default(
+    false,
+  ),
+  stripeChargesEnabled: boolean('stripe_charges_enabled').default(false),
+  stripePayoutsEnabled: boolean('stripe_payouts_enabled').default(false),
+  stripeDetailsSubmitted: boolean('stripe_details_submitted').default(false),
 
   // Status e validação
   verificationStatus: varchar('verification_status', { length: 20 }).default(
@@ -343,6 +364,7 @@ export const studentPaymentMethods = pgTable('student_payment_methods', {
   mpEmail: varchar('mp_email', { length: 255 }),
   mpIsVerified: boolean('mp_is_verified').default(false),
   mpAllowSaveCard: boolean('mp_allow_save_card').default(true),
+  stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
 
   // Status
   canMakePayments: boolean('can_make_payments').default(true).notNull(),
@@ -368,6 +390,7 @@ export const savedCards = pgTable('saved_cards', {
   mpCardToken: varchar('mp_card_token', { length: 255 }), // Token do MP
   mpCustomerId: varchar('mp_customer_id', { length: 255 }), // ID do customer no MP
   mpCardId: varchar('mp_card_id', { length: 255 }), // ID do cartão salvo no MP
+  stripePaymentMethodId: varchar('stripe_payment_method_id', { length: 255 }),
   cardBrand: cardBrandEnum('card_brand').notNull(),
   cardType: cardTypeEnum('card_type').notNull(),
   lastFourDigits: varchar('last_four_digits', { length: 4 }).notNull(),

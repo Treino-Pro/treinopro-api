@@ -407,6 +407,10 @@ export class MercadoPagoService {
     payerLastName?: string;
     payerCpf?: string;
     notificationUrl?: string;
+    /** Token OAuth do personal (seller). Quando presente, o split é aplicado automaticamente. */
+    sellerAccessToken?: string;
+    /** Valor em BRL que fica retido pela plataforma (marketplace_fee). */
+    marketplaceFee?: number;
   }): Promise<{
     paymentId: string;
     status: string;
@@ -469,6 +473,9 @@ export class MercadoPagoService {
       body.notification_url = pixData.notificationUrl;
     }
 
+    // marketplace_fee NÃO é suportado pelo MP para PIX.
+    // O split de routing funciona apenas pelo uso do token OAuth do seller.
+
     this.logger.log('🔍 [PIX] Payload sanitizado:', {
       transaction_amount: body.transaction_amount,
       payment_method_id: body.payment_method_id,
@@ -526,12 +533,24 @@ export class MercadoPagoService {
       idempotencyKey: string;
     } | null = null;
 
+    // Split marketplace: usa o token do seller se disponível (produção apenas)
+    const tokenToUse =
+      !isTestEnv && pixData.sellerAccessToken
+        ? pixData.sellerAccessToken
+        : accessToken;
+
+    if (pixData.sellerAccessToken && !isTestEnv) {
+      this.logger.log(
+        `💳 [PIX SPLIT] Usando token OAuth do seller — marketplace_fee=R$${pixData.marketplaceFee ?? 0}`,
+      );
+    }
+
     for (let index = 0; index < attempts.length; index++) {
       const idempotencyKey = attempts[index];
       const response = await fetch('https://api.mercadopago.com/v1/payments', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${tokenToUse}`,
           'Content-Type': 'application/json',
           'X-Idempotency-Key': idempotencyKey,
         },

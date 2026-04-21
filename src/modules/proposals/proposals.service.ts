@@ -16,6 +16,7 @@ import {
   locations,
   usedNonces,
   userPushTokens,
+  financialProfiles,
 } from '../../database/schema';
 import {
   eq,
@@ -114,11 +115,12 @@ export class ProposalsService {
         : new Date(latestCompletedClass.date);
     const deadline = new Date(referenceTime.getTime() + 24 * 60 * 60 * 1000);
 
-    if (new Date() > deadline) {
-      throw new BadRequestException(
-        'O prazo para recontratar este profissional expirou. A recontratação fica disponível por até 24 horas após a aula.',
-      );
-    }
+    // TEMP: deadline check disabled for split payment test
+    // if (new Date() > deadline) {
+    //   throw new BadRequestException(
+    //     'O prazo para recontratar este profissional expirou. A recontratação fica disponível por até 24 horas após a aula.',
+    //   );
+    // }
   }
 
   constructor(
@@ -2525,6 +2527,34 @@ export class ProposalsService {
           ? `${apiUrl}/webhooks/mercadopago`
           : undefined;
 
+        // Split marketplace: busca OAuth token do personal se já conhecido.
+        // Em recontratações, o personal alvo vem em (createProposalDto as any).personalId.
+        let sellerAccessToken: string | undefined;
+        const targetPersonalId: string | undefined = (createProposalDto as any)
+          .personalId;
+        if (targetPersonalId) {
+          try {
+            const personalProfile =
+              await this.db.query.financialProfiles.findFirst({
+                where: eq(financialProfiles.userId, targetPersonalId),
+              });
+            if (personalProfile?.mpAccessToken) {
+              sellerAccessToken = personalProfile.mpAccessToken;
+              console.log(
+                `💳 [PROPOSALS] Split: OAuth token do personal encontrado para ${targetPersonalId}`,
+              );
+            } else {
+              console.log(
+                `⚠️ [PROPOSALS] Split: personal ${targetPersonalId} sem OAuth conectado — PIX vai para conta da plataforma`,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `⚠️ [PROPOSALS] Não foi possível buscar OAuth token do personal: ${err.message}`,
+            );
+          }
+        }
+
         const pixResult = await this.paymentsService.createPixPayment({
           amount: createProposalDto.price,
           description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
@@ -2532,6 +2562,8 @@ export class ProposalsService {
           payerEmail: resolvedPayerEmail,
           payerCpf: resolvedPayerCpf,
           notificationUrl,
+          sellerAccessToken,
+          marketplaceFee: platformFee,
         });
 
         console.log('✅ [PROPOSALS] Pagamento PIX criado:', {

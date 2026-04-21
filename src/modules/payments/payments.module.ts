@@ -14,6 +14,7 @@ import { RefundsService } from './refunds.service';
 import { WebhooksService } from './webhooks.service';
 import { ErrorHandlerService } from './error-handler.service';
 import { PaymentSimulationService } from './payment-simulation.service';
+import { StripeConnectService } from './stripe-connect.service';
 import {
   MercadoPagoWithdrawalPayoutProvider,
   WITHDRAWAL_PAYOUT_PROVIDER,
@@ -36,6 +37,7 @@ import {
     WebhooksService,
     ErrorHandlerService,
     PaymentSimulationService,
+    StripeConnectService,
     MercadoPagoWithdrawalPayoutProvider,
     {
       provide: WITHDRAWAL_PAYOUT_PROVIDER,
@@ -52,6 +54,7 @@ import {
     WebhooksService,
     ErrorHandlerService,
     PaymentSimulationService,
+    StripeConnectService,
     WITHDRAWAL_PAYOUT_PROVIDER,
   ],
 })

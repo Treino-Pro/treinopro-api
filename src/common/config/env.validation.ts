@@ -73,6 +73,39 @@ export class EnvironmentVariables {
   @IsString()
   MP_WEBHOOK_SECRET: string;
 
+  // Stripe
+  @IsString()
+  @IsOptional()
+  STRIPE_SECRET_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_PUBLISHABLE_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_WEBHOOK_SECRET?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_API_VERSION?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_CONNECT_API_VERSION?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_DEFAULT_CURRENCY?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_CONNECT_RETURN_URL?: string;
+
+  @IsString()
+  @IsOptional()
+  STRIPE_CONNECT_REFRESH_URL?: string;
+
   // Firebase Admin (push notifications)
   @IsString()
   @IsOptional()
