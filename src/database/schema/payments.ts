@@ -247,6 +247,7 @@ export const financialProfiles = pgTable('financial_profiles', {
   stripeChargesEnabled: boolean('stripe_charges_enabled').default(false),
   stripePayoutsEnabled: boolean('stripe_payouts_enabled').default(false),
   stripeDetailsSubmitted: boolean('stripe_details_submitted').default(false),
+  stripeRequirements: jsonb('stripe_requirements'),
 
   // Status e validação
   verificationStatus: varchar('verification_status', { length: 20 }).default(

@@ -16,6 +16,8 @@ interface CreateRecipientAccountInput {
   email: string;
   displayName?: string;
   country?: string;
+  givenName?: string;
+  familyName?: string;
   metadata?: Record<string, string>;
 }
 
@@ -50,6 +52,10 @@ interface CreateRefundInput {
   amount?: number;
   reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer';
   metadata?: Record<string, string>;
+}
+
+interface CreateEmbeddedOnboardingSessionInput {
+  accountId: string;
 }
 
 @Injectable()
@@ -93,6 +99,13 @@ export class StripeConnectService {
       dashboard: 'express',
       identity: {
         country: (input.country || 'BR').toLowerCase(),
+        individual:
+          input.givenName || input.familyName
+            ? {
+                given_name: input.givenName,
+                family_name: input.familyName,
+              }
+            : undefined,
       },
       configuration: {
         recipient: {
@@ -163,6 +176,21 @@ export class StripeConnectService {
         'Stripe-Version': this.connectApiVersion,
       },
     );
+  }
+
+  async createEmbeddedOnboardingSession(
+    input: CreateEmbeddedOnboardingSessionInput,
+  ): Promise<any> {
+    this.assertConfigured();
+
+    return this.requestForm('POST', '/v1/account_sessions', {
+      account: input.accountId,
+      components: {
+        account_onboarding: {
+          enabled: true,
+        },
+      },
+    });
   }
 
   async createEscrowPaymentIntent(

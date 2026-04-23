@@ -8,8 +8,11 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Public } from '../../common/decorators/public.decorator';
 import { WebhooksService } from './webhooks.service';
 import { MercadoPagoService } from './mercadopago.service';
+import { StripeWebhooksService } from './stripe-webhooks.service';
+import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 
 export interface WebhookPayload {
   id: number;
@@ -33,6 +36,8 @@ export class WebhooksController {
   constructor(
     private readonly webhooksService: WebhooksService,
     private readonly mercadoPagoService: MercadoPagoService,
+    private readonly stripeWebhooksService: StripeWebhooksService,
+    private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
   ) {}
 
   @Post('mercadopago')
@@ -71,6 +76,36 @@ export class WebhooksController {
       this.logger.error('❌ [WEBHOOK] Erro ao processar webhook:', error);
 
       // Retornar 200 mesmo com erro para evitar reenvios
+      return { status: 'error' } as any;
+    }
+  }
+
+  @Post('stripe')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async handleStripeWebhook(
+    @Body() rawBody: Buffer | string,
+    @Headers('stripe-signature') signature: string,
+  ): Promise<{ status: string }> {
+    try {
+      const payload =
+        rawBody instanceof Buffer
+          ? rawBody
+          : typeof rawBody === 'string'
+            ? rawBody
+            : JSON.stringify(rawBody || {});
+      const event = this.stripeWebhooksService.constructEvent(
+        payload,
+        signature,
+      );
+
+      if (event.type === 'account.updated') {
+        await this.stripeFinancialAccountsService.handleAccountUpdated(event);
+      }
+
+      return { status: 'success' };
+    } catch (error) {
+      this.logger.error('❌ [WEBHOOK][STRIPE] Erro ao processar webhook:', error);
       return { status: 'error' } as any;
     }
   }

@@ -13,6 +13,7 @@ async function bootstrap() {
   });
 
   // Aumentar limite do body parser para suportar uploads grandes (base64, etc.)
+  app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
   app.use(express.json({ limit: '1gb' }));
   app.use(express.urlencoded({ limit: '1gb', extended: true }));
 

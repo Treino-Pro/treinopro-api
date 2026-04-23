@@ -112,6 +112,20 @@ export class FinancialProfileResponseDto {
 
   // Status
   canReceivePayments: boolean; // Se pode receber pagamentos
+  stripeAccount?: {
+    accountId?: string;
+    onboardingCompleted: boolean;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    detailsSubmitted: boolean;
+    requirements: {
+      currentlyDue: string[];
+      eventuallyDue: string[];
+      pastDue: string[];
+      pendingVerification: string[];
+      disabledReason: string | null;
+    };
+  };
   lastUpdatedAt: Date;
   verifiedAt?: Date; // Data da verificação
 

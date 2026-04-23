@@ -26,12 +26,14 @@ import {
   AccountType,
 } from './dto/financial-profile.dto';
 import { PaymentsService } from './payments.service';
+import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 
 @Injectable()
 export class FinancialProfileService {
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly paymentsService: PaymentsService,
+    private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
   ) {}
 
   // Buscar perfil financeiro do usuário
@@ -302,6 +304,12 @@ export class FinancialProfileService {
       );
     }
 
+    if (!this.stripeFinancialAccountsService.isStripePayoutReady(rawProfile)) {
+      throw new BadRequestException(
+        'Conclua a configuracao financeira antes de solicitar saque.',
+      );
+    }
+
     // Verificar saldo disponível
     const wallet = await this.db.query.userWallets.findFirst({
       where: eq(userWallets.userId, userId),
@@ -508,6 +516,14 @@ export class FinancialProfileService {
 
   // Formatar resposta do perfil
   private formatProfileResponse(profile: any): FinancialProfileResponseDto {
+    const stripeRequirements = profile.stripeRequirements || {
+      currentlyDue: [],
+      eventuallyDue: [],
+      pastDue: [],
+      pendingVerification: [],
+      disabledReason: null,
+    };
+
     return {
       id: profile.id,
       userId: profile.userId,
@@ -532,6 +548,22 @@ export class FinancialProfileService {
           }
         : undefined,
       canReceivePayments: profile.canReceivePayments,
+      stripeAccount: profile.stripeAccountId
+        ? {
+            accountId: profile.stripeAccountId,
+            onboardingCompleted: Boolean(profile.stripeOnboardingCompleted),
+            chargesEnabled: Boolean(profile.stripeChargesEnabled),
+            payoutsEnabled: Boolean(profile.stripePayoutsEnabled),
+            detailsSubmitted: Boolean(profile.stripeDetailsSubmitted),
+            requirements: {
+              currentlyDue: stripeRequirements.currentlyDue || [],
+              eventuallyDue: stripeRequirements.eventuallyDue || [],
+              pastDue: stripeRequirements.pastDue || [],
+              pendingVerification: stripeRequirements.pendingVerification || [],
+              disabledReason: stripeRequirements.disabledReason ?? null,
+            },
+          }
+        : undefined,
       lastUpdatedAt: profile.lastUpdatedAt,
       verifiedAt: profile.verifiedAt,
       createdAt: profile.createdAt,

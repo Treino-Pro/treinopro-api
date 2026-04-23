@@ -25,6 +25,8 @@ Estas sao as migrations oficiais executadas pelo `drizzle-kit migrate`:
 | 14  | 0014_slim_serpent_society          | 0014_slim_serpent_society.sql     |
 | 15  | 0015_ensure_user_push_tokens_token_unique | 0015_ensure_user_push_tokens_token_unique.sql |
 | 16  | 0016_backfill_user_push_tokens            | 0016_backfill_user_push_tokens.sql            |
+| 17  | 0017_stripe_columns                       | 0017_stripe_columns.sql                       |
+| 18  | 0018_stripe_financial_profile_requirements | 0018_stripe_financial_profile_requirements.sql |
 
 ## Scripts manuais (aplicados fora do Drizzle, NAO reexecutar)
 

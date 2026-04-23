@@ -21,6 +21,7 @@ import { MercadoPagoService } from './mercadopago.service';
 import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { PaymentsService } from './payments.service';
 import { FinancialProfileService } from './financial-profile.service';
+import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 import { WithdrawalRequestDto } from './dto/financial-profile.dto';
 import { PaymentStatus } from './dto/payments.dto';
 import { db } from '../../database/connection';
@@ -54,6 +55,7 @@ export class PaymentsController {
     private readonly mercadoPagoOAuthService: MercadoPagoOAuthService,
     private readonly paymentsService: PaymentsService,
     private readonly financialProfileService: FinancialProfileService,
+    private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
   ) {}
 
   // ===== STUDENT PAYMENT METHODS =====
@@ -783,5 +785,31 @@ export class PaymentsController {
       console.error(`❌ [FINANCIAL_PROFILE] Erro ao atualizar perfil:`, error);
       throw new BadRequestException('Erro ao atualizar perfil financeiro');
     }
+  }
+
+  @Post('profile/financial/stripe/account')
+  @UseGuards(JwtAuthGuard)
+  async ensureStripeConnectedAccount(@Request() req) {
+    const userId = req.user.sub;
+
+    return {
+      success: true,
+      data: await this.stripeFinancialAccountsService.ensureConnectedAccount(
+        userId,
+      ),
+    };
+  }
+
+  @Post('profile/financial/stripe/account-session')
+  @UseGuards(JwtAuthGuard)
+  async createStripeEmbeddedOnboardingSession(@Request() req) {
+    const userId = req.user.sub;
+
+    return {
+      success: true,
+      data: await this.stripeFinancialAccountsService.createEmbeddedOnboardingSession(
+        userId,
+      ),
+    };
   }
 }
