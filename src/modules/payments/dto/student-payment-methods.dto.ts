@@ -72,6 +72,28 @@ export class SaveCardDto {
   setAsDefault?: boolean; // Definir como padrão
 }
 
+export class ConfirmStripeSetupIntentDto {
+  @IsString()
+  @IsOptional()
+  setupIntentId?: string;
+
+  @IsString()
+  @IsOptional()
+  paymentMethodId?: string;
+
+  @IsEnum(CardType)
+  @IsOptional()
+  cardType?: CardType;
+
+  @IsString()
+  @IsOptional()
+  nickname?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  setAsDefault?: boolean;
+}
+
 // DTO para dados do Mercado Pago do aluno
 export class StudentMercadoPagoDto {
   @IsEmail()
@@ -200,6 +222,14 @@ export class ProcessClassPaymentDto {
 export class PaymentProcessResponseDto {
   success: boolean;
   paymentId: string;
+
+  provider?: string;
+  stripePaymentIntentId?: string;
+  clientSecret?: string;
+  customerId?: string;
+  customerEphemeralKeySecret?: string;
+  publishableKey?: string;
+  processingModel?: string;
 
   // Dados do Mercado Pago
   mpPreferenceId?: string;

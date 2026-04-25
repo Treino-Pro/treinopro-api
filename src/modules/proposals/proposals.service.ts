@@ -6,6 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import Stripe from 'stripe';
 import {
   proposals,
   users,
@@ -44,6 +45,7 @@ import { buildTrainingStartDate } from './proposals.utils';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
 import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
+import { StripePaymentIntentsService } from '../payments/stripe-payment-intents.service';
 import { JobsService } from '../jobs/jobs.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsGateway } from './proposals.gateway';
@@ -80,6 +82,41 @@ export class ProposalsService {
       return error.message;
     }
     return fallback;
+  }
+
+  private isStripeClientPaymentPending(paymentResult: any): boolean {
+    return (
+      paymentResult?.provider === 'stripe' &&
+      String(paymentResult?.status || '').toLowerCase() === 'pending' &&
+      Boolean(paymentResult?.clientSecret)
+    );
+  }
+
+  private getStripeLatestChargeId(
+    paymentIntent: Stripe.PaymentIntent,
+  ): string | null {
+    const latestCharge = paymentIntent.latest_charge;
+    if (!latestCharge) {
+      return null;
+    }
+
+    return typeof latestCharge === 'string' ? latestCharge : latestCharge.id;
+  }
+
+  private mapStripePaymentIntentStatus(paymentIntent: Stripe.PaymentIntent): {
+    proposalStatus: string;
+    paymentStatus: 'authorized' | 'pending' | 'cancelled';
+  } {
+    switch (paymentIntent.status) {
+      case 'succeeded':
+        return { proposalStatus: 'authorized', paymentStatus: 'authorized' };
+      case 'canceled':
+        return { proposalStatus: 'cancelled', paymentStatus: 'cancelled' };
+      case 'requires_payment_method':
+        return { proposalStatus: 'rejected', paymentStatus: 'cancelled' };
+      default:
+        return { proposalStatus: 'pending', paymentStatus: 'pending' };
+    }
   }
 
   private async ensureRecontractWindowIsOpen(
@@ -127,6 +164,7 @@ export class ProposalsService {
     @Inject('DATABASE_CONNECTION') private readonly db: any,
     private readonly studentPaymentService: StudentPaymentMethodsService,
     private readonly paymentsService: PaymentsService,
+    private readonly stripePaymentIntentsService: StripePaymentIntentsService,
     private readonly jobsService: JobsService,
     private readonly chatGateway: ChatGateway,
     private readonly proposalsGateway: ProposalsGateway,
@@ -408,7 +446,8 @@ export class ProposalsService {
       const isPix = createProposalDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode) ||
+        this.isStripeClientPaymentPending(paymentResult);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -506,6 +545,13 @@ export class ProposalsService {
           sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
           qrCode: paymentResult.qrCode,
           qrCodeBase64: paymentResult.qrCodeBase64,
+          provider: paymentResult.provider,
+          stripePaymentIntentId: paymentResult.stripePaymentIntentId,
+          clientSecret: paymentResult.clientSecret,
+          customerId: paymentResult.customerId,
+          customerEphemeralKeySecret: paymentResult.customerEphemeralKeySecret,
+          publishableKey: paymentResult.publishableKey,
+          processingModel: paymentResult.processingModel,
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
@@ -678,7 +724,8 @@ export class ProposalsService {
       const isPix = createRecontractDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode);
+        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode) ||
+        this.isStripeClientPaymentPending(paymentResult);
       const isSimulated = Boolean((paymentResult as any)?._simulated);
       const allowSimulated =
         process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
@@ -787,6 +834,13 @@ export class ProposalsService {
           sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
           qrCode: paymentResult.qrCode,
           qrCodeBase64: paymentResult.qrCodeBase64,
+          provider: paymentResult.provider,
+          stripePaymentIntentId: paymentResult.stripePaymentIntentId,
+          clientSecret: paymentResult.clientSecret,
+          customerId: paymentResult.customerId,
+          customerEphemeralKeySecret: paymentResult.customerEphemeralKeySecret,
+          publishableKey: paymentResult.publishableKey,
+          processingModel: paymentResult.processingModel,
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
           message: paymentResult.message,
@@ -1967,6 +2021,147 @@ export class ProposalsService {
     }
   }
 
+  async confirmStripeProposalPayment(
+    proposalId: string,
+    studentId: string,
+  ): Promise<ProposalResponseDto> {
+    const [proposal] = await this.db
+      .select()
+      .from(proposals)
+      .where(eq(proposals.id, proposalId))
+      .limit(1);
+
+    if (!proposal) {
+      throw new NotFoundException('Proposta nao encontrada');
+    }
+
+    if (proposal.studentId !== studentId) {
+      throw new ForbiddenException(
+        'Voce nao pode confirmar o pagamento desta proposta',
+      );
+    }
+
+    const payment = await this.db.query.payments.findFirst({
+      where: and(
+        eq(payments.proposalId, proposalId),
+        eq(payments.provider, 'stripe'),
+      ),
+    });
+
+    if (!payment?.stripePaymentIntentId) {
+      throw new NotFoundException('Pagamento Stripe nao encontrado');
+    }
+
+    const paymentIntent =
+      await this.stripePaymentIntentsService.retrievePaymentIntent(
+        payment.stripePaymentIntentId,
+      );
+    const mapped = this.mapStripePaymentIntentStatus(paymentIntent);
+    const latestChargeId = this.getStripeLatestChargeId(paymentIntent);
+    const now = new Date();
+
+    await this.db
+      .update(payments)
+      .set({
+        status: mapped.paymentStatus,
+        stripeLatestChargeId: latestChargeId,
+        stripeChargeId:
+          mapped.paymentStatus === 'authorized' ? latestChargeId : undefined,
+        authorizedAt:
+          mapped.paymentStatus === 'authorized' ? now : payment.authorizedAt,
+        updatedAt: now,
+      })
+      .where(eq(payments.id, payment.id));
+
+    await this.updatePaymentStatus(proposalId, mapped.proposalStatus);
+
+    const [updatedProposal] = await this.db
+      .select()
+      .from(proposals)
+      .where(eq(proposals.id, proposalId))
+      .limit(1);
+    const [student] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, studentId))
+      .limit(1);
+    const response = await this.mapToResponseDto(updatedProposal, student);
+
+    return {
+      ...response,
+      payment: {
+        paymentId: payment.id,
+        status: mapped.proposalStatus,
+        method: updatedProposal.paymentMethod,
+        amount: parseFloat(updatedProposal.price),
+        provider: 'stripe',
+        stripePaymentIntentId: paymentIntent.id,
+        processingModel: payment.processingModel,
+        platformFee: parseFloat(String(payment.platformFee)),
+        personalAmount: parseFloat(String(payment.personalAmount)),
+        message:
+          mapped.proposalStatus === 'authorized'
+            ? 'Pagamento confirmado com sucesso.'
+            : `Pagamento Stripe em status ${paymentIntent.status}.`,
+      },
+    };
+  }
+
+  async handleStripePaymentIntentEvent(
+    eventType: string,
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.stripePaymentIntentId, paymentIntent.id),
+    });
+
+    if (!payment) {
+      console.warn(
+        `⚠️ [PROPOSALS][STRIPE] PaymentIntent sem pagamento interno: ${paymentIntent.id}`,
+      );
+      return;
+    }
+
+    let mapped: {
+      proposalStatus: string;
+      paymentStatus: 'authorized' | 'pending' | 'cancelled';
+    };
+
+    switch (eventType) {
+      case 'payment_intent.succeeded':
+        mapped = { proposalStatus: 'authorized', paymentStatus: 'authorized' };
+        break;
+      case 'payment_intent.payment_failed':
+        mapped = { proposalStatus: 'rejected', paymentStatus: 'cancelled' };
+        break;
+      case 'payment_intent.canceled':
+        mapped = { proposalStatus: 'cancelled', paymentStatus: 'cancelled' };
+        break;
+      default:
+        return;
+    }
+
+    const latestChargeId = this.getStripeLatestChargeId(paymentIntent);
+    const now = new Date();
+
+    await this.db
+      .update(payments)
+      .set({
+        status: mapped.paymentStatus,
+        stripeLatestChargeId: latestChargeId,
+        stripeChargeId:
+          mapped.paymentStatus === 'authorized' ? latestChargeId : undefined,
+        authorizedAt:
+          mapped.paymentStatus === 'authorized' ? now : payment.authorizedAt,
+        updatedAt: now,
+      })
+      .where(eq(payments.id, payment.id));
+
+    if (payment.proposalId) {
+      await this.updatePaymentStatus(payment.proposalId, mapped.proposalStatus);
+    }
+  }
+
   async findProposalByPaymentId(paymentId: string): Promise<any> {
     const [proposal] = await this.db
       .select()
@@ -2352,6 +2547,94 @@ export class ProposalsService {
     return { message: 'Proposta cancelada e reembolso processado com sucesso' };
   }
 
+  private async createStripeProposalPaymentIntent(input: {
+    createProposalDto: CreateProposalDto;
+    userData: any;
+    trainingDate: Date;
+    proposalId: string;
+    platformFee: number;
+    personalAmount: number;
+  }): Promise<any> {
+    const {
+      createProposalDto,
+      userData,
+      trainingDate,
+      proposalId,
+      platformFee,
+      personalAmount,
+    } = input;
+
+    const customerSession =
+      await this.studentPaymentService.createStripeCustomerSession(userData.id);
+    const transferGroup = `proposal_${proposalId}`;
+    const targetPersonalId: string | undefined = (createProposalDto as any)
+      .personalId;
+
+    const paymentIntent =
+      await this.stripePaymentIntentsService.createPaymentIntent({
+        amount: createProposalDto.price,
+        currency: process.env.STRIPE_DEFAULT_CURRENCY || 'brl',
+        customerId: customerSession.customerId,
+        description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
+        setupFutureUsage: 'off_session',
+        transferGroup,
+        metadata: {
+          proposalId,
+          studentId: userData.id,
+          targetPersonalId: targetPersonalId || '',
+          paymentProvider: 'stripe',
+          processingModel: 'separate_charges_and_transfers',
+          paymentMethod: createProposalDto.paymentMethod,
+        },
+      });
+
+    const latestChargeId = this.getStripeLatestChargeId(paymentIntent);
+    const [newPayment] = await this.db
+      .insert(payments)
+      .values({
+        proposalId,
+        studentId: userData.id,
+        personalId: targetPersonalId || null,
+        totalAmount: createProposalDto.price.toString(),
+        platformFee: platformFee.toString(),
+        personalAmount: personalAmount.toString(),
+        status: 'pending',
+        type: 'class_payment',
+        provider: 'stripe',
+        stripePaymentIntentId: paymentIntent.id,
+        stripeTransferGroup: transferGroup,
+        stripeLatestChargeId: latestChargeId,
+        processingModel: 'separate_charges_and_transfers',
+      })
+      .returning();
+
+    console.log('✅ [PROPOSALS][STRIPE] PaymentIntent criado:', {
+      paymentId: newPayment.id,
+      stripePaymentIntentId: paymentIntent.id,
+      proposalId,
+      transferGroup,
+      hasClientSecret: !!paymentIntent.client_secret,
+    });
+
+    return {
+      success: true,
+      paymentId: newPayment.id,
+      status: 'pending',
+      method: createProposalDto.paymentMethod,
+      amount: createProposalDto.price,
+      provider: 'stripe',
+      stripePaymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      customerId: customerSession.customerId,
+      customerEphemeralKeySecret: customerSession.customerEphemeralKeySecret,
+      publishableKey: customerSession.publishableKey,
+      processingModel: 'separate_charges_and_transfers',
+      platformFee,
+      personalAmount,
+      message: 'Finalize o pagamento no Stripe para confirmar a proposta.',
+    };
+  }
+
   // ===== INTEGRAÇÃO REAL COM MERCADO PAGO PARA PROPOSTAS =====
 
   private async createProposalPaymentPreference(
@@ -2415,6 +2698,17 @@ export class ProposalsService {
         paymentMethodReceived: createProposalDto.paymentMethod,
         cardDataReceived: createProposalDto.cardData,
       });
+
+      if (isCardPayment) {
+        return this.createStripeProposalPaymentIntent({
+          createProposalDto,
+          userData,
+          trainingDate,
+          proposalId,
+          platformFee,
+          personalAmount,
+        });
+      }
 
       if (hasCardId && isCardPayment) {
         console.log(

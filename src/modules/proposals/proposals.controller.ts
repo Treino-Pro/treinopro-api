@@ -360,6 +360,20 @@ export class ProposalsController {
     );
   }
 
+  @Post(':id/stripe/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirmar pagamento Stripe da proposta',
+    description:
+      'Consulta o PaymentIntent no Stripe e libera a proposta apenas se o pagamento foi confirmado',
+  })
+  async confirmStripeProposalPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: any,
+  ): Promise<ProposalResponseDto> {
+    return this.proposalsService.confirmStripeProposalPayment(id, req.user.sub);
+  }
+
   @Put(':id')
   @ApiOperation({
     summary: 'Atualizar proposta',

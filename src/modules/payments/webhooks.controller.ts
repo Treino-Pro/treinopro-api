@@ -8,11 +8,13 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Public } from '../../common/decorators/public.decorator';
 import { WebhooksService } from './webhooks.service';
 import { MercadoPagoService } from './mercadopago.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
+import { ProposalsService } from '../proposals/proposals.service';
 
 export interface WebhookPayload {
   id: number;
@@ -38,6 +40,7 @@ export class WebhooksController {
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly stripeWebhooksService: StripeWebhooksService,
     private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   @Post('mercadopago')
@@ -103,9 +106,28 @@ export class WebhooksController {
         await this.stripeFinancialAccountsService.handleAccountUpdated(event);
       }
 
+      if (
+        [
+          'payment_intent.succeeded',
+          'payment_intent.payment_failed',
+          'payment_intent.canceled',
+        ].includes(event.type)
+      ) {
+        const proposalsService = this.moduleRef.get(ProposalsService, {
+          strict: false,
+        });
+        await proposalsService.handleStripePaymentIntentEvent(
+          event.type,
+          event.data.object as any,
+        );
+      }
+
       return { status: 'success' };
     } catch (error) {
-      this.logger.error('❌ [WEBHOOK][STRIPE] Erro ao processar webhook:', error);
+      this.logger.error(
+        '❌ [WEBHOOK][STRIPE] Erro ao processar webhook:',
+        error,
+      );
       return { status: 'error' } as any;
     }
   }

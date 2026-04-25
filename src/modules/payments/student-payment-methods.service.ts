@@ -15,8 +15,10 @@ import {
 import { db } from '../../database/connection';
 import { MercadoPagoService } from './mercadopago.service';
 import { PaymentsService } from './payments.service';
+import { StripeCustomersService } from './stripe-customers.service';
 import {
   SaveCardDto,
+  ConfirmStripeSetupIntentDto,
   UpdateStudentPaymentMethodsDto,
   StudentPaymentMethodsResponseDto,
   ProcessClassPaymentDto,
@@ -36,7 +38,276 @@ export class StudentPaymentMethodsService {
   constructor(
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly paymentsService: PaymentsService,
+    private readonly stripeCustomersService: StripeCustomersService,
   ) {}
+
+  private getStripePublishableKey(): string {
+    const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
+    if (!publishableKey.trim()) {
+      throw new BadRequestException('Chave publicavel Stripe nao configurada');
+    }
+
+    return publishableKey;
+  }
+
+  private normalizeStripeCardBrand(brand?: string | null): CardBrand {
+    switch ((brand || '').toLowerCase()) {
+      case 'visa':
+        return CardBrand.VISA;
+      case 'mastercard':
+        return CardBrand.MASTERCARD;
+      case 'amex':
+      case 'american_express':
+        return CardBrand.AMERICAN_EXPRESS;
+      case 'elo':
+        return CardBrand.ELO;
+      case 'hipercard':
+        return CardBrand.HIPERCARD;
+      case 'diners':
+      case 'diners_club':
+        return CardBrand.DINERS;
+      default:
+        return CardBrand.VISA;
+    }
+  }
+
+  async ensureStripeCustomerForStudent(userId: string): Promise<string> {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuario nao encontrado');
+    }
+
+    if (user.userType !== 'student') {
+      throw new ForbiddenException(
+        'Apenas alunos podem gerenciar metodos de pagamento',
+      );
+    }
+
+    let paymentMethods = await db.query.studentPaymentMethods.findFirst({
+      where: eq(studentPaymentMethods.userId, userId),
+    });
+
+    if (!paymentMethods) {
+      paymentMethods = await this.createDefaultPaymentMethods(userId);
+    }
+
+    if (paymentMethods.stripeCustomerId) {
+      return paymentMethods.stripeCustomerId;
+    }
+
+    const customer = await this.stripeCustomersService.createCustomer({
+      email: user.email || undefined,
+      name:
+        `${user.firstName || ''} ${user.lastName || ''}`.trim() || undefined,
+      metadata: {
+        userId,
+        userType: 'student',
+      },
+    });
+
+    await db
+      .update(studentPaymentMethods)
+      .set({
+        stripeCustomerId: customer.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(studentPaymentMethods.userId, userId));
+
+    return customer.id;
+  }
+
+  async createStripeCustomerSession(userId: string): Promise<{
+    customerId: string;
+    customerEphemeralKeySecret: string;
+    publishableKey: string;
+  }> {
+    const customerId = await this.ensureStripeCustomerForStudent(userId);
+    const ephemeralKey =
+      await this.stripeCustomersService.createEphemeralKey(customerId);
+
+    return {
+      customerId,
+      customerEphemeralKeySecret: ephemeralKey.secret,
+      publishableKey: this.getStripePublishableKey(),
+    };
+  }
+
+  async createStripeSetupIntent(userId: string): Promise<{
+    customerId: string;
+    setupIntentId: string;
+    clientSecret: string;
+    ephemeralKeySecret: string;
+    publishableKey: string;
+  }> {
+    const customerId = await this.ensureStripeCustomerForStudent(userId);
+    const [ephemeralKey, setupIntent] = await Promise.all([
+      this.stripeCustomersService.createEphemeralKey(customerId),
+      this.stripeCustomersService.createSetupIntent({
+        customerId,
+        metadata: {
+          userId,
+          purpose: 'student_saved_card',
+        },
+      }),
+    ]);
+
+    return {
+      customerId,
+      setupIntentId: setupIntent.id,
+      clientSecret: setupIntent.client_secret,
+      ephemeralKeySecret: ephemeralKey.secret,
+      publishableKey: this.getStripePublishableKey(),
+    };
+  }
+
+  async saveStripeSetupIntentPaymentMethod(
+    userId: string,
+    input: ConfirmStripeSetupIntentDto,
+  ): Promise<any> {
+    const customerId = await this.ensureStripeCustomerForStudent(userId);
+    let paymentMethodId = input.paymentMethodId;
+
+    if (input.setupIntentId) {
+      const setupIntent = await this.stripeCustomersService.retrieveSetupIntent(
+        input.setupIntentId,
+      );
+
+      if (setupIntent.customer && setupIntent.customer !== customerId) {
+        throw new BadRequestException(
+          'SetupIntent nao pertence ao aluno autenticado',
+        );
+      }
+
+      if (setupIntent.status !== 'succeeded') {
+        throw new BadRequestException(
+          `SetupIntent ainda nao foi concluido (${setupIntent.status})`,
+        );
+      }
+
+      paymentMethodId =
+        typeof setupIntent.payment_method === 'string'
+          ? setupIntent.payment_method
+          : setupIntent.payment_method?.id;
+    }
+
+    if (!paymentMethodId) {
+      throw new BadRequestException('PaymentMethod Stripe nao informado');
+    }
+
+    const paymentMethod =
+      await this.stripeCustomersService.retrievePaymentMethod(paymentMethodId);
+
+    if (paymentMethod.type !== 'card' || !paymentMethod.card) {
+      throw new BadRequestException('Metodo de pagamento Stripe nao e cartao');
+    }
+
+    const attachedCustomer =
+      typeof paymentMethod.customer === 'string'
+        ? paymentMethod.customer
+        : paymentMethod.customer?.id;
+
+    if (attachedCustomer && attachedCustomer !== customerId) {
+      throw new BadRequestException(
+        'Cartao Stripe nao pertence ao aluno autenticado',
+      );
+    }
+
+    if (!attachedCustomer) {
+      await this.stripeCustomersService.attachPaymentMethod(
+        customerId,
+        paymentMethodId,
+      );
+    }
+
+    const existingCard = await db.query.savedCards.findFirst({
+      where: and(
+        eq(savedCards.userId, userId),
+        eq(savedCards.stripePaymentMethodId, paymentMethodId),
+      ),
+    });
+
+    const activeCards = await db.query.savedCards.findMany({
+      where: and(eq(savedCards.userId, userId), eq(savedCards.isActive, true)),
+    });
+    const shouldSetDefault =
+      Boolean(input.setAsDefault) || activeCards.length === 0;
+
+    if (shouldSetDefault) {
+      await db
+        .update(savedCards)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(eq(savedCards.userId, userId));
+    }
+
+    const card = paymentMethod.card;
+    const cardValues = {
+      userId,
+      stripePaymentMethodId: paymentMethodId,
+      cardBrand: this.normalizeStripeCardBrand(card.brand),
+      cardType: input.cardType || CardType.CREDIT,
+      lastFourDigits: card.last4,
+      expirationMonth: String(card.exp_month).padStart(2, '0'),
+      expirationYear: String(card.exp_year).slice(-2),
+      cardHolderName:
+        paymentMethod.billing_details?.name ||
+        paymentMethod.billing_details?.email ||
+        'Titular do cartao',
+      nickname: input.nickname,
+      isDefault: shouldSetDefault,
+      isActive: true,
+      updatedAt: new Date(),
+      expiresAt: new Date(card.exp_year, card.exp_month, 0),
+    };
+
+    const [savedCard] = existingCard
+      ? await db
+          .update(savedCards)
+          .set(cardValues)
+          .where(eq(savedCards.id, existingCard.id))
+          .returning()
+      : await db
+          .insert(savedCards)
+          .values({
+            ...cardValues,
+            createdAt: new Date(),
+          })
+          .returning();
+
+    await db
+      .update(studentPaymentMethods)
+      .set({
+        stripeCustomerId: customerId,
+        preferredMethod:
+          savedCard.cardType === CardType.DEBIT
+            ? StudentPaymentMethod.DEBIT_CARD
+            : StudentPaymentMethod.CREDIT_CARD,
+        defaultCardId: shouldSetDefault ? savedCard.id : undefined,
+        hasValidPaymentMethod: true,
+        canMakePayments: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(studentPaymentMethods.userId, userId));
+
+    return {
+      id: savedCard.id,
+      type:
+        savedCard.cardType === CardType.DEBIT ? 'debit_card' : 'credit_card',
+      nickname: savedCard.nickname,
+      cardBrand: savedCard.cardBrand,
+      cardType: savedCard.cardType,
+      lastFourDigits: savedCard.lastFourDigits,
+      expirationMonth: savedCard.expirationMonth,
+      expirationYear: savedCard.expirationYear,
+      cardHolderName: savedCard.cardHolderName,
+      isDefault: Boolean(savedCard.isDefault),
+      isActive: Boolean(savedCard.isActive),
+      createdAt: savedCard.createdAt,
+      updatedAt: savedCard.updatedAt,
+    };
+  }
 
   private normalizeSecurityCode(value?: string | null): string | undefined {
     if (typeof value !== 'string') {
@@ -1985,7 +2256,23 @@ export class StudentPaymentMethodsService {
         lastFourDigits: card.lastFourDigits,
         mpCustomerId: card.mpCustomerId,
         mpCardId: card.mpCardId,
+        stripePaymentMethodId: card.stripePaymentMethodId,
       });
+
+      if (card.stripePaymentMethodId) {
+        try {
+          console.log('🗑️ [REMOVE_CARD] Desanexando cartão no Stripe...');
+          await this.stripeCustomersService.detachPaymentMethod(
+            card.stripePaymentMethodId,
+          );
+          console.log('✅ [REMOVE_CARD] Cartão desanexado do Stripe');
+        } catch (stripeError) {
+          console.error(
+            '⚠️ [REMOVE_CARD] Erro ao desanexar no Stripe (continuando):',
+            stripeError,
+          );
+        }
+      }
 
       // Remover cartão do Mercado Pago se tiver customer_id e card_id
       if (card.mpCustomerId && card.mpCardId) {
@@ -2174,6 +2461,7 @@ export class StudentPaymentMethodsService {
         .filter((card: any) => Boolean(card.isActive))
         .map((card: any) => ({
           id: card.id,
+          type: card.cardType === CardType.DEBIT ? 'debit_card' : 'credit_card',
           nickname: card.nickname,
           cardBrand: card.cardBrand,
           cardType: card.cardType,

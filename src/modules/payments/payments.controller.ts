@@ -27,7 +27,10 @@ import { PaymentStatus } from './dto/payments.dto';
 import { db } from '../../database/connection';
 import { users } from '../../database/schema';
 import { eq } from 'drizzle-orm';
-import { CardType } from './dto/student-payment-methods.dto';
+import {
+  CardType,
+  ConfirmStripeSetupIntentDto,
+} from './dto/student-payment-methods.dto';
 
 export interface RemoveCardDto {
   cardId: string;
@@ -229,6 +232,34 @@ export class PaymentsController {
     return await this.studentPaymentMethodsService.updateStudentPaymentMethods(
       userId,
       updateData,
+    );
+  }
+
+  @Post('student/stripe/setup-intent')
+  async createStripeSetupIntent(@Request() req) {
+    const userId = req.user?.id ?? req.user?.sub;
+
+    if (!userId) {
+      throw new Error('Usuário não autenticado');
+    }
+
+    return this.studentPaymentMethodsService.createStripeSetupIntent(userId);
+  }
+
+  @Post('student/stripe/setup-intent/confirm')
+  async confirmStripeSetupIntent(
+    @Request() req,
+    @Body() body: ConfirmStripeSetupIntentDto,
+  ) {
+    const userId = req.user?.id ?? req.user?.sub;
+
+    if (!userId) {
+      throw new Error('Usuário não autenticado');
+    }
+
+    return this.studentPaymentMethodsService.saveStripeSetupIntentPaymentMethod(
+      userId,
+      body,
     );
   }
 

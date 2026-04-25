@@ -16,6 +16,11 @@ interface UpdateStripeCustomerInput {
   metadata?: Record<string, string>;
 }
 
+interface CreateStripeSetupIntentInput {
+  customerId: string;
+  metadata?: Record<string, string>;
+}
+
 @Injectable()
 export class StripeCustomersService {
   private readonly secretKey = process.env.STRIPE_SECRET_KEY || '';
@@ -46,13 +51,14 @@ export class StripeCustomersService {
   }
 
   async retrieveCustomer(customerId: string): Promise<Stripe.Customer> {
-    const customer = await this.assertConfigured().customers.retrieve(customerId);
+    const customer =
+      await this.assertConfigured().customers.retrieve(customerId);
 
-    if (customer.deleted) {
+    if ('deleted' in customer && customer.deleted) {
       throw new BadRequestException('Cliente Stripe removido');
     }
 
-    return customer;
+    return customer as Stripe.Customer;
   }
 
   async updateCustomer(
@@ -64,6 +70,42 @@ export class StripeCustomersService {
       phone: input.phone,
       metadata: input.metadata,
     });
+  }
+
+  async createEphemeralKey(customerId: string): Promise<Stripe.EphemeralKey> {
+    return this.assertConfigured().ephemeralKeys.create(
+      {
+        customer: customerId,
+      },
+      {
+        apiVersion: this.apiVersion,
+      },
+    );
+  }
+
+  async createSetupIntent(
+    input: CreateStripeSetupIntentInput,
+  ): Promise<Stripe.SetupIntent> {
+    return this.assertConfigured().setupIntents.create({
+      customer: input.customerId,
+      usage: 'off_session',
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: input.metadata,
+    });
+  }
+
+  async retrieveSetupIntent(
+    setupIntentId: string,
+  ): Promise<Stripe.SetupIntent> {
+    return this.assertConfigured().setupIntents.retrieve(setupIntentId);
+  }
+
+  async retrievePaymentMethod(
+    paymentMethodId: string,
+  ): Promise<Stripe.PaymentMethod> {
+    return this.assertConfigured().paymentMethods.retrieve(paymentMethodId);
   }
 
   async listPaymentMethods(
@@ -93,9 +135,7 @@ export class StripeCustomersService {
 
   private assertConfigured(): Stripe {
     if (!this.stripe) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
+      throw new BadRequestException('Stripe não está configurado corretamente');
     }
 
     return this.stripe;

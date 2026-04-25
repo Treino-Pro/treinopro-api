@@ -14,7 +14,6 @@ import {
   IsEmail,
   Length,
   Matches,
-  ValidateIf,
   ValidateNested,
   registerDecorator,
   ValidationOptions,
@@ -233,7 +232,7 @@ export class CreateProposalDto {
     description: 'Dados do cartão (se não usar cartão salvo)',
     required: false,
   })
-  @ValidateIf((o) => o.paymentMethod === 'credit_card' && !o.cardId)
+  @IsOptional()
   @ValidateNested()
   @Type(() => ProposalCardDataDto)
   cardData?: ProposalCardDataDto;
@@ -252,12 +251,8 @@ export class CreateProposalDto {
     example: '1234',
     required: false,
   })
-  @ValidateIf((o) => o.paymentMethod === 'credit_card' && !!o.cardId)
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({
-    message:
-      'Por motivos de segurança, o código de segurança (CVV) do seu cartão é obrigatório para confirmar o pagamento.',
-  })
   @Matches(/^\d{3,4}$/, { message: 'CVV deve ter 3 ou 4 dígitos' })
   savedCardCvv?: string;
 
@@ -467,6 +462,13 @@ export class ProposalResponseDto {
     sandboxCheckoutUrl?: string; // URL de checkout MP sandbox
     qrCode?: string; // Para PIX
     qrCodeBase64?: string; // QR Code em base64
+    provider?: string;
+    stripePaymentIntentId?: string;
+    clientSecret?: string;
+    customerId?: string;
+    customerEphemeralKeySecret?: string;
+    publishableKey?: string;
+    processingModel?: string;
     platformFee?: number; // Taxa da plataforma
     personalAmount?: number; // Valor para o personal
     message?: string;

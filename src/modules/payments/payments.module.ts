@@ -17,6 +17,10 @@ import { PaymentSimulationService } from './payment-simulation.service';
 import { StripeConnectService } from './stripe-connect.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
+import { StripePaymentIntentsService } from './stripe-payment-intents.service';
+import { StripeCustomersService } from './stripe-customers.service';
+import { StripeRefundsService } from './stripe-refunds.service';
+import { StripeTransfersService } from './stripe-transfers.service';
 import {
   MercadoPagoWithdrawalPayoutProvider,
   WITHDRAWAL_PAYOUT_PROVIDER,
@@ -42,6 +46,10 @@ import {
     StripeConnectService,
     StripeWebhooksService,
     StripeFinancialAccountsService,
+    StripePaymentIntentsService,
+    StripeCustomersService,
+    StripeRefundsService,
+    StripeTransfersService,
     MercadoPagoWithdrawalPayoutProvider,
     {
       provide: WITHDRAWAL_PAYOUT_PROVIDER,
@@ -61,6 +69,10 @@ import {
     StripeConnectService,
     StripeWebhooksService,
     StripeFinancialAccountsService,
+    StripePaymentIntentsService,
+    StripeCustomersService,
+    StripeRefundsService,
+    StripeTransfersService,
     WITHDRAWAL_PAYOUT_PROVIDER,
   ],
 })
