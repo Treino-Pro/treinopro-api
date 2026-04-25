@@ -19,6 +19,7 @@ import {
 import { GamificationService } from '../gamification/gamification.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { PaymentsService } from '../payments/payments.service';
+import { buildStripeProposalTransferGroup } from '../payments/stripe-transfer-groups';
 import { RatingsService } from '../ratings/ratings.service';
 import { FirebaseNotificationService } from '../notifications/services/firebase-notification.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -153,6 +154,12 @@ export class ClassesService {
         date: new Date(createClassDto.date),
       })
       .returning();
+
+    await this.ensureStripeTransferGroupLinkedToClass({
+      classId: newClass.id,
+      proposalId: createClassDto.proposalId,
+      personalId: proposal.personalId,
+    });
 
     // Buscar a modalidade da proposta para incluir na resposta
     const proposalWithModality = await this.db.query.proposals.findFirst({
@@ -1183,8 +1190,21 @@ export class ClassesService {
     const shouldUpdateClassId = payment.classId !== classId;
     const shouldUpdatePersonalId =
       personalId != null && payment.personalId !== personalId;
+    const stripeTransferGroup =
+      payment.provider === 'stripe' && payment.proposalId
+        ? payment.stripeTransferGroup ||
+          buildStripeProposalTransferGroup(payment.proposalId)
+        : payment.stripeTransferGroup;
+    const shouldUpdateStripeTransferGroup =
+      payment.provider === 'stripe' &&
+      Boolean(stripeTransferGroup) &&
+      payment.stripeTransferGroup !== stripeTransferGroup;
 
-    if (!shouldUpdateClassId && !shouldUpdatePersonalId) {
+    if (
+      !shouldUpdateClassId &&
+      !shouldUpdatePersonalId &&
+      !shouldUpdateStripeTransferGroup
+    ) {
       return payment;
     }
 
@@ -1193,6 +1213,7 @@ export class ClassesService {
       .set({
         classId,
         personalId: personalId ?? payment.personalId ?? null,
+        stripeTransferGroup,
         updatedAt: new Date(),
       })
       .where(eq(payments.id, payment.id));
@@ -1201,7 +1222,48 @@ export class ClassesService {
       ...payment,
       classId,
       personalId: personalId ?? payment.personalId ?? null,
+      stripeTransferGroup,
     };
+  }
+
+  private async ensureStripeTransferGroupLinkedToClass(input: {
+    classId: string;
+    proposalId: string;
+    personalId?: string | null;
+  }): Promise<void> {
+    const payment = await this.db.query.payments.findFirst({
+      where: and(
+        eq(payments.proposalId, input.proposalId),
+        eq(payments.provider, 'stripe'),
+      ),
+    });
+
+    if (!payment) {
+      return;
+    }
+
+    const transferGroup =
+      payment.stripeTransferGroup ||
+      buildStripeProposalTransferGroup(input.proposalId);
+
+    const shouldUpdate =
+      payment.classId !== input.classId ||
+      payment.personalId !== input.personalId ||
+      payment.stripeTransferGroup !== transferGroup;
+
+    if (!shouldUpdate) {
+      return;
+    }
+
+    await this.db
+      .update(payments)
+      .set({
+        classId: input.classId,
+        personalId: input.personalId ?? payment.personalId ?? null,
+        stripeTransferGroup: transferGroup,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, payment.id));
   }
 
   async getClassStats(userId: string): Promise<ClassStatsDto> {

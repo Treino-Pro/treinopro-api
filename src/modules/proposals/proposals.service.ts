@@ -46,6 +46,7 @@ import { StudentPaymentMethodsService } from '../payments/student-payment-method
 import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { StripePaymentIntentsService } from '../payments/stripe-payment-intents.service';
+import { buildStripeProposalTransferGroup } from '../payments/stripe-transfer-groups';
 import { JobsService } from '../jobs/jobs.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { ProposalsGateway } from './proposals.gateway';
@@ -2566,7 +2567,7 @@ export class ProposalsService {
 
     const customerSession =
       await this.studentPaymentService.createStripeCustomerSession(userData.id);
-    const transferGroup = `proposal_${proposalId}`;
+    const transferGroup = buildStripeProposalTransferGroup(proposalId);
     const targetPersonalId: string | undefined = (createProposalDto as any)
       .personalId;
 
@@ -2585,6 +2586,7 @@ export class ProposalsService {
           paymentProvider: 'stripe',
           processingModel: 'separate_charges_and_transfers',
           paymentMethod: createProposalDto.paymentMethod,
+          transferGroup,
         },
       });
 
