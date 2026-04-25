@@ -1083,6 +1083,25 @@ export class ClassesService {
     error?: string;
   } | null> {
     try {
+      const proposalPayment = await this.db.query.payments.findFirst({
+        where: eq(payments.proposalId, proposalId),
+        columns: {
+          provider: true,
+        },
+      });
+
+      if (proposalPayment?.provider === 'stripe') {
+        console.log(
+          `ℹ️ [SPLIT PIX] Proposta ${proposalId} usa Stripe — repasse MP legado pulado`,
+        );
+        return {
+          attempted: false,
+          success: true,
+          skipped: true,
+          reason: 'stripe_internal_wallet_release',
+        };
+      }
+
       const proposal = await this.db.query.proposals.findFirst({
         where: eq(proposals.id, proposalId),
         columns: {

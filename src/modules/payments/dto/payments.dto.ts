@@ -501,6 +501,10 @@ export class TransactionResponseDto {
   description?: string;
   mpTransactionId?: string;
   mpOperationId?: string;
+  stripeTransferId?: string;
+  stripeBalanceTransactionId?: string;
+  stripeRefundId?: string;
+  stripeDisputeId?: string;
   status: PaymentStatus;
   metadata?: any;
 
@@ -739,11 +743,15 @@ export class TransferRequestDto {
 
   @ApiProperty({
     description: 'Método de transferência',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
-    example: 'pix',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
-  transferMethod: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
+  transferMethod:
+    | 'pix'
+    | 'bank_transfer'
+    | 'mercadopago_balance'
+    | 'stripe_connect';
 
   @ApiProperty({
     description: 'Dados específicos do método de transferência',
@@ -782,12 +790,16 @@ export class ApproveWithdrawalDto {
 
   @ApiProperty({
     description: 'Método de transferência escolhido pelo admin',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
-    example: 'pix',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
   @IsOptional()
-  transferMethod?: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+  transferMethod?:
+    | 'pix'
+    | 'bank_transfer'
+    | 'mercadopago_balance'
+    | 'stripe_connect';
 }
 
 export class RejectWithdrawalDto {
@@ -831,11 +843,11 @@ export class WithdrawalRequestDto {
 
   @ApiProperty({
     description: 'Método de saque preferido',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance'],
-    example: 'pix',
+    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance'])
-  method: 'pix' | 'bank_transfer' | 'mercadopago_balance';
+  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
+  method: 'pix' | 'bank_transfer' | 'mercadopago_balance' | 'stripe_connect';
 
   @ApiProperty({
     description: 'Urgência do saque',
@@ -929,6 +941,13 @@ export class WithdrawalResponseDto {
     example: '1234567890',
   })
   mpTransferId?: string;
+
+  @ApiProperty({
+    description: 'ID do Transfer Stripe Connect',
+    example: 'tr_1234567890',
+    required: false,
+  })
+  stripeTransferId?: string;
 
   @ApiProperty({
     description: 'Data de criação',

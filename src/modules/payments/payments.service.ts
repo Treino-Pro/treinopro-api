@@ -56,6 +56,12 @@ import {
   WithdrawalResponseDto,
 } from './dto/payments.dto';
 
+type PaymentReleaseResult = {
+  released: boolean;
+  alreadyReleased: boolean;
+  payment: any;
+};
+
 @Injectable()
 export class PaymentsService {
   constructor(
@@ -419,17 +425,33 @@ export class PaymentsService {
       currentPayment.status !== PaymentStatus.CAPTURED
     ) {
       console.log(`💳 Pagamento ${paymentId} - aplicando split e repasse`);
-      await this.capturePayment(paymentId);
+      await this.capturePayment(paymentId, 'Status atualizado para capturado');
+
+      const capturedUpdateData: any = {
+        updatedAt: new Date(),
+      };
+      if (mpPaymentId) {
+        capturedUpdateData.mpPaymentId = mpPaymentId;
+      }
+      await this.db
+        .update(payments)
+        .set(capturedUpdateData)
+        .where(eq(payments.id, paymentId));
     }
 
-    await this.db
-      .update(payments)
-      .set(updateData)
-      .where(eq(payments.id, paymentId));
+    if (status !== PaymentStatus.CAPTURED) {
+      await this.db
+        .update(payments)
+        .set(updateData)
+        .where(eq(payments.id, paymentId));
+    }
   }
 
   // Capturar pagamento e aplicar split
-  async capturePayment(paymentId: string): Promise<void> {
+  async capturePayment(
+    paymentId: string,
+    reason: string = 'Pagamento capturado',
+  ): Promise<void> {
     const payment = await this.db.query.payments.findFirst({
       where: eq(payments.id, paymentId),
       with: {
@@ -442,25 +464,18 @@ export class PaymentsService {
       throw new NotFoundException('Pagamento não encontrado');
     }
 
-    // Aplicar split do Mercado Pago
-    const splitData: MercadoPagoSplitDto = {
-      marketplace: process.env.MP_MARKETPLACE_ID || 'marketplace_id',
-      marketplace_fee: payment.platformFee,
-      application_fee: '0',
-      amount: payment.personalAmount,
-    };
+    if (payment.status === PaymentStatus.CAPTURED) {
+      console.log(
+        `ℹ️ [CAPTURE_PAYMENT] Pagamento ${paymentId} já capturado; liberação idempotente ignorada`,
+      );
+      return;
+    }
 
-    // Atualizar split data
-    await this.db
-      .update(payments)
-      .set({
-        splitData,
-        updatedAt: new Date(),
-      })
-      .where(eq(payments.id, paymentId));
-
-    // Atualizar carteiras
-    await this.updateWallets(payment);
+    await this.releasePaymentToInternalWallet(payment, {
+      classId: payment.classId,
+      reason,
+      allowPending: true,
+    });
   }
 
   // Atualizar carteiras dos usuários
@@ -542,6 +557,278 @@ export class PaymentsService {
     console.log(
       '💰 [UPDATE_WALLETS] ===== REPASSE CONCLUÍDO COM SUCESSO =====',
     );
+  }
+
+  private async releasePaymentToInternalWallet(
+    payment: any,
+    options: {
+      classId?: string | null;
+      reason: string;
+      allowPending: boolean;
+    },
+  ): Promise<PaymentReleaseResult> {
+    if (!payment.personalId) {
+      throw new BadRequestException(
+        'Pagamento não possui personal vinculado para liberação',
+      );
+    }
+
+    const isStripe = payment.provider === 'stripe';
+    const currentStatus = String(payment.status || '').toLowerCase();
+
+    if (currentStatus === PaymentStatus.CAPTURED) {
+      return {
+        released: false,
+        alreadyReleased: true,
+        payment,
+      };
+    }
+
+    if (isStripe && currentStatus !== PaymentStatus.AUTHORIZED) {
+      throw new BadRequestException(
+        `Pagamento Stripe ainda não confirmado. Status atual: ${payment.status}`,
+      );
+    }
+
+    const allowedStatuses = isStripe
+      ? [PaymentStatus.AUTHORIZED]
+      : options.allowPending
+        ? [PaymentStatus.AUTHORIZED, PaymentStatus.PENDING]
+        : [PaymentStatus.AUTHORIZED];
+
+    if (!allowedStatuses.includes(payment.status)) {
+      throw new BadRequestException(
+        `Pagamento não está em estado capturável. Status atual: ${payment.status}`,
+      );
+    }
+
+    const now = new Date();
+    const classId = options.classId ?? payment.classId ?? null;
+    const totalAmount = this.toMoneyNumber(payment.totalAmount);
+    const platformFee = this.toMoneyNumber(payment.platformFee);
+    const personalAmount = this.toMoneyNumber(payment.personalAmount);
+    const releaseMetadata = this.buildInternalWalletReleaseMetadata(payment, {
+      classId,
+      reason: options.reason,
+      releasedAt: now,
+      totalAmount,
+      platformFee,
+      personalAmount,
+    });
+    const splitData = this.buildInternalWalletSplitData(
+      payment,
+      releaseMetadata,
+    );
+
+    return this.db.transaction(async (tx: any) => {
+      const [capturedPayment] = await tx
+        .update(payments)
+        .set({
+          status: PaymentStatus.CAPTURED,
+          splitData,
+          capturedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(payments.id, payment.id),
+            inArray(payments.status, allowedStatuses),
+          ),
+        )
+        .returning();
+
+      if (!capturedPayment) {
+        const [latestPayment] = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, payment.id))
+          .limit(1);
+
+        if (!latestPayment) {
+          throw new NotFoundException('Pagamento não encontrado');
+        }
+
+        if (latestPayment.status === PaymentStatus.CAPTURED) {
+          return {
+            released: false,
+            alreadyReleased: true,
+            payment: latestPayment,
+          };
+        }
+
+        throw new BadRequestException(
+          `Pagamento não está em estado capturável. Status atual: ${latestPayment.status}`,
+        );
+      }
+
+      await this.ensureWalletExists(tx, capturedPayment.personalId, now);
+
+      const personalAmountString = this.toMoneyString(personalAmount);
+      await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} + ${personalAmountString}::numeric`,
+          totalEarned: sql`${userWallets.totalEarned} + ${personalAmountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(eq(userWallets.userId, capturedPayment.personalId));
+
+      const totalAmountString = this.toMoneyString(totalAmount);
+      await tx.insert(paymentTransactions).values([
+        {
+          paymentId: capturedPayment.id,
+          userId: capturedPayment.personalId,
+          type: PaymentType.PERSONAL_EARNINGS,
+          amount: personalAmountString,
+          description: classId
+            ? `Ganhos da aula ${classId}`
+            : `Ganhos do pagamento ${capturedPayment.id}`,
+          status: PaymentStatus.CAPTURED,
+          metadata: {
+            ...releaseMetadata,
+            ledgerEntry: 'personal_internal_wallet_credit',
+          },
+          processedAt: now,
+        },
+        {
+          paymentId: capturedPayment.id,
+          userId: capturedPayment.studentId,
+          type: PaymentType.CLASS_PAYMENT,
+          amount: this.toMoneyString(-totalAmount),
+          description: classId
+            ? `Pagamento da aula ${classId}`
+            : `Pagamento ${capturedPayment.id}`,
+          status: PaymentStatus.CAPTURED,
+          metadata: {
+            ...releaseMetadata,
+            ledgerEntry: 'student_payment_debit',
+            grossAmount: totalAmountString,
+          },
+          processedAt: now,
+        },
+      ]);
+
+      return {
+        released: true,
+        alreadyReleased: false,
+        payment: capturedPayment,
+      };
+    });
+  }
+
+  private async ensureWalletExists(
+    tx: any,
+    userId: string,
+    now: Date,
+  ): Promise<void> {
+    const insertWallet = tx.insert(userWallets).values({
+      userId,
+      availableBalance: '0.00',
+      pendingBalance: '0.00',
+      totalEarned: '0.00',
+      totalWithdrawn: '0.00',
+      updatedAt: now,
+    });
+
+    if (typeof insertWallet.onConflictDoNothing === 'function') {
+      await insertWallet.onConflictDoNothing({ target: userWallets.userId });
+      return;
+    }
+
+    await insertWallet;
+  }
+
+  private buildInternalWalletSplitData(
+    payment: any,
+    releaseMetadata: Record<string, any>,
+  ): Record<string, any> {
+    const currentSplitData =
+      payment.splitData && typeof payment.splitData === 'object'
+        ? payment.splitData
+        : {};
+
+    if (payment.provider === 'stripe') {
+      return this.compactObject({
+        ...currentSplitData,
+        stripe: this.compactObject({
+          paymentIntentId: payment.stripePaymentIntentId,
+          chargeId: payment.stripeChargeId,
+          latestChargeId: payment.stripeLatestChargeId,
+          transferGroup: payment.stripeTransferGroup,
+          processingModel: payment.processingModel,
+        }),
+        internalWalletRelease: releaseMetadata,
+      });
+    }
+
+    const mercadoPagoSplit: MercadoPagoSplitDto = {
+      marketplace: process.env.MP_MARKETPLACE_ID || 'marketplace_id',
+      marketplace_fee: payment.platformFee,
+      application_fee: '0',
+      amount: payment.personalAmount,
+    };
+
+    return {
+      ...currentSplitData,
+      mercadoPagoSplit,
+      internalWalletRelease: releaseMetadata,
+    };
+  }
+
+  private buildInternalWalletReleaseMetadata(
+    payment: any,
+    input: {
+      classId?: string | null;
+      reason: string;
+      releasedAt: Date;
+      totalAmount: number;
+      platformFee: number;
+      personalAmount: number;
+    },
+  ): Record<string, any> {
+    const provider = payment.provider || 'mercado_pago';
+    const classScope = input.classId || payment.classId || 'proposal';
+
+    return this.compactObject({
+      provider,
+      processingModel:
+        payment.processingModel ||
+        (provider === 'stripe' ? 'separate_charges_and_transfers' : undefined),
+      releaseType: 'internal_wallet_release',
+      releaseReason: input.reason,
+      releaseIdempotencyKey: `${provider}_wallet_release:${payment.id}:${classScope}:${payment.personalId}`,
+      paymentId: payment.id,
+      classId: input.classId,
+      proposalId: payment.proposalId,
+      studentId: payment.studentId,
+      personalId: payment.personalId,
+      totalAmount: this.toMoneyString(input.totalAmount),
+      platformFee: this.toMoneyString(input.platformFee),
+      personalAmount: this.toMoneyString(input.personalAmount),
+      releasedAt: input.releasedAt.toISOString(),
+      stripePaymentIntentId: payment.stripePaymentIntentId,
+      stripeChargeId: payment.stripeChargeId,
+      stripeLatestChargeId: payment.stripeLatestChargeId,
+      stripeTransferGroup: payment.stripeTransferGroup,
+    });
+  }
+
+  private compactObject<T extends Record<string, any>>(value: T): T {
+    return Object.fromEntries(
+      Object.entries(value).filter(([, entryValue]) => {
+        return (
+          entryValue !== undefined && entryValue !== null && entryValue !== ''
+        );
+      }),
+    ) as T;
+  }
+
+  private toMoneyNumber(value: string | number): number {
+    return Number(Number(value || 0).toFixed(2));
+  }
+
+  private toMoneyString(value: string | number): string {
+    return this.toMoneyNumber(value).toFixed(2);
   }
 
   // Criar disputa
@@ -959,7 +1246,7 @@ export class PaymentsService {
     console.log('💰 [CAPTURE_AFTER_CLASS] Class ID:', classId);
     console.log('💰 [CAPTURE_AFTER_CLASS] Reason:', reason);
 
-    const payment = await this.db.query.payments.findFirst({
+    let payment = await this.db.query.payments.findFirst({
       where: eq(payments.classId, classId),
       with: {
         class: true,
@@ -969,42 +1256,100 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      console.error(
-        '❌ [CAPTURE_AFTER_CLASS] Pagamento não encontrado para esta aula',
-      );
-      throw new NotFoundException('Pagamento não encontrado para esta aula');
+      const classData = await this.db.query.classes.findFirst({
+        where: eq(classes.id, classId),
+        columns: {
+          id: true,
+          proposalId: true,
+          personalId: true,
+        },
+      });
+
+      if (classData?.proposalId) {
+        payment = await this.db.query.payments.findFirst({
+          where: eq(payments.proposalId, classData.proposalId),
+          with: {
+            class: true,
+            student: true,
+            personal: true,
+          },
+        });
+
+        if (payment) {
+          await this.db
+            .update(payments)
+            .set({
+              classId,
+              personalId: classData.personalId ?? payment.personalId,
+              updatedAt: new Date(),
+            })
+            .where(eq(payments.id, payment.id));
+
+          payment = {
+            ...payment,
+            classId,
+            personalId: classData.personalId ?? payment.personalId,
+          };
+        }
+      }
+
+      if (!payment) {
+        console.error(
+          '❌ [CAPTURE_AFTER_CLASS] Pagamento não encontrado para esta aula',
+        );
+        throw new NotFoundException('Pagamento não encontrado para esta aula');
+      }
     }
 
     console.log('💰 [CAPTURE_AFTER_CLASS] Pagamento encontrado:', {
       id: payment.id,
+      provider: payment.provider,
       status: payment.status,
       totalAmount: payment.totalAmount,
       personalAmount: payment.personalAmount,
       mpPaymentId: payment.mpPaymentId,
+      stripePaymentIntentId: payment.stripePaymentIntentId,
     });
 
-    // Aceitar tanto AUTHORIZED (webhook mapeado) quanto PENDING (sem webhook)
-    const canCapture =
-      payment.status === PaymentStatus.AUTHORIZED ||
-      payment.status === PaymentStatus.PENDING;
+    if (payment.status === PaymentStatus.CAPTURED) {
+      console.log(
+        `ℹ️ [CAPTURE_AFTER_CLASS] Pagamento ${payment.id} já capturado; liberação idempotente ignorada`,
+      );
+      return;
+    }
+
+    const isStripePayment = payment.provider === 'stripe';
+    const canCapture = isStripePayment
+      ? payment.status === PaymentStatus.AUTHORIZED
+      : payment.status === PaymentStatus.AUTHORIZED ||
+        payment.status === PaymentStatus.PENDING;
+
     if (!canCapture) {
       console.error(
         '❌ [CAPTURE_AFTER_CLASS] Pagamento não está em estado capturável. Status atual:',
         payment.status,
       );
       throw new BadRequestException(
-        `Pagamento não está em estado capturável. Status atual: ${payment.status}`,
+        isStripePayment
+          ? `Pagamento Stripe ainda não confirmado. Status atual: ${payment.status}`
+          : `Pagamento não está em estado capturável. Status atual: ${payment.status}`,
       );
     }
+
     if (payment.status === PaymentStatus.PENDING) {
       console.warn(
         '⚠️ [CAPTURE_AFTER_CLASS] Pagamento em PENDING (sem webhook AUTHORIZED). Forçando captura e split.',
       );
     }
 
-    // Capturar no Mercado Pago (com tratamento de erro)
     let mpCaptureSuccess = false;
-    if (payment.mpPaymentId) {
+
+    if (isStripePayment) {
+      mpCaptureSuccess = true;
+      console.log(
+        '💳 [CAPTURE_AFTER_CLASS] Pagamento Stripe confirmado; liberando saldo interno sem payout bancário',
+      );
+    } else if (payment.mpPaymentId) {
       try {
         console.log(
           '💳 [CAPTURE_AFTER_CLASS] Buscando status real do pagamento no Mercado Pago:',
@@ -1053,13 +1398,24 @@ export class PaymentsService {
       mpCaptureSuccess = true; // Simulações sempre "funcionam"
     }
 
-    // Atualizar status para capturado (isso vai aplicar o split)
-    console.log('🔄 [CAPTURE_AFTER_CLASS] Atualizando status para CAPTURED...');
-    await this.updatePaymentStatus(payment.id, PaymentStatus.CAPTURED);
+    console.log(
+      '🔄 [CAPTURE_AFTER_CLASS] Liberando saldo interno e marcando como CAPTURED...',
+    );
+    const releaseResult = await this.releasePaymentToInternalWallet(payment, {
+      classId,
+      reason,
+      allowPending: !isStripePayment,
+    });
 
     if (!mpCaptureSuccess) {
       console.warn(
         '⚠️ [CAPTURE_AFTER_CLASS] Split aplicado localmente apesar da falha no MP',
+      );
+    }
+
+    if (releaseResult.alreadyReleased) {
+      console.log(
+        `ℹ️ [CAPTURE_AFTER_CLASS] Pagamento ${payment.id} já tinha liberação registrada`,
       );
     }
 
@@ -1639,6 +1995,10 @@ export class PaymentsService {
       description: transaction.description,
       mpTransactionId: transaction.mpTransactionId,
       mpOperationId: transaction.mpOperationId,
+      stripeTransferId: transaction.stripeTransferId,
+      stripeBalanceTransactionId: transaction.stripeBalanceTransactionId,
+      stripeRefundId: transaction.stripeRefundId,
+      stripeDisputeId: transaction.stripeDisputeId,
       status: transaction.status,
       metadata: transaction.metadata,
       user: transaction.user
@@ -1669,20 +2029,6 @@ export class PaymentsService {
         `💸 [TRANSFER] Processando transferência real para personal ${transferDto.personalId}`,
       );
 
-      // Validar dados de transferência
-      const validation = await this.mercadoPagoService.validateTransferData({
-        personalId: transferDto.personalId,
-        amount: transferDto.amount,
-        transferMethod: transferDto.transferMethod,
-        personalData: transferDto.personalData,
-      });
-
-      if (!validation.isValid) {
-        throw new BadRequestException(
-          `Dados de transferência inválidos: ${validation.errors.join(', ')}`,
-        );
-      }
-
       // Buscar dados do personal
       const personal = await this.db.query.users.findFirst({
         where: eq(users.id, transferDto.personalId),
@@ -1703,13 +2049,28 @@ export class PaymentsService {
         );
       }
 
-      // Fazer transferência via Mercado Pago
+      if (!this.isStripeWithdrawalProfileReady(financialProfile)) {
+        throw new BadRequestException(
+          'Personal trainer ainda não tem Stripe Connect pronto para saque',
+        );
+      }
+
+      const transferMethod = this.normalizeWithdrawalTransferMethod(
+        transferDto.transferMethod,
+        financialProfile,
+      );
+      const personalData = this.preparePersonalDataForTransfer(
+        financialProfile,
+        transferMethod,
+      );
+
+      // Fazer transferência via Stripe Connect
       const payoutResult = await this.withdrawalPayoutProvider.executePayout({
         personalId: transferDto.personalId,
         amount: transferDto.amount,
         description: transferDto.description,
-        transferMethod: transferDto.transferMethod,
-        personalData: transferDto.personalData,
+        transferMethod,
+        personalData,
         context: {
           initiatedBy: `admin:${adminId}`,
         },
@@ -1739,7 +2100,7 @@ export class PaymentsService {
         metadata: {
           transferId: payoutResult.transferId,
           provider: payoutResult.provider,
-          transferMethod: transferDto.transferMethod,
+          transferMethod,
           adminId,
         },
       });
@@ -1773,7 +2134,6 @@ export class PaymentsService {
       adminId,
       adminNotes: approveDto.adminNotes,
       keepPendingOnFailure: false,
-      skipPayoutProvider: true,
     });
 
     if (!result.success || !result.withdrawal) {
@@ -1964,6 +2324,10 @@ export class PaymentsService {
           // ✅ NÃO enviamos o accessToken do personal para operações de payout (saque)
           // por motivos de segurança e porque o MP exige o token da plataforma para repasses.
         };
+      case 'stripe_connect':
+        return {
+          stripeAccountId: financialProfile.stripeAccountId,
+        };
       default:
         throw new Error('Método de transferência inválido');
     }
@@ -2001,6 +2365,14 @@ export class PaymentsService {
         throw new NotFoundException('Solicitação de saque não encontrada');
       }
 
+      if (withdrawal.status === 'completed') {
+        return {
+          success: true,
+          withdrawal,
+          transferId: withdrawal.transactionId,
+        };
+      }
+
       if (
         withdrawal.status !== 'pending' &&
         withdrawal.status !== 'processing'
@@ -2016,10 +2388,17 @@ export class PaymentsService {
         throw new BadRequestException('Perfil financeiro não encontrado');
       }
 
+      if (!this.isStripeWithdrawalProfileReady(financialProfile)) {
+        throw new BadRequestException(
+          'Personal trainer ainda não tem Stripe Connect pronto para saque',
+        );
+      }
+
       const requestedAmount = parseFloat(withdrawal.amount);
       const netAmount = parseFloat(withdrawal.netAmount);
       const transferMethod = this.normalizeWithdrawalTransferMethod(
         options?.transferMethodOverride || withdrawal.method,
+        financialProfile,
       );
       const personalData = this.preparePersonalDataForTransfer(
         financialProfile,
@@ -2036,6 +2415,10 @@ export class PaymentsService {
           ? currentTransferData.payout
           : {};
       const payoutAttemptCount = Number(previousPayout.attemptCount || 0) + 1;
+      const payoutIdempotencyKey =
+        previousPayout.idempotencyKey ||
+        `stripe_withdrawal:${withdrawalId}:${withdrawal.userId}:${this.toMoneyString(netAmount)}`;
+      const stripeTransferGroup = `withdrawal_${withdrawalId}`;
 
       await this.db
         .update(withdrawalRequests)
@@ -2050,10 +2433,13 @@ export class PaymentsService {
               ...previousPayout,
               provider: previousPayout.provider || 'pending_provider',
               attemptCount: payoutAttemptCount,
+              idempotencyKey: payoutIdempotencyKey,
               lastAttemptAt: attemptTimestamp,
               lastInitiatedBy: options?.initiatedBy || 'admin',
               lastTransferMethod: transferMethod,
               lastStatus: 'processing',
+              stripeAccountId: financialProfile.stripeAccountId,
+              stripeTransferGroup,
             },
           },
         })
@@ -2079,6 +2465,7 @@ export class PaymentsService {
           context: {
             withdrawalId,
             initiatedBy: options?.initiatedBy || 'admin',
+            idempotencyKey: payoutIdempotencyKey,
           },
         });
       }
@@ -2088,30 +2475,55 @@ export class PaymentsService {
           ? 'pending'
           : 'failed';
 
-        const [failedWithdrawal] = await this.db
-          .update(withdrawalRequests)
-          .set({
-            status: fallbackStatus,
-            failureReason:
-              payoutResult.failureReason || 'Falha ao processar transferência',
-            updatedAt: new Date(),
-            transferData: {
-              ...currentTransferData,
-              payout: {
-                ...previousPayout,
-                provider: payoutResult.provider,
-                attemptCount: payoutAttemptCount,
-                lastAttemptAt: attemptTimestamp,
-                lastInitiatedBy: options?.initiatedBy || 'admin',
-                lastTransferMethod: transferMethod,
-                lastStatus: fallbackStatus,
-                failureCode: payoutResult.failureCode,
-                failureReason: payoutResult.failureReason,
-              },
+        const failureUpdate = {
+          status: fallbackStatus,
+          failureReason:
+            payoutResult.failureReason || 'Falha ao processar transferência',
+          updatedAt: new Date(),
+          transferData: {
+            ...currentTransferData,
+            payout: {
+              ...previousPayout,
+              provider: payoutResult.provider,
+              attemptCount: payoutAttemptCount,
+              idempotencyKey:
+                payoutResult.idempotencyKey || payoutIdempotencyKey,
+              lastAttemptAt: attemptTimestamp,
+              lastInitiatedBy: options?.initiatedBy || 'admin',
+              lastTransferMethod: transferMethod,
+              lastStatus: fallbackStatus,
+              stripeAccountId:
+                payoutResult.destinationAccountId ||
+                financialProfile.stripeAccountId,
+              stripeTransferGroup,
+              failureCode: payoutResult.failureCode,
+              failureReason: payoutResult.failureReason,
             },
-          })
-          .where(eq(withdrawalRequests.id, withdrawalId))
-          .returning();
+          },
+        };
+
+        const [failedWithdrawal] = options?.keepPendingOnFailure
+          ? await this.db
+              .update(withdrawalRequests)
+              .set(failureUpdate)
+              .where(eq(withdrawalRequests.id, withdrawalId))
+              .returning()
+          : await this.db.transaction(async (tx: any) => {
+              await tx
+                .update(userWallets)
+                .set({
+                  availableBalance: sql`${userWallets.availableBalance} + ${this.toMoneyString(requestedAmount)}::numeric`,
+                  pendingBalance: sql`${userWallets.pendingBalance} - ${this.toMoneyString(requestedAmount)}::numeric`,
+                  updatedAt: new Date(),
+                })
+                .where(eq(userWallets.userId, withdrawal.userId));
+
+              return tx
+                .update(withdrawalRequests)
+                .set(failureUpdate)
+                .where(eq(withdrawalRequests.id, withdrawalId))
+                .returning();
+            });
 
         await this.createWithdrawalHistory({
           withdrawalId,
@@ -2128,6 +2540,11 @@ export class PaymentsService {
             failureCode: payoutResult.failureCode,
             provider: payoutResult.provider,
             transferMethod,
+            stripeAccountId:
+              payoutResult.destinationAccountId ||
+              financialProfile.stripeAccountId,
+            stripeTransferGroup,
+            idempotencyKey: payoutResult.idempotencyKey || payoutIdempotencyKey,
             initiatedBy: options?.initiatedBy || 'admin',
           },
         });
@@ -2139,39 +2556,52 @@ export class PaymentsService {
         };
       }
 
-      const wallet = await this.getUserWallet(withdrawal.userId);
-      await this.updateWallet(withdrawal.userId, {
-        pendingBalance: wallet.pendingBalance - requestedAmount,
-        totalWithdrawn: wallet.totalWithdrawn + requestedAmount,
-      });
+      const completedAt = new Date();
+      const [updatedWithdrawal] = await this.db.transaction(async (tx: any) => {
+        await tx
+          .update(userWallets)
+          .set({
+            pendingBalance: sql`${userWallets.pendingBalance} - ${this.toMoneyString(requestedAmount)}::numeric`,
+            totalWithdrawn: sql`${userWallets.totalWithdrawn} + ${this.toMoneyString(requestedAmount)}::numeric`,
+            lastWithdrawalAt: completedAt,
+            updatedAt: completedAt,
+          })
+          .where(eq(userWallets.userId, withdrawal.userId));
 
-      const [updatedWithdrawal] = await this.db
-        .update(withdrawalRequests)
-        .set({
-          status: 'completed',
-          adminNotes: options?.adminNotes,
-          mpTransferId: payoutResult.transferId,
-          transactionId: payoutResult.transferId,
-          processedAt: withdrawal.processedAt || new Date(),
-          completedAt: new Date(),
-          updatedAt: new Date(),
-          failureReason: null,
-          transferData: {
-            ...currentTransferData,
-            payout: {
-              ...previousPayout,
-              provider: payoutResult.provider,
-              attemptCount: payoutAttemptCount,
-              lastAttemptAt: attemptTimestamp,
-              lastInitiatedBy: options?.initiatedBy || 'admin',
-              lastTransferMethod: transferMethod,
-              lastStatus: 'completed',
-              externalTransferId: payoutResult.transferId,
+        return tx
+          .update(withdrawalRequests)
+          .set({
+            status: 'completed',
+            adminNotes: options?.adminNotes,
+            transactionId: payoutResult.transferId,
+            processedAt: withdrawal.processedAt || completedAt,
+            completedAt,
+            updatedAt: completedAt,
+            failureReason: null,
+            transferData: {
+              ...currentTransferData,
+              payout: {
+                ...previousPayout,
+                provider: payoutResult.provider,
+                attemptCount: payoutAttemptCount,
+                idempotencyKey:
+                  payoutResult.idempotencyKey || payoutIdempotencyKey,
+                lastAttemptAt: attemptTimestamp,
+                lastInitiatedBy: options?.initiatedBy || 'admin',
+                lastTransferMethod: transferMethod,
+                lastStatus: 'completed',
+                externalTransferId: payoutResult.transferId,
+                balanceTransactionId: payoutResult.balanceTransactionId,
+                stripeAccountId:
+                  payoutResult.destinationAccountId ||
+                  financialProfile.stripeAccountId,
+                stripeTransferGroup,
+              },
             },
-          },
-        })
-        .where(eq(withdrawalRequests.id, withdrawalId))
-        .returning();
+          })
+          .where(eq(withdrawalRequests.id, withdrawalId))
+          .returning();
+      });
 
       await this.createWithdrawalHistory({
         withdrawalId,
@@ -2183,8 +2613,14 @@ export class PaymentsService {
         adminId: options?.adminId,
         metadata: {
           transferId: payoutResult.transferId,
+          balanceTransactionId: payoutResult.balanceTransactionId,
           provider: payoutResult.provider,
           transferMethod,
+          stripeAccountId:
+            payoutResult.destinationAccountId ||
+            financialProfile.stripeAccountId,
+          stripeTransferGroup,
+          idempotencyKey: payoutResult.idempotencyKey || payoutIdempotencyKey,
           requestedAmount,
           netAmount,
           initiatedBy: options?.initiatedBy || 'admin',
@@ -2210,8 +2646,15 @@ export class PaymentsService {
 
   private normalizeWithdrawalTransferMethod(
     method: string,
+    financialProfile?: any,
   ): WithdrawalTransferMethod {
+    if (financialProfile?.stripeAccountId) {
+      return 'stripe_connect';
+    }
+
     switch (method) {
+      case 'stripe_connect':
+        return 'stripe_connect';
       case 'mercado_pago':
       case 'mercadopago_balance':
         return 'mercadopago_balance';
@@ -2222,6 +2665,39 @@ export class PaymentsService {
       default:
         throw new Error('Método de transferência inválido');
     }
+  }
+
+  private isStripeWithdrawalProfileReady(financialProfile: any): boolean {
+    const requirements = this.normalizeStripeRequirements(
+      financialProfile?.stripeRequirements,
+    );
+
+    return Boolean(
+      financialProfile?.stripeAccountId &&
+        financialProfile?.stripeDetailsSubmitted &&
+        financialProfile?.stripePayoutsEnabled &&
+        requirements.currentlyDue.length === 0 &&
+        requirements.pastDue.length === 0,
+    );
+  }
+
+  private normalizeStripeRequirements(raw: any): {
+    currentlyDue: string[];
+    pastDue: string[];
+  } {
+    const requirements = raw || {};
+    return {
+      currentlyDue: Array.isArray(requirements.currently_due)
+        ? requirements.currently_due
+        : Array.isArray(requirements.currentlyDue)
+          ? requirements.currentlyDue
+          : [],
+      pastDue: Array.isArray(requirements.past_due)
+        ? requirements.past_due
+        : Array.isArray(requirements.pastDue)
+          ? requirements.pastDue
+          : [],
+    };
   }
 
   private async createWithdrawalHistory(data: {
@@ -2249,6 +2725,10 @@ export class PaymentsService {
   }
 
   private formatWithdrawalResponse(withdrawal: any): WithdrawalResponseDto {
+    const payout =
+      withdrawal.transferData && typeof withdrawal.transferData === 'object'
+        ? withdrawal.transferData.payout
+        : undefined;
     const userName =
       withdrawal.user?.firstName != null && withdrawal.user?.lastName != null
         ? `${withdrawal.user.firstName} ${withdrawal.user.lastName}`.trim()
@@ -2268,6 +2748,8 @@ export class PaymentsService {
       rejectionReason: withdrawal.rejectionReason,
       adminNotes: withdrawal.adminNotes,
       mpTransferId: withdrawal.mpTransferId,
+      stripeTransferId:
+        payout?.provider === 'stripe' ? payout.externalTransferId : undefined,
       createdAt: withdrawal.createdAt,
       processedAt: withdrawal.processedAt,
       user: withdrawal.user

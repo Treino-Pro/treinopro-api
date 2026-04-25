@@ -23,6 +23,7 @@ import { StripeRefundsService } from './stripe-refunds.service';
 import { StripeTransfersService } from './stripe-transfers.service';
 import {
   MercadoPagoWithdrawalPayoutProvider,
+  StripeWithdrawalPayoutProvider,
   WITHDRAWAL_PAYOUT_PROVIDER,
 } from './withdrawal-payout.provider';
 
@@ -51,9 +52,10 @@ import {
     StripeRefundsService,
     StripeTransfersService,
     MercadoPagoWithdrawalPayoutProvider,
+    StripeWithdrawalPayoutProvider,
     {
       provide: WITHDRAWAL_PAYOUT_PROVIDER,
-      useExisting: MercadoPagoWithdrawalPayoutProvider,
+      useExisting: StripeWithdrawalPayoutProvider,
     },
   ],
   exports: [

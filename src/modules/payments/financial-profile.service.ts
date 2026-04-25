@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import {
   financialProfiles,
   withdrawalRequests,
@@ -310,6 +310,26 @@ export class FinancialProfileService {
       );
     }
 
+    const existingOpenWithdrawal =
+      await this.db.query.withdrawalRequests.findFirst({
+        where: and(
+          eq(withdrawalRequests.userId, userId),
+          inArray(withdrawalRequests.status, ['pending', 'processing']),
+        ),
+        orderBy: [desc(withdrawalRequests.createdAt)],
+      });
+
+    if (existingOpenWithdrawal) {
+      return {
+        ...this.formatWithdrawalResponse(existingOpenWithdrawal),
+        idempotent: true,
+        pendingManualApproval: existingOpenWithdrawal.status === 'pending',
+      } as WithdrawalHistoryDto & {
+        idempotent: boolean;
+        pendingManualApproval: boolean;
+      };
+    }
+
     // Verificar saldo disponível
     const wallet = await this.db.query.userWallets.findFirst({
       where: eq(userWallets.userId, userId),
@@ -320,6 +340,10 @@ export class FinancialProfileService {
     }
 
     const requestedAmount = parseFloat(withdrawalDto.amount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      throw new BadRequestException('Valor de saque inválido');
+    }
+
     const availableBalance = parseFloat(wallet.availableBalance);
 
     if (requestedAmount > availableBalance) {
@@ -328,72 +352,86 @@ export class FinancialProfileService {
       );
     }
 
-    // Calcular taxa
-    const fee = this.calculateWithdrawalFee(
-      requestedAmount,
-      withdrawalDto.method,
-      withdrawalDto.urgency,
-    );
+    // No fluxo Stripe Connect, taxas de gateway ficam com a plataforma.
+    const fee = 0;
     const netAmount = requestedAmount - fee;
+    const amountString = requestedAmount.toFixed(2);
+    const netAmountString = netAmount.toFixed(2);
+    const now = new Date();
 
-    // Criar solicitação de saque
-    const [withdrawalRequest] = await this.db
-      .insert(withdrawalRequests)
-      .values({
+    const [withdrawalRequest] = await this.db.transaction(async (tx: any) => {
+      const [updatedWallet] = await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} - ${amountString}::numeric`,
+          pendingBalance: sql`${userWallets.pendingBalance} + ${amountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(userWallets.id, wallet.id),
+            sql`${userWallets.availableBalance} >= ${amountString}::numeric`,
+          ),
+        )
+        .returning();
+
+      if (!updatedWallet) {
+        throw new BadRequestException(
+          `Saldo insuficiente. Disponível: R$ ${availableBalance.toFixed(2)}`,
+        );
+      }
+
+      const [createdWithdrawal] = await tx
+        .insert(withdrawalRequests)
+        .values({
+          userId,
+          walletId: wallet.id,
+          amount: amountString,
+          fee: fee.toFixed(2),
+          netAmount: netAmountString,
+          method: 'stripe_connect',
+          urgency: withdrawalDto.urgency || 'normal',
+          description: withdrawalDto.description,
+          status: 'pending',
+          transferData: {
+            provider: 'stripe',
+            requestedMethod: withdrawalDto.method,
+            requestedAt: now.toISOString(),
+            stripeAccount: {
+              accountId: rawProfile.stripeAccountId,
+              detailsSubmitted: rawProfile.stripeDetailsSubmitted,
+              payoutsEnabled: rawProfile.stripePayoutsEnabled,
+            },
+            profile,
+          },
+        })
+        .returning();
+
+      await tx.insert(withdrawalHistory).values({
+        withdrawalId: createdWithdrawal.id,
         userId,
-        walletId: wallet.id,
-        amount: withdrawalDto.amount,
-        fee: fee.toString(),
-        netAmount: netAmount.toString(),
-        method: withdrawalDto.method,
-        urgency: withdrawalDto.urgency || 'normal',
-        description: withdrawalDto.description,
-        status: 'pending',
-        transferData: {
-          profile: profile,
-          requestedAt: new Date(),
+        action: 'requested',
+        description: 'Saque solicitado pelo aplicativo',
+        metadata: {
+          provider: 'stripe',
+          method: 'stripe_connect',
+          requestedMethod: withdrawalDto.method,
+          stripeAccountId: rawProfile.stripeAccountId,
+          amount: requestedAmount,
+          fee,
+          netAmount,
+          requestedAt: now.toISOString(),
         },
-      })
-      .returning();
+        createdAt: now,
+      });
 
-    await this.db.insert(withdrawalHistory).values({
-      withdrawalId: withdrawalRequest.id,
-      userId,
-      action: 'requested',
-      description: 'Saque solicitado pelo aplicativo',
-      metadata: {
-        method: withdrawalDto.method,
-        amount: requestedAmount,
-        fee,
-        netAmount,
-        requestedAt: new Date().toISOString(),
-      },
-      createdAt: new Date(),
+      return [createdWithdrawal];
     });
-
-    // Atualizar saldo da carteira (reservar o valor)
-    await this.db
-      .update(userWallets)
-      .set({
-        availableBalance: (availableBalance - requestedAmount).toString(),
-        pendingBalance: (
-          parseFloat(wallet.pendingBalance) + requestedAmount
-        ).toString(),
-        updatedAt: new Date(),
-      })
-      .where(eq(userWallets.userId, userId));
-
-    const transferMethod =
-      withdrawalDto.method === PaymentMethod.MERCADO_PAGO
-        ? 'mercadopago_balance'
-        : withdrawalDto.method === PaymentMethod.BANK_TRANSFER
-          ? 'bank_transfer'
-          : 'bank_transfer';
 
     const autoResult = await this.paymentsService.processWithdrawalPayout(
       withdrawalRequest.id,
       {
-        transferMethodOverride: transferMethod,
+        transferMethodOverride: 'stripe_connect',
         initiatedBy: 'system:auto_withdrawal',
         keepPendingOnFailure: true,
       },

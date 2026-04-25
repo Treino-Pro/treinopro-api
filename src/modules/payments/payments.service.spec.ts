@@ -54,6 +54,7 @@ const mockDb = {
     returning: jest.fn().mockResolvedValue([]),
   })),
   select: jest.fn(),
+  transaction: jest.fn(async (callback: any) => callback(mockDb)),
 };
 
 // Mock do MercadoPagoService
@@ -85,6 +86,21 @@ describe('PaymentsService', () => {
   let service: PaymentsService;
 
   beforeEach(async () => {
+    mockDb.transaction.mockImplementation(async (callback: any) =>
+      callback(mockDb),
+    );
+    mockDb.insert.mockReturnValue({
+      values: jest.fn().mockReturnValue({
+        onConflictDoNothing: jest.fn().mockResolvedValue(undefined),
+        returning: jest.fn().mockResolvedValue([]),
+      }),
+    });
+    mockDb.update.mockReturnValue({
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockResolvedValue([]),
+    });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -290,6 +306,9 @@ describe('PaymentsService', () => {
       };
 
       mockDb.query.payments.findFirst.mockResolvedValue(mockPayment);
+      mockMercadoPagoService.mapPaymentStatus.mockReturnValueOnce(
+        PaymentStatus.AUTHORIZED,
+      );
       mockDb.update.mockReturnValue({
         set: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -751,21 +770,113 @@ describe('PaymentsService', () => {
 
     it('deve lançar NotFoundException quando pagamento PIX não está vinculado ao classId', async () => {
       mockDb.query.payments.findFirst.mockResolvedValue(null);
+      mockDb.query.classes.findFirst.mockResolvedValue(null);
 
       await expect(service.capturePaymentAfterClass(classId)).rejects.toThrow(
         'Pagamento não encontrado para esta aula',
       );
     });
 
-    it('deve lançar BadRequestException se pagamento já foi capturado', async () => {
+    it('deve ser idempotente se pagamento já foi capturado', async () => {
       mockDb.query.payments.findFirst.mockResolvedValue({
         ...pixPayment,
         status: PaymentStatus.CAPTURED,
       });
 
-      await expect(service.capturePaymentAfterClass(classId)).rejects.toThrow(
-        /capturável/,
+      await expect(
+        service.capturePaymentAfterClass(classId),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('capturePaymentAfterClass - Stripe Fase 5', () => {
+    const classId = 'class-stripe-1';
+    const stripePayment = {
+      id: 'pay-stripe-1',
+      classId,
+      proposalId: 'prop-stripe-1',
+      studentId: 'student-1',
+      personalId: 'personal-1',
+      provider: 'stripe',
+      stripePaymentIntentId: 'pi_123',
+      stripeChargeId: 'ch_123',
+      stripeLatestChargeId: 'ch_123',
+      stripeTransferGroup: 'proposal_prop-stripe-1',
+      processingModel: 'separate_charges_and_transfers',
+      totalAmount: '100.00',
+      platformFee: '10.00',
+      personalAmount: '90.00',
+      status: PaymentStatus.AUTHORIZED,
+      type: PaymentType.CLASS_PAYMENT,
+    };
+
+    it('libera saldo interno e registra metadados Stripe sem chamar Mercado Pago', async () => {
+      const capturedPayment = {
+        ...stripePayment,
+        status: PaymentStatus.CAPTURED,
+      };
+      const insertValues = jest.fn().mockReturnValue({
+        onConflictDoNothing: jest.fn().mockResolvedValue(undefined),
+      });
+
+      mockDb.query.payments.findFirst.mockResolvedValue(stripePayment);
+      mockDb.update.mockReturnValue({
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([capturedPayment]),
+      });
+      mockDb.insert.mockReturnValue({
+        values: insertValues,
+      });
+
+      await expect(
+        service.capturePaymentAfterClass(classId),
+      ).resolves.not.toThrow();
+
+      expect(mockMercadoPagoService.capturePayment).not.toHaveBeenCalled();
+
+      const transactionBatch = insertValues.mock.calls.find(([value]) =>
+        Array.isArray(value),
+      )?.[0];
+
+      expect(transactionBatch).toHaveLength(2);
+      expect(transactionBatch[0]).toEqual(
+        expect.objectContaining({
+          userId: 'personal-1',
+          type: PaymentType.PERSONAL_EARNINGS,
+          amount: '90.00',
+          status: PaymentStatus.CAPTURED,
+          metadata: expect.objectContaining({
+            provider: 'stripe',
+            processingModel: 'separate_charges_and_transfers',
+            releaseType: 'internal_wallet_release',
+            stripePaymentIntentId: 'pi_123',
+            stripeChargeId: 'ch_123',
+            stripeTransferGroup: 'proposal_prop-stripe-1',
+          }),
+        }),
       );
+      expect(transactionBatch[1]).toEqual(
+        expect.objectContaining({
+          userId: 'student-1',
+          type: PaymentType.CLASS_PAYMENT,
+          amount: '-100.00',
+          status: PaymentStatus.CAPTURED,
+        }),
+      );
+    });
+
+    it('não libera saldo se o PaymentIntent Stripe ainda não foi confirmado', async () => {
+      mockDb.query.payments.findFirst.mockResolvedValue({
+        ...stripePayment,
+        status: PaymentStatus.PENDING,
+      });
+
+      await expect(service.capturePaymentAfterClass(classId)).rejects.toThrow(
+        'Pagamento Stripe ainda não confirmado',
+      );
+
+      expect(mockDb.transaction).not.toHaveBeenCalled();
     });
   });
 
