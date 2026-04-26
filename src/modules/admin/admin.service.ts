@@ -74,7 +74,8 @@ export class AdminService {
             personalAmount: payments.personalAmount,
             status: payments.status,
             createdAt: payments.createdAt,
-            mpPaymentId: payments.mpPaymentId,
+            provider: payments.provider,
+            stripePaymentIntentId: payments.stripePaymentIntentId,
             studentFirstName: users.firstName,
             studentLastName: users.lastName,
             studentEmail: users.email,
@@ -133,7 +134,8 @@ export class AdminService {
                   : new Date().toISOString(),
                 studentName: studentName || null,
                 personalName: personalName || null,
-                mpPaymentId: row.mpPaymentId || null,
+                provider: row.provider || null,
+                stripePaymentIntentId: row.stripePaymentIntentId || null,
               };
             });
           }),
@@ -703,7 +705,8 @@ export class AdminService {
           personalAmount: payments.personalAmount,
           status: payments.status,
           createdAt: payments.createdAt,
-          mpPaymentId: payments.mpPaymentId,
+          provider: payments.provider,
+          stripePaymentIntentId: payments.stripePaymentIntentId,
           studentFirstName: users.firstName,
           studentLastName: users.lastName,
           studentEmail: users.email,
@@ -768,7 +771,8 @@ export class AdminService {
             : new Date().toISOString(),
           studentName: studentName || null,
           personalName: personalName || null,
-          mpPaymentId: row.mpPaymentId || null,
+          provider: row.provider || null,
+          stripePaymentIntentId: row.stripePaymentIntentId || null,
         };
       });
 

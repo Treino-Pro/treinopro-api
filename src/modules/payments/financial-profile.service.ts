@@ -18,7 +18,6 @@ import {
   UpdateFinancialProfileDto,
   FinancialProfileResponseDto,
   ValidateBankAccountDto,
-  ValidateMercadoPagoDto,
   WithdrawalRequestDto,
   WithdrawalHistoryDto,
   PersonalFinancialStatsDto,
@@ -63,7 +62,7 @@ export class FinancialProfileService {
       .insert(financialProfiles)
       .values({
         userId,
-        preferredMethod: PaymentMethod.BANK_TRANSFER,
+        preferredMethod: PaymentMethod.STRIPE_CONNECT,
         isComplete: false,
         canReceivePayments: false,
       })
@@ -132,14 +131,6 @@ export class FinancialProfileService {
       updateData.document = updateDto.bankAccount.document;
     }
 
-    // Dados do Mercado Pago
-    if (updateDto.mercadoPagoAccount) {
-      updateData.mpEmail = updateDto.mercadoPagoAccount.email;
-      updateData.mpUserId = updateDto.mercadoPagoAccount.userId;
-      updateData.mpAccessToken = updateDto.mercadoPagoAccount.accessToken;
-      updateData.mpIsVerified = false; // Requer verificação
-    }
-
     // Verificar se o perfil está completo
     updateData.isComplete = this.checkProfileCompleteness(updateDto);
     updateData.canReceivePayments = updateData.isComplete;
@@ -187,17 +178,7 @@ export class FinancialProfileService {
       });
     }
 
-    if (updateDto.preferredMethod === PaymentMethod.MERCADO_PAGO) {
-      if (!updateDto.mercadoPagoAccount) {
-        throw new BadRequestException('Dados do Mercado Pago são obrigatórios');
-      }
-
-      // Validar email do MP
-      await this.validateMercadoPago({
-        email: updateDto.mercadoPagoAccount.email,
-        accessToken: updateDto.mercadoPagoAccount.accessToken,
-      });
-    }
+    if (updateDto.preferredMethod === PaymentMethod.STRIPE_CONNECT) return;
   }
 
   // Verificar se perfil está completo
@@ -215,10 +196,7 @@ export class FinancialProfileService {
       );
     }
 
-    if (updateDto.preferredMethod === PaymentMethod.MERCADO_PAGO) {
-      const mp = updateDto.mercadoPagoAccount;
-      return !!mp?.email;
-    }
+    if (updateDto.preferredMethod === PaymentMethod.STRIPE_CONNECT) return true;
 
     return false;
   }
@@ -253,29 +231,6 @@ export class FinancialProfileService {
     // - Consulta à API do banco central
     // - Validação de CPF/CNPJ com dígitos verificadores
     // - Verificação se a conta existe
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-    };
-  }
-
-  // Validar Mercado Pago
-  async validateMercadoPago(
-    validateDto: ValidateMercadoPagoDto,
-  ): Promise<{ isValid: boolean; errors: string[] }> {
-    const errors: string[] = [];
-
-    // Validar formato do email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(validateDto.email)) {
-      errors.push('Email inválido');
-    }
-
-    // Aqui você pode adicionar validações com a API do MP:
-    // - Verificar se a conta existe
-    // - Validar access token se fornecido
-    // - Verificar status da conta
 
     return {
       isValid: errors.length === 0,
@@ -468,8 +423,6 @@ export class FinancialProfileService {
 
     if (method === PaymentMethod.BANK_TRANSFER) {
       fee = urgency === 'urgent' ? 5.0 : 2.0; // Taxa fixa
-    } else if (method === PaymentMethod.MERCADO_PAGO) {
-      fee = amount * 0.01; // 1% do valor
     }
 
     return fee;
@@ -544,11 +497,6 @@ export class FinancialProfileService {
       if (!profile.bankAccount?.document) missing.push('CPF/CNPJ');
     }
 
-    if (profile.preferredMethod === PaymentMethod.MERCADO_PAGO) {
-      if (!profile.mercadoPagoAccount?.email)
-        missing.push('Email do Mercado Pago');
-    }
-
     return missing;
   }
 
@@ -576,13 +524,6 @@ export class FinancialProfileService {
             agency: this.maskAgency(profile.agency),
             accountHolderName: profile.accountHolderName,
             document: this.maskDocument(profile.document),
-          }
-        : undefined,
-      mercadoPagoAccount: profile.mpEmail
-        ? {
-            email: this.maskEmail(profile.mpEmail),
-            userId: profile.mpUserId,
-            isVerified: profile.mpIsVerified,
           }
         : undefined,
       canReceivePayments: profile.canReceivePayments,
@@ -631,11 +572,6 @@ export class FinancialProfileService {
   }
 
   // Métodos de mascaramento para segurança
-  private maskEmail(email: string): string {
-    const [local, domain] = email.split('@');
-    return `${local.charAt(0)}***@${domain}`;
-  }
-
   private maskAccountNumber(account: string): string {
     if (!account) return '';
     return account.replace(/\d(?=\d{2})/g, '*');

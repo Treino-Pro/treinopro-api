@@ -63,16 +63,6 @@ export class EnvironmentVariables {
   @IsOptional()
   CORS_ORIGIN?: string;
 
-  // Mercado Pago (obrigatórios)
-  @IsString()
-  MP_ACCESS_TOKEN: string;
-
-  @IsString()
-  MP_PUBLIC_KEY: string;
-
-  @IsString()
-  MP_WEBHOOK_SECRET: string;
-
   // Stripe
   @IsString()
   @IsOptional()

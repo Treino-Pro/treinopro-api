@@ -473,7 +473,7 @@ export class ClassesService {
           } | null = null;
 
           if (payment.proposalId) {
-            externalPayoutResult = await this.triggerPixProposalSplit(
+            externalPayoutResult = await this.triggerProposalSettlementGuard(
               id,
               payment.proposalId,
               classData.personalId,
@@ -533,7 +533,7 @@ export class ClassesService {
                   classId: id,
                   amount: personalAmount.toFixed(2),
                   message:
-                    'O saldo foi liberado na sua carteira TreinoPro, mas o repasse externo ao Mercado Pago ficou pendente.',
+                    'O saldo foi liberado na sua carteira TreinoPro, mas o repasse externo ficou pendente.',
                   externalPayoutError:
                     externalPayoutResult.error || 'unknown_error',
                 },
@@ -550,9 +550,9 @@ export class ClassesService {
           console.log(
             'ℹ️ [COMPLETE_CLASS] Pagamento já está capturado - nenhum repasse adicional necessário',
           );
-          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          // Garantir idempotência da liberação mesmo se o status já foi atualizado
           if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
+            await this.triggerProposalSettlementGuard(
               id,
               payment.proposalId,
               classData.personalId,
@@ -568,14 +568,11 @@ export class ClassesService {
           );
         }
       } else {
-        // Sem registro na tabela payments → pode ser pagamento PIX de proposta.
-        // Nesse caso o dinheiro está na conta MP da plataforma e o repasse deve
-        // ser feito via MP Transfers para a conta MP do personal.
         console.log(
-          '⚠️ [COMPLETE_CLASS] Nenhum pagamento na tabela payments — verificando proposta PIX...',
+          '⚠️ [COMPLETE_CLASS] Nenhum pagamento na tabela payments — proposta sem pagamento Stripe local',
         );
         if (classData.proposalId) {
-          await this.triggerPixProposalSplit(
+          await this.triggerProposalSettlementGuard(
             id,
             classData.proposalId,
             classData.personalId,
@@ -769,9 +766,8 @@ export class ClassesService {
             '✅ [TIMER_EXPIRATION] Pagamento capturado e split aplicado via PaymentsService',
           );
 
-          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
           if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
+            await this.triggerProposalSettlementGuard(
               classId,
               payment.proposalId,
               classData.personalId,
@@ -781,9 +777,9 @@ export class ClassesService {
           console.log(
             'ℹ️ [TIMER_EXPIRATION] Pagamento já capturado - nenhum repasse adicional necessário',
           );
-          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          // Garantir idempotência da liberação mesmo se o status já foi atualizado
           if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
+            await this.triggerProposalSettlementGuard(
               classId,
               payment.proposalId,
               classData.personalId,
@@ -792,10 +788,10 @@ export class ClassesService {
         }
       } else {
         console.log(
-          '⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado — verificando proposta PIX...',
+          '⚠️ [TIMER_EXPIRATION] Nenhum pagamento encontrado — proposta sem pagamento Stripe local',
         );
         if (classData.proposalId) {
-          await this.triggerPixProposalSplit(
+          await this.triggerProposalSettlementGuard(
             classId,
             classData.proposalId,
             classData.personalId,
@@ -1069,8 +1065,8 @@ export class ClassesService {
     return this.formatClassResponse(updatedClass);
   }
 
-  // Verifica se a proposta tem pagamento PIX confirmado e aciona o repasse MP
-  private async triggerPixProposalSplit(
+  // Cutover Stripe: pagamentos de proposta liberam carteira via PaymentsService.
+  private async triggerProposalSettlementGuard(
     classId: string,
     proposalId: string,
     personalId: string,
@@ -1086,94 +1082,49 @@ export class ClassesService {
       const proposalPayment = await this.db.query.payments.findFirst({
         where: eq(payments.proposalId, proposalId),
         columns: {
-          provider: true,
-        },
-      });
-
-      if (proposalPayment?.provider === 'stripe') {
-        console.log(
-          `ℹ️ [SPLIT PIX] Proposta ${proposalId} usa Stripe — repasse MP legado pulado`,
-        );
-        return {
-          attempted: false,
-          success: true,
-          skipped: true,
-          reason: 'stripe_internal_wallet_release',
-        };
-      }
-
-      const proposal = await this.db.query.proposals.findFirst({
-        where: eq(proposals.id, proposalId),
-        columns: {
           id: true,
-          paymentId: true,
-          paymentStatus: true,
-          price: true,
+          provider: true,
+          status: true,
         },
       });
 
-      if (!proposal) {
-        console.log(`⚠️ [SPLIT PIX] Proposta ${proposalId} não encontrada`);
-        return {
-          attempted: false,
-          success: false,
-          skipped: true,
-          reason: 'proposal_not_found',
-        };
-      }
-
-      const { paymentId, paymentStatus, price } = proposal;
-
-      // Apenas pagamentos confirmados e com ID numérico do MP (PIX real)
-      const confirmedStatuses = ['captured', 'approved', 'authorized'];
-      if (!paymentId || !confirmedStatuses.includes(paymentStatus ?? '')) {
+      if (!proposalPayment) {
         console.log(
-          `⚠️ [SPLIT PIX] Proposta ${proposalId} sem pagamento PIX confirmado (status=${paymentStatus}, paymentId=${paymentId}) — split pulado`,
+          `⚠️ [SETTLEMENT] Proposta ${proposalId} sem pagamento Stripe local para aula ${classId}`,
         );
         return {
           attempted: false,
           success: false,
           skipped: true,
-          reason: 'payment_not_confirmed',
+          reason: 'payment_not_found',
         };
       }
 
-      const isSimulated =
-        paymentId.startsWith('sim_pix_') ||
-        paymentId.startsWith('sim_') ||
-        paymentId.startsWith('proposal_');
-      if (isSimulated) {
+      if (proposalPayment.provider && proposalPayment.provider !== 'stripe') {
         console.log(
-          `🧪 [SPLIT PIX] Pagamento simulado (${paymentId}) — split externo pulado`,
+          `⚠️ [SETTLEMENT] Pagamento legado ${proposalPayment.id} ignorado no cutover Stripe`,
         );
         return {
           attempted: false,
           success: false,
           skipped: true,
-          reason: 'simulated_payment',
+          reason: 'legacy_payment_provider_disabled',
         };
       }
-
-      const platformFeePercentage =
-        parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
-      const totalAmount = parseFloat(String(price));
-      const personalAmount = parseFloat(
-        (totalAmount * (1 - platformFeePercentage)).toFixed(2),
-      );
 
       console.log(
-        `💸 [SPLIT PIX] Aula ${classId}: repassando R$${personalAmount} ao personal ${personalId}`,
+        `ℹ️ [SETTLEMENT] Pagamento Stripe ${proposalPayment.id} da proposta ${proposalId} libera carteira interna via PaymentsService (personal=${personalId}, status=${proposalPayment.status})`,
       );
 
-      return await this.paymentsService.transferPixSplitToPersonal({
-        personalId,
-        amount: personalAmount,
-        classId,
-        proposalId,
-      });
+      return {
+        attempted: false,
+        success: true,
+        skipped: true,
+        reason: 'stripe_internal_wallet_release',
+      };
     } catch (error) {
       console.error(
-        `❌ [SPLIT PIX] Erro ao acionar repasse PIX para proposta ${proposalId}:`,
+        `❌ [SETTLEMENT] Erro ao validar liberação da proposta ${proposalId}:`,
         error,
       );
       return {
@@ -2024,25 +1975,24 @@ export class ClassesService {
             'Disputa resolvida: aluno confirmou ausência',
           );
 
-          // ===== REPASSE PIX (TRANSFERÊNCIA REAL MP PLATAFORMA -> PERSONAL) =====
           if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
+            await this.triggerProposalSettlementGuard(
               classId,
               payment.proposalId,
               classData.personalId,
             );
           }
         } else if (payment && payment.status === 'captured') {
-          // Garantir repasse PIX mesmo se o status já foi atualizado (defensivo para retries)
+          // Garantir idempotência da liberação mesmo se o status já foi atualizado
           if (payment.proposalId) {
-            await this.triggerPixProposalSplit(
+            await this.triggerProposalSettlementGuard(
               classId,
               payment.proposalId,
               classData.personalId,
             );
           }
         } else if (!payment && classData.proposalId) {
-          await this.triggerPixProposalSplit(
+          await this.triggerProposalSettlementGuard(
             classId,
             classData.proposalId,
             classData.personalId,

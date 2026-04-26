@@ -2,8 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentsController } from './payments.controller';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
-import { MercadoPagoService } from './mercadopago.service';
-import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { PaymentsService } from './payments.service';
 import { FinancialProfileService } from './financial-profile.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
@@ -25,8 +23,6 @@ describe('PaymentsController', () => {
       providers: [
         { provide: StudentPaymentMethodsService, useValue: {} },
         { provide: RefundsService, useValue: {} },
-        { provide: MercadoPagoService, useValue: {} },
-        { provide: MercadoPagoOAuthService, useValue: {} },
         { provide: PaymentsService, useValue: {} },
         { provide: FinancialProfileService, useValue: {} },
         { provide: JwtAuthGuard, useValue: { canActivate: jest.fn() } },

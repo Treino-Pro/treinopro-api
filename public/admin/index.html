@@ -752,7 +752,7 @@
     const adminNotes = prompt('Notas administrativas para aprovação (opcional):', '') ?? '';
     const { ok, data } = await api(`/admin/withdrawals/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ adminNotes, transferMethod: 'mercadopago_balance' }),
+      body: JSON.stringify({ adminNotes, transferMethod: 'stripe_connect' }),
     });
 
     if (!ok) {
@@ -908,7 +908,7 @@
     const rows = items.map(d => `
       <tr>
         <td><code style="font-size:11px;color:var(--text-muted)">${d.id?.slice(0,8)}…</code></td>
-        <td>${d.payment?.provider || (d.payment?.stripePaymentIntentId ? 'stripe' : d.payment?.mpPaymentId ? 'mercado_pago' : '—')}</td>
+        <td>${d.payment?.provider || (d.payment?.stripePaymentIntentId ? 'stripe' : '—')}</td>
         <td>${d.reason || '—'}</td>
         <td><span class="badge badge-${disputeBadge(d.status)}">${d.status || '—'}</span></td>
         <td>${fmtDate(d.createdAt)}</td>
@@ -943,7 +943,7 @@
     const d = data.dispute || data;
     const canResolve = d.status === 'under_review' || d.status === 'pending';
     const p = d.payment || {};
-    const provider = p.provider || (p.stripePaymentIntentId ? 'stripe' : p.mpPaymentId ? 'mercado_pago' : '—');
+    const provider = p.provider || (p.stripePaymentIntentId ? 'stripe' : '—');
 
     document.getElementById('modal-dispute-body').innerHTML = `
       <div class="info-grid">

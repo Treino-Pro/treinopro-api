@@ -104,29 +104,17 @@ export class PaymentJobsProcessor {
     this.logger.log(`🔄 Sincronizando status do pagamento: ${paymentId}`);
 
     try {
-      // Buscar status atual no Mercado Pago - usando getPayments como workaround
       const payments = await this.paymentsService.getPayments({}, 'system');
       const payment = payments.find((p) => p.id === paymentId) || null;
 
-      if (payment && payment.mpPaymentId) {
-        const mpPayment = await this.paymentsService.getMpPayment(
-          payment.mpPaymentId,
-        );
-
-        if (mpPayment) {
-          const newStatus = this.paymentsService.mapMpPaymentStatus(
-            mpPayment.status,
-          );
-
-          if (newStatus !== payment.status) {
-            // Comentando temporariamente até ajustar os tipos
-            // await this.paymentsService.updatePaymentStatus(paymentId, newStatus, payment.mpPaymentId, mpPayment);
-            this.logger.log(
-              `🔄 Status atualizado: ${paymentId} -> ${newStatus}`,
-            );
-          }
-        }
+      if (!payment) {
+        this.logger.warn(`⚠️ Pagamento não encontrado: ${paymentId}`);
+        return;
       }
+
+      this.logger.log(
+        `ℹ️ Status Stripe é sincronizado por webhook; pagamento ${paymentId} permanece ${payment.status}`,
+      );
     } catch (error) {
       this.logger.error(
         `❌ Erro ao sincronizar status do pagamento ${paymentId}:`,

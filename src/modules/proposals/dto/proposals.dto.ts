@@ -213,10 +213,10 @@ export class CreateProposalDto {
   @ApiProperty({
     description: 'Método de pagamento escolhido',
     example: 'credit_card',
-    enum: ['credit_card', 'debit_card', 'mercado_pago', 'pix'],
+    enum: ['credit_card', 'debit_card'],
   })
   @IsString()
-  @IsIn(['credit_card', 'debit_card', 'mercado_pago', 'pix'])
+  @IsIn(['credit_card', 'debit_card'])
   paymentMethod: string;
 
   @ApiProperty({
@@ -457,11 +457,6 @@ export class ProposalResponseDto {
     status: string;
     method: string;
     amount: number;
-    preferenceId?: string; // ID da preferência MP
-    checkoutUrl?: string; // URL de checkout MP
-    sandboxCheckoutUrl?: string; // URL de checkout MP sandbox
-    qrCode?: string; // Para PIX
-    qrCodeBase64?: string; // QR Code em base64
     provider?: string;
     stripePaymentIntentId?: string;
     clientSecret?: string;
@@ -581,11 +576,11 @@ export class PaymentStatusWebhookDto {
   paymentStatus: string;
 
   @ApiProperty({
-    description: 'ID do pagamento no MercadoPago',
-    example: '1234567890',
+    description: 'ID do PaymentIntent Stripe',
+    example: 'pi_1234567890',
     required: false,
   })
   @IsOptional()
   @IsString()
-  mpPaymentId?: string;
+  stripePaymentIntentId?: string;
 }

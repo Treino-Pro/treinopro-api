@@ -27,6 +27,7 @@ Estas sao as migrations oficiais executadas pelo `drizzle-kit migrate`:
 | 16  | 0016_backfill_user_push_tokens            | 0016_backfill_user_push_tokens.sql            |
 | 17  | 0017_stripe_columns                       | 0017_stripe_columns.sql                       |
 | 18  | 0018_stripe_financial_profile_requirements | 0018_stripe_financial_profile_requirements.sql |
+| 19  | 0019_remove_mercado_pago                  | 0019_remove_mercado_pago.sql                  |
 
 ## Scripts manuais (aplicados fora do Drizzle, NAO reexecutar)
 

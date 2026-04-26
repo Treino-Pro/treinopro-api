@@ -36,7 +36,7 @@ export const proposals = pgTable('proposals', {
 
   // Campos de pagamento
   paymentId: varchar('payment_id', { length: 255 }), // ID do pagamento processado
-  paymentMethod: varchar('payment_method', { length: 50 }), // credit_card, debit_card, pix, etc
+  paymentMethod: varchar('payment_method', { length: 50 }), // credit_card, debit_card
   paymentStatus: varchar('payment_status', { length: 50 }), // pending, approved, rejected, etc
 
   // Referência à aula criada (quando aceita)

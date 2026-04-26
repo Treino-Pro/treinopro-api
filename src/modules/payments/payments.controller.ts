@@ -10,15 +10,10 @@ import {
   UseGuards,
   Request,
   BadRequestException,
-  Res,
 } from '@nestjs/common';
-import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Public } from '../../common/decorators/public.decorator';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
-import { MercadoPagoService } from './mercadopago.service';
-import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { PaymentsService } from './payments.service';
 import { FinancialProfileService } from './financial-profile.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
@@ -54,8 +49,6 @@ export class PaymentsController {
   constructor(
     private readonly studentPaymentMethodsService: StudentPaymentMethodsService,
     private readonly refundsService: RefundsService,
-    private readonly mercadoPagoService: MercadoPagoService,
-    private readonly mercadoPagoOAuthService: MercadoPagoOAuthService,
     private readonly paymentsService: PaymentsService,
     private readonly financialProfileService: FinancialProfileService,
     private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
@@ -222,10 +215,6 @@ export class PaymentsController {
       preferredMethod?: string;
       enableAutoPayment?: boolean;
       defaultCardId?: string;
-      mercadoPagoAccount?: {
-        email: string;
-        allowSaveCard: boolean;
-      };
     },
   ) {
     const userId = req.user?.id ?? req.user?.sub;
@@ -637,134 +626,6 @@ export class PaymentsController {
       throw new BadRequestException(
         `Erro ao capturar pagamento: ${error.message}`,
       );
-    }
-  }
-
-  // ===== SEARCH & UTILITIES =====
-
-  @Get('search')
-  async searchPayments(
-    @Request() req,
-    @Query('externalReference') externalReference?: string,
-    @Query('status') status?: string,
-    @Query('dateCreatedFrom') dateCreatedFrom?: string,
-    @Query('dateCreatedTo') dateCreatedTo?: string,
-    @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
-  ) {
-    return await this.mercadoPagoService.searchPayments({
-      externalReference,
-      status,
-      dateCreatedFrom,
-      dateCreatedTo,
-      limit,
-      offset,
-    });
-  }
-
-  @Get('identification-types')
-  async getIdentificationTypes() {
-    return await this.mercadoPagoService.getIdentificationTypes();
-  }
-
-  @Get('customers/search')
-  async searchCustomers(
-    @Query('email') email?: string,
-    @Query('firstName') firstName?: string,
-    @Query('lastName') lastName?: string,
-    @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
-  ) {
-    return await this.mercadoPagoService.searchCustomers({
-      email,
-      firstName,
-      lastName,
-      limit,
-      offset,
-    });
-  }
-
-  // ===== MERCADO PAGO OAUTH =====
-
-  @Get('mercadopago/oauth/start')
-  @UseGuards(JwtAuthGuard)
-  async startMercadoPagoOAuth(@Request() req) {
-    const userId = req.user.sub;
-    console.log(`🔗 [MP_OAUTH] Iniciando fluxo OAuth para user ${userId}`);
-
-    try {
-      const result = await this.mercadoPagoOAuthService.startOAuth(userId);
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error) {
-      console.error(`❌ [MP_OAUTH] Erro ao iniciar OAuth:`, error);
-      throw error;
-    }
-  }
-
-  @Get('mercadopago/oauth/callback')
-  @Public()
-  async handleMercadoPagoOAuthCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
-    @Res() res: Response,
-  ) {
-    console.log(
-      `🔗 [MP_OAUTH] Callback recebido com state=${state?.substring(0, 8)}...`,
-    );
-
-    try {
-      const result = await this.mercadoPagoOAuthService.handleCallback(
-        code,
-        state,
-      );
-
-      // Redirecionar para deep link do app após sucesso
-      const deepLink = `treinopro://mercadopago/callback?success=true&email=${encodeURIComponent(result.mpEmail)}`;
-      return res.redirect(deepLink);
-    } catch (error) {
-      console.error(`❌ [MP_OAUTH] Erro no callback:`, error);
-      const deepLink = `treinopro://mercadopago/callback?success=false&error=${encodeURIComponent(error.message || 'Erro desconhecido')}`;
-      return res.redirect(deepLink);
-    }
-  }
-
-  @Get('mercadopago/oauth/status')
-  @UseGuards(JwtAuthGuard)
-  async getMercadoPagoOAuthStatus(@Request() req) {
-    const userId = req.user.sub;
-
-    try {
-      const status = await this.mercadoPagoOAuthService.getOAuthStatus(userId);
-      return {
-        success: true,
-        data: status,
-      };
-    } catch (error) {
-      console.error(`❌ [MP_OAUTH] Erro ao buscar status:`, error);
-      throw new BadRequestException(
-        'Erro ao buscar status da conta Mercado Pago',
-      );
-    }
-  }
-
-  @Post('mercadopago/oauth/disconnect')
-  @UseGuards(JwtAuthGuard)
-  async disconnectMercadoPago(@Request() req) {
-    const userId = req.user.sub;
-    console.log(`🔗 [MP_OAUTH] Desconectando MP para user ${userId}`);
-
-    try {
-      await this.mercadoPagoOAuthService.disconnect(userId);
-      return {
-        success: true,
-        message: 'Conta Mercado Pago desconectada com sucesso',
-      };
-    } catch (error) {
-      console.error(`❌ [MP_OAUTH] Erro ao desconectar:`, error);
-      throw error;
     }
   }
 

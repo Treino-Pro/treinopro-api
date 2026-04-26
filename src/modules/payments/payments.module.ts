@@ -6,14 +6,9 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsHealthController } from './payments-health.controller';
 import { WebhooksController } from './webhooks.controller';
 import { PaymentsService } from './payments.service';
-import { MercadoPagoService } from './mercadopago.service';
-import { MercadoPagoOAuthService } from './mercadopago-oauth.service';
 import { FinancialProfileService } from './financial-profile.service';
 import { StudentPaymentMethodsService } from './student-payment-methods.service';
 import { RefundsService } from './refunds.service';
-import { WebhooksService } from './webhooks.service';
-import { ErrorHandlerService } from './error-handler.service';
-import { PaymentSimulationService } from './payment-simulation.service';
 import { StripeConnectService } from './stripe-connect.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
@@ -22,7 +17,6 @@ import { StripeCustomersService } from './stripe-customers.service';
 import { StripeRefundsService } from './stripe-refunds.service';
 import { StripeTransfersService } from './stripe-transfers.service';
 import {
-  MercadoPagoWithdrawalPayoutProvider,
   StripeWithdrawalPayoutProvider,
   WITHDRAWAL_PAYOUT_PROVIDER,
 } from './withdrawal-payout.provider';
@@ -36,14 +30,9 @@ import {
   ],
   providers: [
     PaymentsService,
-    MercadoPagoService,
-    MercadoPagoOAuthService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,
-    WebhooksService,
-    ErrorHandlerService,
-    PaymentSimulationService,
     StripeConnectService,
     StripeWebhooksService,
     StripeFinancialAccountsService,
@@ -51,7 +40,6 @@ import {
     StripeCustomersService,
     StripeRefundsService,
     StripeTransfersService,
-    MercadoPagoWithdrawalPayoutProvider,
     StripeWithdrawalPayoutProvider,
     {
       provide: WITHDRAWAL_PAYOUT_PROVIDER,
@@ -60,14 +48,9 @@ import {
   ],
   exports: [
     PaymentsService,
-    MercadoPagoService,
-    MercadoPagoOAuthService,
     FinancialProfileService,
     StudentPaymentMethodsService,
     RefundsService,
-    WebhooksService,
-    ErrorHandlerService,
-    PaymentSimulationService,
     StripeConnectService,
     StripeWebhooksService,
     StripeFinancialAccountsService,

@@ -59,9 +59,6 @@ export const payments = pgTable('payments', {
   // Para propostas (quando classId é NULL)
   proposalId: uuid('proposal_id'), // ID da proposta quando não há aula
 
-  // Dados do Mercado Pago
-  mpPaymentId: varchar('mp_payment_id', { length: 255 }), // ID do pagamento no MP
-  mpPreferenceId: varchar('mp_preference_id', { length: 255 }), // ID da preferência
   provider: varchar('provider', { length: 50 }),
   stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }),
   stripeChargeId: varchar('stripe_charge_id', { length: 255 }),
@@ -82,8 +79,8 @@ export const payments = pgTable('payments', {
   status: paymentStatusEnum('status').default('pending').notNull(),
   type: paymentTypeEnum('type').default('class_payment').notNull(),
 
-  // Dados do split
-  splitData: jsonb('split_data'), // Dados do split do Mercado Pago
+  // Dados do split/liberação interna
+  splitData: jsonb('split_data'),
 
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -147,9 +144,6 @@ export const paymentTransactions = pgTable('payment_transactions', {
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   description: text('description'),
 
-  // Dados do Mercado Pago
-  mpTransactionId: varchar('mp_transaction_id', { length: 255 }),
-  mpOperationId: varchar('mp_operation_id', { length: 255 }),
   stripeTransferId: varchar('stripe_transfer_id', { length: 255 }),
   stripeBalanceTransactionId: varchar('stripe_balance_transaction_id', {
     length: 255,
@@ -171,7 +165,7 @@ export const paymentTransactions = pgTable('payment_transactions', {
 // Enum para método de pagamento
 export const paymentMethodEnum = pgEnum('payment_method', [
   'bank_transfer',
-  'mercado_pago',
+  'stripe_connect',
 ]);
 
 // Enum para tipo de conta
@@ -190,8 +184,6 @@ export const withdrawalStatusEnum = pgEnum('withdrawal_status', [
 export const studentPaymentMethodEnum = pgEnum('student_payment_method', [
   'credit_card',
   'debit_card',
-  'mercado_pago',
-  'pix',
 ]);
 
 export const cardBrandEnum = pgEnum('card_brand', [
@@ -229,16 +221,6 @@ export const financialProfiles = pgTable('financial_profiles', {
   accountHolderName: varchar('account_holder_name', { length: 100 }),
   document: varchar('document', { length: 20 }), // CPF/CNPJ
 
-  // Dados do Mercado Pago (OAuth)
-  mpEmail: varchar('mp_email', { length: 255 }),
-  mpUserId: varchar('mp_user_id', { length: 100 }),
-  mpAccessToken: text('mp_access_token'), // Criptografado
-  mpRefreshToken: text('mp_refresh_token'), // OAuth refresh token
-  mpTokenExpiresAt: timestamp('mp_token_expires_at'), // Expiração do access token
-  mpConnectedAt: timestamp('mp_connected_at'), // Quando a conta foi conectada via OAuth
-  mpOauthState: varchar('mp_oauth_state', { length: 255 }).unique(), // State anti-CSRF (unique → índice automático)
-  mpOauthStateCreatedAt: timestamp('mp_oauth_state_created_at'), // Quando o state foi gerado (TTL)
-  mpIsVerified: boolean('mp_is_verified').default(false),
   stripeAccountId: varchar('stripe_account_id', { length: 255 }),
   stripeAccountMode: varchar('stripe_account_mode', { length: 100 }),
   stripeOnboardingCompleted: boolean('stripe_onboarding_completed').default(
@@ -311,7 +293,7 @@ export const withdrawalRequests = pgTable('withdrawal_requests', {
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   fee: decimal('fee', { precision: 10, scale: 2 }).default('0.00').notNull(),
   netAmount: decimal('net_amount', { precision: 10, scale: 2 }).notNull(),
-  method: text('method').notNull(), // 'bank_transfer', 'mercado_pago'
+  method: text('method').notNull(), // 'bank_transfer', 'stripe_connect'
   urgency: varchar('urgency', { length: 10 }).default('normal').notNull(), // normal, urgent
 
   // Status e processamento
@@ -321,7 +303,7 @@ export const withdrawalRequests = pgTable('withdrawal_requests', {
   failureReason: text('failure_reason'),
 
   // Dados da transferência (snapshot dos dados no momento do saque)
-  transferData: jsonb('transfer_data'), // Dados bancários ou MP usados
+  transferData: jsonb('transfer_data'), // Snapshot dos dados de transferência
 
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -361,10 +343,6 @@ export const studentPaymentMethods = pgTable('student_payment_methods', {
   enableAutoPayment: boolean('enable_auto_payment').default(false).notNull(),
   defaultCardId: uuid('default_card_id'), // Referência ao cartão padrão
 
-  // Dados do Mercado Pago
-  mpEmail: varchar('mp_email', { length: 255 }),
-  mpIsVerified: boolean('mp_is_verified').default(false),
-  mpAllowSaveCard: boolean('mp_allow_save_card').default(true),
   stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
 
   // Status
@@ -387,10 +365,7 @@ export const savedCards = pgTable('saved_cards', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
 
-  // Dados do cartão (tokenizados/criptografados)
-  mpCardToken: varchar('mp_card_token', { length: 255 }), // Token do MP
-  mpCustomerId: varchar('mp_customer_id', { length: 255 }), // ID do customer no MP
-  mpCardId: varchar('mp_card_id', { length: 255 }), // ID do cartão salvo no MP
+  // Dados do cartão tokenizados pelo Stripe
   stripePaymentMethodId: varchar('stripe_payment_method_id', { length: 255 }),
   cardBrand: cardBrandEnum('card_brand').notNull(),
   cardType: cardTypeEnum('card_type').notNull(),

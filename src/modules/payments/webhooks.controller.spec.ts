@@ -1,7 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { WebhooksController } from './webhooks.controller';
-import { WebhooksService } from './webhooks.service';
-import { MercadoPagoService } from './mercadopago.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 import { PaymentsService } from './payments.service';
@@ -27,8 +25,6 @@ describe('WebhooksController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [WebhooksController],
       providers: [
-        { provide: WebhooksService, useValue: {} },
-        { provide: MercadoPagoService, useValue: {} },
         { provide: StripeWebhooksService, useValue: stripeWebhooksService },
         {
           provide: StripeFinancialAccountsService,

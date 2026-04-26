@@ -127,7 +127,8 @@ export class DashboardSummaryResponseDto {
         createdAt: { type: 'string' },
         studentName: { type: 'string' },
         personalName: { type: 'string' },
-        mpPaymentId: { type: 'string' },
+        provider: { type: 'string' },
+        stripePaymentIntentId: { type: 'string' },
       },
     },
   })
@@ -138,7 +139,8 @@ export class DashboardSummaryResponseDto {
     createdAt: string;
     studentName?: string | null;
     personalName?: string | null;
-    mpPaymentId?: string | null;
+    provider?: string | null;
+    stripePaymentIntentId?: string | null;
   }>;
 
   @ApiProperty({
@@ -347,7 +349,8 @@ export class FinancialSummaryResponseDto {
         createdAt: { type: 'string' },
         studentName: { type: 'string' },
         personalName: { type: 'string' },
-        mpPaymentId: { type: 'string' },
+        provider: { type: 'string' },
+        stripePaymentIntentId: { type: 'string' },
       },
     },
   })
@@ -360,7 +363,8 @@ export class FinancialSummaryResponseDto {
     createdAt: string;
     studentName: string | null;
     personalName: string | null;
-    mpPaymentId: string | null;
+    provider: string | null;
+    stripePaymentIntentId: string | null;
   }>;
 
   @ApiPropertyOptional({

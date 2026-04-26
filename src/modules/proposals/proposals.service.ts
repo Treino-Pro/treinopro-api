@@ -43,7 +43,6 @@ import {
 } from './dto/proposals.dto';
 import { buildTrainingStartDate } from './proposals.utils';
 import { StudentPaymentMethodsService } from '../payments/student-payment-methods.service';
-import { StudentPaymentMethod } from '../payments/dto/student-payment-methods.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { StripePaymentIntentsService } from '../payments/stripe-payment-intents.service';
 import { buildStripeProposalTransferGroup } from '../payments/stripe-transfer-groups';
@@ -441,42 +440,26 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
-      // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
+      // Stripe retorna sucesso quando o PaymentIntent está autorizado ou aguardando confirmação do app.
       const paymentStatus = String(paymentResult.status || '').toLowerCase();
-      const isPix = createProposalDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode) ||
         this.isStripeClientPaymentPending(paymentResult);
-      const isSimulated = Boolean((paymentResult as any)?._simulated);
-      const allowSimulated =
-        process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
-      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
 
       console.log('🔍 [PROPOSALS] Validação do pagamento:', {
         success: paymentResult.success,
         status: paymentResult.status,
         statusOk,
-        isSimulated,
-        allowSimulated,
-        isTestEnv,
         message: paymentResult.message,
       });
 
-      if (
-        !paymentResult.success ||
-        !statusOk ||
-        (isSimulated && !(allowSimulated && isTestEnv))
-      ) {
+      if (!paymentResult.success || !statusOk) {
         // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
         await this.db
           .delete(payments)
           .where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
-        const reason = isSimulated
-          ? 'Pagamento em simulação (sandbox) não permite criar proposta'
-          : paymentResult.message || 'Falha no pagamento';
+        const reason = paymentResult.message || 'Falha no pagamento';
         throw new BadRequestException(`Falha no pagamento: ${reason}`);
       }
 
@@ -541,11 +524,6 @@ export class ProposalsService {
           status: paymentResult.status,
           method: createProposalDto.paymentMethod,
           amount: createProposalDto.price,
-          preferenceId: paymentResult.preferenceId,
-          checkoutUrl: paymentResult.checkoutUrl,
-          sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
-          qrCode: paymentResult.qrCode,
-          qrCodeBase64: paymentResult.qrCodeBase64,
           provider: paymentResult.provider,
           stripePaymentIntentId: paymentResult.stripePaymentIntentId,
           clientSecret: paymentResult.clientSecret,
@@ -576,7 +554,7 @@ export class ProposalsService {
             try {
               await this.processAutomaticRefund(
                 proposal.id,
-                existingPayment.mpPaymentId ?? '',
+                existingPayment.id,
                 'Falha ao criar proposta após pagamento aprovado',
               );
               console.log(
@@ -586,7 +564,7 @@ export class ProposalsService {
             } catch (refundErr) {
               // Se o reembolso falhar, NÃO deletar — preservar registros para reconciliação manual.
               console.error(
-                `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar após erro em createProposal (proposalId=${proposal.id}, paymentId=${existingPayment.mpPaymentId}). Registros preservados para auditoria.`,
+                `🚨 [PROPOSALS] CRITICAL: falha ao reembolsar após erro em createProposal (proposalId=${proposal.id}, paymentId=${existingPayment.id}). Registros preservados para auditoria.`,
                 refundErr,
               );
               return; // Sair sem deletar — auditoria é mais importante
@@ -719,32 +697,19 @@ export class ProposalsService {
         proposal.id, // Usar ID real da proposta
       );
 
-      // Considerar sucesso quando MP autorizar/aprovar ou quando for PIX pendente aguardando pagamento.
-      // Se for simulado, só permitir quando explícito via ENV e apenas em TEST.
+      // Stripe retorna sucesso quando o PaymentIntent está autorizado ou aguardando confirmação do app.
       const paymentStatus = String(paymentResult.status || '').toLowerCase();
-      const isPix = createRecontractDto.paymentMethod === 'pix';
       const statusOk =
         ['authorized', 'approved', 'captured'].includes(paymentStatus) ||
-        (isPix && paymentStatus === 'pending' && !!paymentResult.qrCode) ||
         this.isStripeClientPaymentPending(paymentResult);
-      const isSimulated = Boolean((paymentResult as any)?._simulated);
-      const allowSimulated =
-        process.env.ALLOW_SIMULATED_PAYMENTS_FOR_PROPOSALS === 'true';
-      const isTestEnv = (process.env.MP_ACCESS_TOKEN || '').startsWith('TEST-');
 
-      if (
-        !paymentResult.success ||
-        !statusOk ||
-        (isSimulated && !(allowSimulated && isTestEnv))
-      ) {
+      if (!paymentResult.success || !statusOk) {
         // Se pagamento falhar, deletar pagamentos (FK) e depois a proposta
         await this.db
           .delete(payments)
           .where(eq(payments.proposalId, proposal.id));
         await this.db.delete(proposals).where(eq(proposals.id, proposal.id));
-        const reason = isSimulated
-          ? 'Pagamento em simulação (sandbox) não permite criar proposta'
-          : paymentResult.message || 'Falha no pagamento';
+        const reason = paymentResult.message || 'Falha no pagamento';
         throw new BadRequestException(`Falha no pagamento: ${reason}`);
       }
 
@@ -830,11 +795,6 @@ export class ProposalsService {
           status: paymentResult.status,
           method: createRecontractDto.paymentMethod,
           amount: createRecontractDto.price,
-          preferenceId: paymentResult.preferenceId,
-          checkoutUrl: paymentResult.checkoutUrl,
-          sandboxCheckoutUrl: paymentResult.sandboxCheckoutUrl,
-          qrCode: paymentResult.qrCode,
-          qrCodeBase64: paymentResult.qrCodeBase64,
           provider: paymentResult.provider,
           stripePaymentIntentId: paymentResult.stripePaymentIntentId,
           clientSecret: paymentResult.clientSecret,
@@ -867,7 +827,7 @@ export class ProposalsService {
             try {
               await this.processAutomaticRefund(
                 proposal.id,
-                existingPayment.mpPaymentId ?? '',
+                existingPayment.id,
                 'Falha ao criar recontratação após pagamento aprovado',
               );
             } catch (refundErr) {
@@ -1033,36 +993,6 @@ export class ProposalsService {
       throw new ForbiddenException(
         'Você só pode visualizar suas próprias propostas',
       );
-    }
-
-    // ===== FALLBACK: consulta ao MP quando webhook não atualizou o status =====
-    // Se o pagamento ainda está pendente e o paymentId é um ID numérico do MP
-    // (pagamento PIX real), consulta o MP diretamente para obter o status atual.
-    // Isso garante que o polling no app detecte o pagamento mesmo quando o
-    // webhook falha (ex: MP_WEBHOOK_SECRET incorreto ou URL não configurada).
-    const isRealMpId = /^\d+$/.test(proposal.paymentId ?? '');
-    const needsLiveCheck =
-      isRealMpId &&
-      (!proposal.paymentStatus || proposal.paymentStatus === 'pending');
-
-    if (needsLiveCheck) {
-      try {
-        const mpPayment = await this.paymentsService.getMpPayment(
-          proposal.paymentId,
-        );
-        if (mpPayment?.status && mpPayment.status !== 'pending') {
-          const mappedStatus = this.paymentsService.mapMpPaymentStatus(
-            mpPayment.status,
-          );
-          await this.db
-            .update(proposals)
-            .set({ paymentStatus: mappedStatus, updatedAt: new Date() })
-            .where(eq(proposals.id, id));
-          proposal.paymentStatus = mappedStatus;
-        }
-      } catch {
-        // Ignora erros de rede — retorna o status que está no banco
-      }
     }
 
     // Buscar dados do usuário para incluir na resposta
@@ -2287,87 +2217,33 @@ export class ProposalsService {
     reason: string,
   ): Promise<void> {
     try {
-      const isSimulated =
-        paymentId.startsWith('sim_pix_') || paymentId.startsWith('sim_');
+      const resolvedPayment = await this.resolveAutomaticRefundPayment(
+        proposalId,
+        paymentId,
+      );
 
-      if (isSimulated) {
-        // Pagamento mockado — não há nada a reembolsar no MP
+      if (!resolvedPayment.localPayment) {
+        throw new BadRequestException(
+          `Nao foi possivel resolver o pagamento Stripe da proposta ${proposalId} para reembolso automatico`,
+        );
+      }
+
+      if (
+        ['refunded', 'cancelled', 'canceled'].includes(
+          String(resolvedPayment.localPayment.status || '').toLowerCase(),
+        )
+      ) {
         console.log(
-          `🧪 [PROPOSALS] Pagamento simulado ${paymentId} — nenhuma chamada ao MP necessária`,
+          `ℹ️ [PROPOSALS] Pagamento ${resolvedPayment.localPayment.id} já está em estado terminal (${resolvedPayment.localPayment.status})`,
         );
       } else {
-        try {
-          const resolvedPayment = await this.resolveAutomaticRefundPayment(
-            proposalId,
-            paymentId,
-          );
-
-          if (resolvedPayment.localPayment && !resolvedPayment.mpPaymentId) {
-            console.log(
-              `💾 [PROPOSALS] Pagamento ${paymentId} resolvido apenas localmente (${resolvedPayment.source}) — aplicando reembolso interno`,
-            );
-            await this.paymentsService.refundPayment(
-              resolvedPayment.localPayment.id,
-              reason,
-            );
-          } else if (resolvedPayment.mpPaymentId) {
-            const mpPayment = await this.paymentsService.getMpPayment(
-              resolvedPayment.mpPaymentId,
-            );
-            const mpStatus = String(
-              mpPayment?.status ?? 'unknown',
-            ).toLowerCase();
-
-            if (
-              mpStatus === 'pending' ||
-              mpStatus === 'in_process' ||
-              mpStatus === 'authorized'
-            ) {
-              console.log(
-                `🛑 [PROPOSALS] Cancelando pagamento MP ${resolvedPayment.mpPaymentId} (origem=${resolvedPayment.source}, status=${mpStatus})`,
-              );
-              await this.paymentsService.cancelMpPayment(
-                resolvedPayment.mpPaymentId,
-              );
-              console.log(
-                `✅ [PROPOSALS] Pagamento MP ${resolvedPayment.mpPaymentId} cancelado com sucesso`,
-              );
-            } else if (mpStatus === 'approved' || mpStatus === 'captured') {
-              console.log(
-                `💰 [PROPOSALS] Solicitando reembolso ao MP para ${resolvedPayment.mpPaymentId} (origem=${resolvedPayment.source}, status=${mpStatus})`,
-              );
-              await this.paymentsService.createRefundByMpId(
-                resolvedPayment.mpPaymentId,
-                reason,
-              );
-              console.log(
-                `✅ [PROPOSALS] Reembolso criado no MP para pagamento: ${resolvedPayment.mpPaymentId}`,
-              );
-            } else if (
-              mpStatus === 'cancelled' ||
-              mpStatus === 'canceled' ||
-              mpStatus === 'refunded'
-            ) {
-              console.log(
-                `ℹ️ [PROPOSALS] Pagamento ${resolvedPayment.mpPaymentId} já está em estado terminal (${mpStatus})`,
-              );
-            } else {
-              console.log(
-                `⚠️ [PROPOSALS] Pagamento ${resolvedPayment.mpPaymentId} com status '${mpStatus}' — ação de reembolso/cancelamento não aplicável`,
-              );
-            }
-          } else {
-            throw new BadRequestException(
-              `Nao foi possivel resolver o pagamento da proposta ${proposalId} para reembolso automatico`,
-            );
-          }
-        } catch (refundError) {
-          console.error(
-            `❌ [PROPOSALS] Falha ao processar reembolso para ${paymentId}:`,
-            refundError,
-          );
-          throw refundError;
-        }
+        console.log(
+          `💾 [PROPOSALS] Pagamento ${paymentId} resolvido (${resolvedPayment.source}) — aplicando reembolso Stripe`,
+        );
+        await this.paymentsService.refundPayment(
+          resolvedPayment.localPayment.id,
+          reason,
+        );
       }
 
       // Atualizar status da proposta
@@ -2384,10 +2260,6 @@ export class ProposalsService {
     }
   }
 
-  private isMercadoPagoNumericId(value?: string | null): boolean {
-    return /^\d+$/.test(String(value || '').trim());
-  }
-
   private isUuid(value?: string | null): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(value || '').trim(),
@@ -2399,13 +2271,11 @@ export class ProposalsService {
     paymentId: string,
   ): Promise<{
     localPayment: any | null;
-    mpPaymentId: string | null;
     source: string;
   }> {
     const normalizedPaymentId = String(paymentId || '').trim();
     const paymentLookupConditions: any[] = [
       eq(payments.proposalId, proposalId),
-      eq(payments.mpPaymentId, normalizedPaymentId),
     ];
 
     if (this.isUuid(normalizedPaymentId)) {
@@ -2416,59 +2286,18 @@ export class ProposalsService {
       where: or(...paymentLookupConditions),
     });
 
-    if (localPayment?.mpPaymentId) {
-      return {
-        localPayment,
-        mpPaymentId: localPayment.mpPaymentId,
-        source:
-          localPayment.proposalId === proposalId
-            ? 'payments.proposalId'
-            : 'payments.mpPaymentId',
-      };
-    }
-
     if (localPayment) {
       return {
         localPayment,
-        mpPaymentId: null,
-        source: 'payments.id',
+        source:
+          localPayment.proposalId === proposalId
+            ? 'payments.proposalId'
+            : 'payments.id',
       };
-    }
-
-    if (this.isMercadoPagoNumericId(normalizedPaymentId)) {
-      return {
-        localPayment: null,
-        mpPaymentId: normalizedPaymentId,
-        source: 'proposal.paymentId',
-      };
-    }
-
-    const externalReference = proposalId || normalizedPaymentId;
-
-    try {
-      const searchResult = await this.paymentsService.searchMpPayments({
-        externalReference,
-        limit: 1,
-      });
-      const matchedPayment = searchResult?.results?.[0];
-
-      if (matchedPayment?.id) {
-        return {
-          localPayment: null,
-          mpPaymentId: String(matchedPayment.id),
-          source: 'mp.external_reference',
-        };
-      }
-    } catch (searchError) {
-      console.warn(
-        `⚠️ [PROPOSALS] Busca no MP por external_reference falhou para ${externalReference}:`,
-        searchError?.message || searchError,
-      );
     }
 
     return {
       localPayment: null,
-      mpPaymentId: null,
       source: 'unresolved',
     };
   }
@@ -2476,7 +2305,7 @@ export class ProposalsService {
   async findPaymentByExternalReference(
     externalReference: string,
   ): Promise<any> {
-    // No fluxo de propostas, o external_reference do MP corresponde ao proposalId.
+    // No fluxo de propostas Stripe, a referência externa corresponde ao proposalId.
     try {
       const payment = await this.db.query.payments?.findFirst({
         where: eq(payments.proposalId, externalReference),
@@ -2637,7 +2466,7 @@ export class ProposalsService {
     };
   }
 
-  // ===== INTEGRAÇÃO REAL COM MERCADO PAGO PARA PROPOSTAS =====
+  // ===== INTEGRAÇÃO STRIPE PARA PROPOSTAS =====
 
   private async createProposalPaymentPreference(
     createProposalDto: CreateProposalDto,
@@ -2660,18 +2489,6 @@ export class ProposalsService {
       });
 
       console.log('🆔 [PROPOSALS] Proposal ID real:', proposalId);
-
-      const resolvedPayerEmail =
-        createProposalDto.payerEmail?.trim() || userData?.email?.trim();
-      const fallbackDocumentNumber = String(
-        userData?.documentNumber ?? '',
-      ).replace(/\D/g, '');
-      const resolvedPayerCpf =
-        createProposalDto.payerCpf?.trim() ||
-        (userData?.documentType === 'CPF' &&
-        fallbackDocumentNumber.length === 11
-          ? fallbackDocumentNumber
-          : undefined);
 
       // Calcular taxa da plataforma
       const platformFeePercentage =
@@ -2712,274 +2529,11 @@ export class ProposalsService {
         });
       }
 
-      if (hasCardId && isCardPayment) {
-        console.log(
-          '🚀 [PROPOSALS] Iniciando pagamento automático com cartão salvo...',
-        );
-
-        try {
-          const paymentDto = {
-            classId: proposalId, // Usar ID real da proposta
-            paymentMethod:
-              createProposalDto.paymentMethod as StudentPaymentMethod,
-            cardId: createProposalDto.cardId,
-            savedCardCvv: createProposalDto.savedCardCvv,
-            cardData: null,
-            installments: createProposalDto.installments || '1',
-            saveCard: createProposalDto.saveCard || false,
-            cardNickname: createProposalDto.cardNickname,
-            payerEmail: resolvedPayerEmail, // ✅ Fallback para email do usuário autenticado
-            payerCpf: resolvedPayerCpf, // ✅ Fallback para CPF do documento do usuário
-          };
-
-          console.log(
-            '📤 [PROPOSALS] Dados enviados para processProposalPayment:',
-            {
-              ...paymentDto,
-              savedCardCvv: paymentDto.savedCardCvv
-                ? `*** (${paymentDto.savedCardCvv.trim().length} dígitos)`
-                : undefined,
-            },
-          );
-
-          // Dados da proposta para o pagamento
-          const proposalData = {
-            price: createProposalDto.price,
-            personalId: 'temp-personal-id', // Será definido quando personal aceitar
-            studentEmail: userData.email,
-          };
-
-          // Processar pagamento automático da proposta usando cartão salvo
-          const paymentResult =
-            await this.studentPaymentService.processProposalPayment(
-              userData.id,
-              paymentDto,
-              proposalData,
-            );
-
-          console.log(
-            '✅ [PROPOSALS] Resultado do pagamento automático:',
-            paymentResult,
-          );
-
-          const response = {
-            success: true,
-            paymentId: String(
-              paymentResult.mpPaymentId ||
-                paymentResult.paymentId ||
-                proposalId,
-            ),
-            status: paymentResult.status,
-            method: createProposalDto.paymentMethod,
-            amount: createProposalDto.price,
-            platformFee,
-            personalAmount,
-            message:
-              paymentResult.message || 'Pagamento processado com sucesso.',
-          };
-
-          console.log(
-            '📤 [PROPOSALS] Resposta do pagamento automático:',
-            response,
-          );
-          console.log('🏁 [PROPOSALS] ===== FIM DO PAGAMENTO AUTOMÁTICO =====');
-
-          return response;
-        } catch (paymentError) {
-          console.error(
-            '❌ [PROPOSALS] Erro no pagamento automático:',
-            paymentError.message,
-          );
-          console.error('❌ [PROPOSALS] Stack trace:', paymentError.stack);
-          console.log(
-            '🚫 [PROPOSALS] Pagamento recusado - proposta não será criada',
-          );
-          // Se o pagamento falhar, NÃO criar a proposta
-          throw new BadRequestException(
-            `Pagamento recusado: ${paymentError.message}`,
-          );
-        }
-      }
-
-      // ===== PIX: CRIAR PAGAMENTO PIX VIA API MP =====
-      if (createProposalDto.paymentMethod === 'pix') {
-        console.log('🔵 [PROPOSALS] Iniciando pagamento PIX real...');
-
-        // Proteção defensiva: PIX não deve carregar cardId
-        if (createProposalDto.cardId) {
-          console.warn('⚠️ [PROPOSALS] cardId ignorado pois paymentMethod=pix');
-          createProposalDto.cardId = undefined;
-        }
-
-        if (!resolvedPayerEmail) {
-          throw new BadRequestException(
-            'payerEmail é obrigatório para pagamento via PIX',
-          );
-        }
-
-        const apiUrl = process.env.API_URL;
-        const isPublicUrl = !!apiUrl && !/localhost|127\.0\.0\.1/.test(apiUrl);
-        const notificationUrl = isPublicUrl
-          ? `${apiUrl}/webhooks/mercadopago`
-          : undefined;
-
-        // Split marketplace: busca OAuth token do personal se já conhecido.
-        // Em recontratações, o personal alvo vem em (createProposalDto as any).personalId.
-        let sellerAccessToken: string | undefined;
-        const targetPersonalId: string | undefined = (createProposalDto as any)
-          .personalId;
-        if (targetPersonalId) {
-          try {
-            const personalProfile =
-              await this.db.query.financialProfiles.findFirst({
-                where: eq(financialProfiles.userId, targetPersonalId),
-              });
-            if (personalProfile?.mpAccessToken) {
-              sellerAccessToken = personalProfile.mpAccessToken;
-              console.log(
-                `💳 [PROPOSALS] Split: OAuth token do personal encontrado para ${targetPersonalId}`,
-              );
-            } else {
-              console.log(
-                `⚠️ [PROPOSALS] Split: personal ${targetPersonalId} sem OAuth conectado — PIX vai para conta da plataforma`,
-              );
-            }
-          } catch (err) {
-            console.warn(
-              `⚠️ [PROPOSALS] Não foi possível buscar OAuth token do personal: ${err.message}`,
-            );
-          }
-        }
-
-        const pixResult = await this.paymentsService.createPixPayment({
-          amount: createProposalDto.price,
-          description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
-          externalReference: proposalId,
-          payerEmail: resolvedPayerEmail,
-          payerCpf: resolvedPayerCpf,
-          notificationUrl,
-          sellerAccessToken,
-          marketplaceFee: platformFee,
-        });
-
-        console.log('✅ [PROPOSALS] Pagamento PIX criado:', {
-          paymentId: pixResult.paymentId,
-          status: pixResult.status,
-          hasQrCode: !!pixResult.qrCode,
-          hasQrCodeBase64: !!pixResult.qrCodeBase64,
-        });
-
-        // Registrar pagamento PIX na tabela payments para que os webhooks e a
-        // lógica de captura pós-aula consigam localizar o registro por proposalId.
-        // Se o INSERT falhar, propagar erro — sem registro interno não é seguro prosseguir.
-        const pixPaymentStatus =
-          pixResult.status === 'approved' ? 'authorized' : 'pending';
-        await this.db.insert(payments).values({
-          proposalId,
-          studentId: userData.id,
-          mpPaymentId: String(pixResult.paymentId),
-          totalAmount: createProposalDto.price.toString(),
-          platformFee: platformFee.toString(),
-          personalAmount: personalAmount.toString(),
-          status: pixPaymentStatus,
-          type: 'class_payment',
-        });
-        console.log(
-          `💾 [PROPOSALS] Registro PIX inserido na tabela payments (proposalId=${proposalId}, status=${pixPaymentStatus})`,
-        );
-
-        const pixResponse = {
-          success: true,
-          paymentId: pixResult.paymentId,
-          status: pixResult.status,
-          method: 'pix',
-          amount: createProposalDto.price,
-          qrCode: pixResult.qrCode,
-          qrCodeBase64: pixResult.qrCodeBase64,
-          checkoutUrl: pixResult.ticketUrl,
-          platformFee,
-          personalAmount,
-          message:
-            'Proposta criada com sucesso. PIX gerado; conclua o pagamento para confirmar.',
-          expiresAt: pixResult.expiresAt
-            ? new Date(pixResult.expiresAt)
-            : new Date(Date.now() + 30 * 60 * 1000),
-        };
-
-        console.log('🏁 [PROPOSALS] ===== FIM DO PAGAMENTO PIX =====');
-        return pixResponse;
-      }
-
-      // ===== FALLBACK: CRIAR PREFERÊNCIA MP (Mercado Pago checkout ou cartão sem ID) =====
-      console.log('🔄 [PROPOSALS] Iniciando fallback para Mercado Pago...');
-      console.log('🔄 [PROPOSALS] Motivo do fallback:', {
-        hasCardId,
-        isCardPayment,
-        paymentMethod: createProposalDto.paymentMethod,
-        cardId: createProposalDto.cardId,
-        cardData: createProposalDto.cardData,
-      });
-
-      // Criar dados para o Mercado Pago
-      const preferenceData = {
-        classId: proposalId, // Usar ID real da proposta
-        title: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString()}`,
-        totalAmount: createProposalDto.price,
-        platformFee,
-        personalAmount,
-        studentEmail: userData.email,
-        personalEmail: 'temp@personal.com', // Será definido quando aceita
-        externalReference: proposalId, // Usar ID real da proposta
-      };
-
-      console.log('📋 [PROPOSALS] Dados da preferência MP:', preferenceData);
-
-      // Criar preferência no Mercado Pago
-      const mpPreference =
-        await this.paymentsService.createMpPreference(preferenceData);
-
-      console.log('✅ [PROPOSALS] Preferência MP criada:', {
-        id: mpPreference.id,
-        initPoint: mpPreference.initPoint,
-        sandboxInitPoint: mpPreference.sandboxInitPoint,
-      });
-
-      // Registrar pagamento de checkout na tabela payments (sem mpPaymentId ainda —
-      // será vinculado pelo webhook handlePaymentCreated via external_reference).
-      // Se o INSERT falhar, propagar erro — sem registro interno não é seguro prosseguir.
-      await this.db.insert(payments).values({
-        proposalId,
-        studentId: userData.id,
-        totalAmount: createProposalDto.price.toString(),
-        platformFee: platformFee.toString(),
-        personalAmount: personalAmount.toString(),
-        status: 'pending',
-        type: 'class_payment',
-      });
-      console.log(
-        `💾 [PROPOSALS] Registro de checkout MP inserido em payments (proposalId=${proposalId})`,
+      throw new BadRequestException(
+        'Metodo de pagamento removido no cutover Stripe. Use credit_card ou debit_card.',
       );
-
-      const response = {
-        success: true,
-        paymentId: proposalId, // Usar ID real da proposta
-        status: 'pending',
-        method: createProposalDto.paymentMethod,
-        amount: createProposalDto.price,
-        preferenceId: mpPreference.id,
-        checkoutUrl: mpPreference.initPoint,
-        sandboxCheckoutUrl: mpPreference.sandboxInitPoint,
-        platformFee,
-        personalAmount,
-        message: 'Preferência de pagamento criada com sucesso.',
-      };
-
-      console.log('📤 [PROPOSALS] Resposta do fallback MP:', response);
-      console.log('🏁 [PROPOSALS] ===== FIM DO FALLBACK MP =====');
-
-      return response;
     } catch (error) {
-      console.error('❌ [PROPOSALS] Erro ao criar preferência MP:', error);
+      console.error('❌ [PROPOSALS] Erro ao criar pagamento Stripe:', error);
       console.error('❌ [PROPOSALS] Stack trace:', error.stack);
       console.log('🚫 [PROPOSALS] Pagamento falhou - proposta não será criada');
 

@@ -5,7 +5,6 @@ import {
   IsOptional,
   IsUUID,
   IsNotEmpty,
-  IsEmail,
   IsObject,
   Min,
   Max,
@@ -102,14 +101,6 @@ export class UpdatePaymentDto {
   @IsEnum(PaymentStatus)
   @IsOptional()
   status?: PaymentStatus;
-
-  @IsString()
-  @IsOptional()
-  mpPaymentId?: string;
-
-  @IsString()
-  @IsOptional()
-  mpPreferenceId?: string;
 
   @IsNumber()
   @Min(0)
@@ -294,18 +285,6 @@ export class PaymentResponseDto {
     example: '123e4567-e89b-12d3-a456-426614174003',
   })
   personalId: string;
-
-  @ApiPropertyOptional({
-    description: 'ID do pagamento no Mercado Pago',
-    example: '1234567890',
-  })
-  mpPaymentId?: string;
-
-  @ApiPropertyOptional({
-    description: 'ID da preferência no Mercado Pago',
-    example: '1234567890',
-  })
-  mpPreferenceId?: string;
 
   @ApiPropertyOptional({
     description: 'Provedor de pagamento',
@@ -547,8 +526,6 @@ export class TransactionResponseDto {
   type: PaymentType;
   amount: number;
   description?: string;
-  mpTransactionId?: string;
-  mpOperationId?: string;
   stripeTransferId?: string;
   stripeBalanceTransactionId?: string;
   stripeRefundId?: string;
@@ -722,43 +699,6 @@ export class DisputeNotificationDto {
   evidenceInstructions?: string;
 }
 
-// DTOs para integração com Mercado Pago
-export class MercadoPagoWebhookDto {
-  @IsString()
-  @IsNotEmpty()
-  id: string;
-
-  @IsString()
-  @IsNotEmpty()
-  type: string;
-
-  @IsString()
-  @IsNotEmpty()
-  action: string;
-
-  @IsObject()
-  @IsNotEmpty()
-  data: any;
-}
-
-export class MercadoPagoSplitDto {
-  @IsString()
-  @IsNotEmpty()
-  marketplace: string;
-
-  @IsString()
-  @IsNotEmpty()
-  marketplace_fee: string;
-
-  @IsString()
-  @IsNotEmpty()
-  application_fee: string;
-
-  @IsString()
-  @IsNotEmpty()
-  amount: string;
-}
-
 // ===== DTOs PARA TRANSFERÊNCIA REAL =====
 
 export class TransferRequestDto {
@@ -791,15 +731,11 @@ export class TransferRequestDto {
 
   @ApiProperty({
     description: 'Método de transferência',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    enum: ['bank_transfer', 'stripe_connect'],
     example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
-  transferMethod:
-    | 'pix'
-    | 'bank_transfer'
-    | 'mercadopago_balance'
-    | 'stripe_connect';
+  @IsEnum(['bank_transfer', 'stripe_connect'])
+  transferMethod: 'bank_transfer' | 'stripe_connect';
 
   @ApiProperty({
     description: 'Dados específicos do método de transferência',
@@ -807,14 +743,13 @@ export class TransferRequestDto {
   })
   @IsObject()
   personalData: {
-    pixKey?: string;
     bankAccount?: {
       bank: string;
       agency: string;
       account: string;
       accountType: string;
     };
-    mpAccountId?: string;
+    stripeAccountId?: string;
   };
 }
 
@@ -838,16 +773,12 @@ export class ApproveWithdrawalDto {
 
   @ApiProperty({
     description: 'Método de transferência escolhido pelo admin',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    enum: ['bank_transfer', 'stripe_connect'],
     example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
+  @IsEnum(['bank_transfer', 'stripe_connect'])
   @IsOptional()
-  transferMethod?:
-    | 'pix'
-    | 'bank_transfer'
-    | 'mercadopago_balance'
-    | 'stripe_connect';
+  transferMethod?: 'bank_transfer' | 'stripe_connect';
 }
 
 export class RejectWithdrawalDto {
@@ -891,11 +822,11 @@ export class WithdrawalRequestDto {
 
   @ApiProperty({
     description: 'Método de saque preferido',
-    enum: ['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'],
+    enum: ['bank_transfer', 'stripe_connect'],
     example: 'stripe_connect',
   })
-  @IsEnum(['pix', 'bank_transfer', 'mercadopago_balance', 'stripe_connect'])
-  method: 'pix' | 'bank_transfer' | 'mercadopago_balance' | 'stripe_connect';
+  @IsEnum(['bank_transfer', 'stripe_connect'])
+  method: 'bank_transfer' | 'stripe_connect';
 
   @ApiProperty({
     description: 'Urgência do saque',
@@ -948,7 +879,7 @@ export class WithdrawalResponseDto {
 
   @ApiProperty({
     description: 'Método de saque',
-    example: 'pix',
+    example: 'stripe_connect',
   })
   method: string;
 
@@ -983,12 +914,6 @@ export class WithdrawalResponseDto {
     example: 'Saque aprovado',
   })
   adminNotes?: string;
-
-  @ApiProperty({
-    description: 'ID da transferência no Mercado Pago',
-    example: '1234567890',
-  })
-  mpTransferId?: string;
 
   @ApiProperty({
     description: 'ID do Transfer Stripe Connect',

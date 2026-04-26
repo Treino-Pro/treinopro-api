@@ -20,11 +20,6 @@ import {
   withdrawalHistory,
   financialProfiles,
 } from '../../database/schema/payments';
-import {
-  MercadoPagoService,
-  CreatePreferenceData,
-  MPPreferenceResponse,
-} from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   WITHDRAWAL_PAYOUT_PROVIDER,
@@ -49,8 +44,6 @@ import {
   PaymentStatus,
   PaymentType,
   DisputeStatus,
-  MercadoPagoWebhookDto,
-  MercadoPagoSplitDto,
   TransferRequestDto,
   ApproveWithdrawalDto,
   RejectWithdrawalDto,
@@ -85,7 +78,6 @@ type PersonalSettlementReversalResult = {
 export class PaymentsService {
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
-    private readonly mercadoPagoService: MercadoPagoService,
     private readonly notificationsService: NotificationsService,
     @Inject(WITHDRAWAL_PAYOUT_PROVIDER)
     private readonly withdrawalPayoutProvider: WithdrawalPayoutProvider,
@@ -93,314 +85,10 @@ export class PaymentsService {
     private readonly stripeTransfersService: StripeTransfersService,
   ) {}
 
-  // Delegador público para createPixPayment (evita acesso por string de index)
-  async createPixPayment(pixData: {
-    amount: number;
-    description: string;
-    externalReference: string;
-    payerEmail: string;
-    payerFirstName?: string;
-    payerLastName?: string;
-    payerCpf?: string;
-    notificationUrl?: string;
-    sellerAccessToken?: string;
-    marketplaceFee?: number;
-  }): Promise<{
-    paymentId: string;
-    status: string;
-    qrCode: string;
-    qrCodeBase64: string;
-    ticketUrl?: string;
-    expiresAt?: string;
-  }> {
-    return this.mercadoPagoService.createPixPayment(pixData);
-  }
-
-  // Delegador para reembolso direto pelo ID numérico do MP (PIX de propostas)
-  async createRefundByMpId(mpPaymentId: string, reason?: string): Promise<any> {
-    return this.mercadoPagoService.createRefund(mpPaymentId, { reason });
-  }
-
-  async cancelMpPayment(mpPaymentId: string): Promise<any> {
-    return this.mercadoPagoService.cancelPayment(mpPaymentId);
-  }
-
-  async searchMpPayments(params: {
-    externalReference?: string;
-    status?: string;
-    dateCreatedFrom?: string;
-    dateCreatedTo?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<any> {
-    return this.mercadoPagoService.searchPayments(params);
-  }
-
-  // Repasse de split PIX para a conta MP do personal (chamado após conclusão de aula)
-  async transferPixSplitToPersonal(data: {
-    personalId: string;
-    amount: number;
-    classId: string;
-    proposalId: string;
-  }): Promise<{
-    attempted: boolean;
-    success: boolean;
-    skipped?: boolean;
-    reason?: string;
-    transferId?: string;
-    error?: string;
-    usedOAuthToken?: boolean;
-  }> {
-    const paymentRecord = await this.db.query.payments.findFirst({
-      where: (payment: any, { eq }: any) =>
-        eq(payment.proposalId, data.proposalId),
-      columns: {
-        id: true,
-        splitData: true,
-      },
-    });
-
-    const persistExternalPayoutResult = async (result: Record<string, any>) => {
-      if (!paymentRecord?.id) return;
-
-      const currentSplitData =
-        paymentRecord.splitData && typeof paymentRecord.splitData === 'object'
-          ? paymentRecord.splitData
-          : {};
-      const previousExternalPayout =
-        currentSplitData.externalPayout &&
-        typeof currentSplitData.externalPayout === 'object'
-          ? currentSplitData.externalPayout
-          : {};
-
-      await this.db
-        .update(payments)
-        .set({
-          splitData: {
-            ...currentSplitData,
-            externalPayout: {
-              ...previousExternalPayout,
-              ...result,
-              classId: data.classId,
-              proposalId: data.proposalId,
-              personalId: data.personalId,
-              amount: Number(data.amount.toFixed(2)),
-              updatedAt: new Date().toISOString(),
-            },
-          },
-          updatedAt: new Date(),
-        })
-        .where(eq(payments.id, paymentRecord.id));
-    };
-
-    const existingExternalPayout = paymentRecord?.splitData?.externalPayout;
-    if (existingExternalPayout?.success) {
-      return {
-        attempted: false,
-        success: true,
-        skipped: true,
-        reason: 'already_succeeded',
-        transferId: existingExternalPayout.transferId,
-        usedOAuthToken: Boolean(existingExternalPayout.usedOAuthToken),
-      };
-    }
-
-    const result = {
-      attempted: false,
-      success: false,
-      skipped: true,
-      reason: 'disabled_invalid_mp_payout_flow',
-      error:
-        'Repasse externo manual via /v1/payouts desativado; saldo mantido na carteira interna',
-      usedOAuthToken: false,
-    };
-
-    console.warn(
-      `⚠️ [SPLIT PIX] Repasse externo manual desativado para aula ${data.classId} — saldo mantido na carteira interna do personal ${data.personalId}`,
-    );
-    await persistExternalPayoutResult(result);
-    return result;
-  }
-
-  // Delegadores públicos tipados para MercadoPagoService (evitam acesso por string de índice)
-  async getMpPayment(mpPaymentId: string): Promise<any> {
-    return this.mercadoPagoService.getPayment(mpPaymentId);
-  }
-
-  mapMpPaymentStatus(mpStatus: string): string {
-    return this.mercadoPagoService.mapPaymentStatus(mpStatus);
-  }
-
-  async createMpPreference(
-    data: CreatePreferenceData,
-  ): Promise<MPPreferenceResponse> {
-    return this.mercadoPagoService.createPreference(data);
-  }
-
-  // Criar preferência de pagamento no Mercado Pago
-  async createPaymentPreference(
-    createDto: CreatePaymentPreferenceDto,
-    userId: string,
-  ): Promise<any> {
-    // Verificar configuração do Mercado Pago
-    if (!this.mercadoPagoService.isConfigured()) {
-      throw new BadRequestException(
-        'Mercado Pago não está configurado corretamente',
-      );
-    }
-
-    // Verificar se a aula existe e o usuário é o aluno
-    const classData = await this.db.query.classes.findFirst({
-      where: eq(classes.id, createDto.classId),
-      with: {
-        student: true,
-        personal: true,
-      },
-    });
-
-    if (!classData) {
-      throw new NotFoundException('Aula não encontrada');
-    }
-
-    if (classData.studentId !== userId) {
-      throw new ForbiddenException(
-        'Apenas o aluno pode criar pagamento para esta aula',
-      );
-    }
-
-    // Verificar se já existe pagamento para esta aula
-    const existingPayment = await this.db.query.payments.findFirst({
-      where: and(
-        eq(payments.classId, createDto.classId),
-        eq(payments.studentId, userId),
-      ),
-    });
-
-    if (existingPayment) {
-      throw new BadRequestException('Já existe um pagamento para esta aula');
-    }
-
-    // Calcular valores usando variável de ambiente
-    const platformFeePercentage =
-      parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
-    const platformFee = createDto.totalAmount * platformFeePercentage;
-    const personalAmount = createDto.totalAmount - platformFee;
-
-    // Criar registro de pagamento no banco
-    const [newPayment] = await this.db
-      .insert(payments)
-      .values({
-        classId: createDto.classId,
-        studentId: userId,
-        personalId: classData.personalId,
-        provider: 'mercado_pago',
-        totalAmount: createDto.totalAmount.toString(),
-        platformFee: platformFee.toString(),
-        personalAmount: personalAmount.toString(),
-        status: PaymentStatus.PENDING,
-        type: PaymentType.CLASS_PAYMENT,
-      })
-      .returning();
-
-    // Preparar dados para o Mercado Pago
-    const preferenceData: CreatePreferenceData = {
-      classId: createDto.classId,
-      title: `${classData.location} - ${classData.date.toLocaleDateString()}`,
-      totalAmount: createDto.totalAmount,
-      platformFee,
-      personalAmount,
-      studentEmail: classData.student.email,
-      personalEmail: classData.personal.email,
-      externalReference: newPayment.id,
-    };
-
-    // Criar preferência no Mercado Pago
-    const mpPreference =
-      await this.mercadoPagoService.createPreference(preferenceData);
-
-    // Atualizar registro com ID da preferência
-    await this.db
-      .update(payments)
-      .set({
-        mpPreferenceId: mpPreference.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(payments.id, newPayment.id));
-
-    return {
-      preferenceId: mpPreference.id,
-      initPoint: mpPreference.initPoint,
-      sandboxInitPoint: mpPreference.sandboxInitPoint,
-      paymentId: newPayment.id,
-      totalAmount: createDto.totalAmount,
-      platformFee,
-      personalAmount,
-    };
-  }
-
-  // Processar webhook do Mercado Pago
-  async processWebhook(
-    webhookDto: MercadoPagoWebhookDto,
-    headers?: any,
-  ): Promise<void> {
-    const { id, type } = webhookDto;
-
-    // Validar webhook
-    if (
-      headers &&
-      !this.mercadoPagoService.validateWebhook(webhookDto, headers)
-    ) {
-      throw new BadRequestException('Webhook inválido');
-    }
-
-    if (type === 'payment') {
-      // Buscar informações do pagamento no Mercado Pago
-      const mpPaymentData = await this.mercadoPagoService.getPayment(id);
-
-      if (!mpPaymentData || !mpPaymentData.external_reference) {
-        throw new NotFoundException('Pagamento não encontrado no Mercado Pago');
-      }
-
-      // Buscar pagamento no banco usando external_reference (nosso ID)
-      const payment = await this.db.query.payments.findFirst({
-        where: eq(payments.id, mpPaymentData.external_reference),
-        with: {
-          class: true,
-          student: true,
-          personal: true,
-        },
-      });
-
-      if (!payment) {
-        throw new NotFoundException(
-          'Pagamento não encontrado no banco de dados',
-        );
-      }
-
-      // Mapear status do MP para nosso sistema
-      const newStatus = this.mercadoPagoService.mapPaymentStatus(
-        mpPaymentData.status,
-      );
-
-      // Atualizar status do pagamento
-      await this.updatePaymentStatus(
-        payment.id,
-        newStatus as PaymentStatus,
-        id,
-        mpPaymentData,
-      );
-
-      // Log para auditoria
-      console.log(`Webhook processado: Payment ${id} -> Status ${newStatus}`);
-    }
-  }
-
   // Atualizar status do pagamento
   async updatePaymentStatus(
     paymentId: string,
     status: PaymentStatus,
-    mpPaymentId?: string,
-    mpData?: any,
   ): Promise<void> {
     const currentPayment = await this.db.query.payments.findFirst({
       where: eq(payments.id, paymentId),
@@ -414,18 +102,6 @@ export class PaymentsService {
       status,
       updatedAt: new Date(),
     };
-
-    if (mpPaymentId) {
-      updateData.mpPaymentId = mpPaymentId;
-    }
-
-    // Salvar dados completos do MP para auditoria
-    if (mpData) {
-      updateData.splitData = {
-        mpPaymentData: mpData,
-        processedAt: new Date(),
-      };
-    }
 
     if (status === PaymentStatus.AUTHORIZED) {
       updateData.authorizedAt = new Date();
@@ -451,9 +127,6 @@ export class PaymentsService {
       const capturedUpdateData: any = {
         updatedAt: new Date(),
       };
-      if (mpPaymentId) {
-        capturedUpdateData.mpPaymentId = mpPaymentId;
-      }
       await this.db
         .update(payments)
         .set(capturedUpdateData)
@@ -768,32 +441,17 @@ export class PaymentsService {
         ? payment.splitData
         : {};
 
-    if (payment.provider === 'stripe') {
-      return this.compactObject({
-        ...currentSplitData,
-        stripe: this.compactObject({
-          paymentIntentId: payment.stripePaymentIntentId,
-          chargeId: payment.stripeChargeId,
-          latestChargeId: payment.stripeLatestChargeId,
-          transferGroup: payment.stripeTransferGroup,
-          processingModel: payment.processingModel,
-        }),
-        internalWalletRelease: releaseMetadata,
-      });
-    }
-
-    const mercadoPagoSplit: MercadoPagoSplitDto = {
-      marketplace: process.env.MP_MARKETPLACE_ID || 'marketplace_id',
-      marketplace_fee: payment.platformFee,
-      application_fee: '0',
-      amount: payment.personalAmount,
-    };
-
-    return {
+    return this.compactObject({
       ...currentSplitData,
-      mercadoPagoSplit,
+      stripe: this.compactObject({
+        paymentIntentId: payment.stripePaymentIntentId,
+        chargeId: payment.stripeChargeId,
+        latestChargeId: payment.stripeLatestChargeId,
+        transferGroup: payment.stripeTransferGroup,
+        processingModel: payment.processingModel,
+      }),
       internalWalletRelease: releaseMetadata,
-    };
+    });
   }
 
   private buildInternalWalletReleaseMetadata(
@@ -807,7 +465,7 @@ export class PaymentsService {
       personalAmount: number;
     },
   ): Record<string, any> {
-    const provider = payment.provider || 'mercado_pago';
+    const provider = payment.provider || 'stripe';
     const classScope = input.classId || payment.classId || 'proposal';
 
     return this.compactObject({
@@ -1630,90 +1288,8 @@ export class PaymentsService {
       return;
     }
 
-    // Reembolsar no Mercado Pago se tiver mpPaymentId
-    if (payment.mpPaymentId) {
-      let mpStatus: string | undefined;
-
-      try {
-        console.log(
-          `[MercadoPagoService] Buscando status real do pagamento MP: ${payment.mpPaymentId}`,
-        );
-        // Buscar status real no Mercado Pago para decidir entre reembolso ou cancelamento
-        const mpPayment = await this.mercadoPagoService.getPayment(
-          payment.mpPaymentId,
-        );
-        mpStatus = mpPayment?.status;
-      } catch (error) {
-        console.error(
-          `❌ Erro ao consultar status MP para ${payment.mpPaymentId}:`,
-          error,
-        );
-        // Se falhar a consulta, não podemos assumir se é reembolso ou cancelamento.
-        // Tentamos o reembolso padrão como último recurso (pode falhar se for authorized).
-        throw new BadRequestException(
-          `Não foi possível verificar o status do pagamento no Mercado Pago. Erro: ${error.message}`,
-        );
-      }
-
-      if (mpStatus === 'authorized' || mpStatus === 'pending') {
-        // Se apenas autorizado (custódia) ou pendente, cancelar a autorização
-        console.log(
-          `ℹ️ Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Cancelando autorização em vez de reembolsar.`,
-        );
-        await this.mercadoPagoService.cancelPayment(payment.mpPaymentId);
-        console.log(`🔄 Autorização cancelada no MP: ${payment.mpPaymentId}`);
-      } else if (mpStatus === 'approved') {
-        // Se aprovado, realizar o reembolso normal
-        console.log(
-          `ℹ️ Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Processando reembolso.`,
-        );
-        await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
-        console.log(`🔄 Reembolso processado no MP: ${payment.mpPaymentId}`);
-      } else if (mpStatus === 'cancelled' || mpStatus === 'refunded') {
-        console.log(
-          `ℹ️ Pagamento MP ${payment.mpPaymentId} já está em estado terminal: ${mpStatus}`,
-        );
-      } else {
-        console.warn(
-          `⚠️ Status do pagamento MP ${payment.mpPaymentId} é '${mpStatus}'. Tentando reembolso padrão.`,
-        );
-        await this.mercadoPagoService.refundPayment(payment.mpPaymentId);
-        console.log(
-          `🔄 Reembolso (fallback) processado no MP: ${payment.mpPaymentId}`,
-        );
-      }
-    }
-
-    // Atualizar status
-    await this.updatePaymentStatus(paymentId, PaymentStatus.REFUNDED);
-
-    // Reverter saldo da carteira do personal se já foi creditado
-    if (payment.status === PaymentStatus.CAPTURED) {
-      const personalWallet = await this.getUserWallet(payment.personalId);
-      await this.updateWallet(payment.personalId, {
-        availableBalance:
-          personalWallet.availableBalance - parseFloat(payment.personalAmount),
-        totalEarned:
-          personalWallet.totalEarned - parseFloat(payment.personalAmount),
-      });
-
-      console.log(
-        `💳 Carteira do personal ${payment.personalId} revertida: -R$ ${payment.personalAmount}`,
-      );
-    }
-
-    // Criar transação de reembolso
-    await this.createTransaction({
-      paymentId,
-      userId: payment.studentId,
-      type: PaymentType.REFUND,
-      amount: parseFloat(payment.totalAmount),
-      description: reason || `Reembolso da aula ${payment.classId}`,
-      status: PaymentStatus.REFUNDED,
-    });
-
-    console.log(
-      `✅ Reembolso completo para pagamento ${paymentId}: R$ ${payment.totalAmount}`,
+    throw new BadRequestException(
+      'Pagamento legado sem Stripe nao pode ser reembolsado automaticamente apos o cutover',
     );
   }
 
@@ -1988,7 +1564,6 @@ export class PaymentsService {
       status: payment.status,
       totalAmount: payment.totalAmount,
       personalAmount: payment.personalAmount,
-      mpPaymentId: payment.mpPaymentId,
       stripePaymentIntentId: payment.stripePaymentIntentId,
     });
 
@@ -1999,11 +1574,8 @@ export class PaymentsService {
       return;
     }
 
-    const isStripePayment = payment.provider === 'stripe';
-    const canCapture = isStripePayment
-      ? payment.status === PaymentStatus.AUTHORIZED
-      : payment.status === PaymentStatus.AUTHORIZED ||
-        payment.status === PaymentStatus.PENDING;
+    const isStripePayment = this.isStripePayment(payment);
+    const canCapture = isStripePayment && payment.status === PaymentStatus.AUTHORIZED;
 
     if (!canCapture) {
       console.error(
@@ -2011,72 +1583,8 @@ export class PaymentsService {
         payment.status,
       );
       throw new BadRequestException(
-        isStripePayment
-          ? `Pagamento Stripe ainda não confirmado. Status atual: ${payment.status}`
-          : `Pagamento não está em estado capturável. Status atual: ${payment.status}`,
+        `Pagamento Stripe ainda não confirmado. Status atual: ${payment.status}`,
       );
-    }
-
-    if (payment.status === PaymentStatus.PENDING) {
-      console.warn(
-        '⚠️ [CAPTURE_AFTER_CLASS] Pagamento em PENDING (sem webhook AUTHORIZED). Forçando captura e split.',
-      );
-    }
-
-    let mpCaptureSuccess = false;
-
-    if (isStripePayment) {
-      mpCaptureSuccess = true;
-      console.log(
-        '💳 [CAPTURE_AFTER_CLASS] Pagamento Stripe confirmado; liberando saldo interno sem payout bancário',
-      );
-    } else if (payment.mpPaymentId) {
-      try {
-        console.log(
-          '💳 [CAPTURE_AFTER_CLASS] Buscando status real do pagamento no Mercado Pago:',
-          payment.mpPaymentId,
-        );
-        const mpPayment = await this.mercadoPagoService.getPayment(
-          payment.mpPaymentId,
-        );
-        const mpStatus = mpPayment?.status;
-
-        if (mpStatus === 'authorized' || mpStatus === 'pending') {
-          console.log(
-            '💳 [CAPTURE_AFTER_CLASS] Capturando pagamento no Mercado Pago:',
-            payment.mpPaymentId,
-          );
-          await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
-          console.log(
-            `✅ [CAPTURE_AFTER_CLASS] Captura processada no MP: ${payment.mpPaymentId}`,
-          );
-          mpCaptureSuccess = true;
-        } else if (mpStatus === 'approved') {
-          console.log(
-            `ℹ️ [CAPTURE_AFTER_CLASS] Pagamento MP ${payment.mpPaymentId} já está como 'approved'. Pulando captura.`,
-          );
-          mpCaptureSuccess = true;
-        } else {
-          console.warn(
-            `⚠️ [CAPTURE_AFTER_CLASS] Pagamento MP ${payment.mpPaymentId} está como '${mpStatus}'. Tentando captura padrão.`,
-          );
-          await this.mercadoPagoService.capturePayment(payment.mpPaymentId);
-          mpCaptureSuccess = true;
-        }
-      } catch (error) {
-        console.error(
-          `❌ [CAPTURE_AFTER_CLASS] Falha ao capturar no MP: ${error.message}`,
-        );
-        console.warn(
-          '⚠️ [CAPTURE_AFTER_CLASS] Continuando com split local mesmo com falha no MP',
-        );
-        mpCaptureSuccess = false;
-      }
-    } else {
-      console.warn(
-        '⚠️ [CAPTURE_AFTER_CLASS] Pagamento não tem mpPaymentId - pode ser simulação',
-      );
-      mpCaptureSuccess = true; // Simulações sempre "funcionam"
     }
 
     console.log(
@@ -2085,14 +1593,8 @@ export class PaymentsService {
     const releaseResult = await this.releasePaymentToInternalWallet(payment, {
       classId,
       reason,
-      allowPending: !isStripePayment,
+      allowPending: false,
     });
-
-    if (!mpCaptureSuccess) {
-      console.warn(
-        '⚠️ [CAPTURE_AFTER_CLASS] Split aplicado localmente apesar da falha no MP',
-      );
-    }
 
     if (releaseResult.alreadyReleased) {
       console.log(
@@ -2553,8 +2055,6 @@ export class PaymentsService {
       classId: payment.classId,
       studentId: payment.studentId,
       personalId: payment.personalId,
-      mpPaymentId: payment.mpPaymentId,
-      mpPreferenceId: payment.mpPreferenceId,
       provider: payment.provider,
       proposalId: payment.proposalId,
       stripePaymentIntentId: payment.stripePaymentIntentId,
@@ -2682,8 +2182,6 @@ export class PaymentsService {
       type: transaction.type,
       amount: parseFloat(transaction.amount),
       description: transaction.description,
-      mpTransactionId: transaction.mpTransactionId,
-      mpOperationId: transaction.mpOperationId,
       stripeTransferId: transaction.stripeTransferId,
       stripeBalanceTransactionId: transaction.stripeBalanceTransactionId,
       stripeRefundId: transaction.stripeRefundId,
@@ -2988,31 +2486,6 @@ export class PaymentsService {
     transferMethod: string,
   ): WithdrawalPayoutPersonalData {
     switch (transferMethod) {
-      case 'pix':
-        return {
-          pixKey: financialProfile.pixKey,
-        };
-      case 'bank_transfer':
-        return {
-          bankAccount:
-            financialProfile.bankCode &&
-            financialProfile.accountNumber &&
-            financialProfile.agency
-              ? {
-                  bank: financialProfile.bankName || financialProfile.bankCode,
-                  agency: financialProfile.agency,
-                  account: financialProfile.accountNumber,
-                  accountType: financialProfile.accountType,
-                }
-              : undefined,
-        };
-      case 'mercado_pago':
-      case 'mercadopago_balance':
-        return {
-          mpAccountId: financialProfile.mpUserId,
-          // ✅ NÃO enviamos o accessToken do personal para operações de payout (saque)
-          // por motivos de segurança e porque o MP exige o token da plataforma para repasses.
-        };
       case 'stripe_connect':
         return {
           stripeAccountId: financialProfile.stripeAccountId,
@@ -3344,15 +2817,8 @@ export class PaymentsService {
     switch (method) {
       case 'stripe_connect':
         return 'stripe_connect';
-      case 'mercado_pago':
-      case 'mercadopago_balance':
-        return 'mercadopago_balance';
-      case 'pix':
-        return 'pix';
-      case 'bank_transfer':
-        return 'bank_transfer';
       default:
-        throw new Error('Método de transferência inválido');
+        throw new Error('Saque deve usar Stripe Connect');
     }
   }
 
@@ -3436,7 +2902,6 @@ export class PaymentsService {
       description: withdrawal.description,
       rejectionReason: withdrawal.rejectionReason,
       adminNotes: withdrawal.adminNotes,
-      mpTransferId: withdrawal.mpTransferId,
       stripeTransferId:
         payout?.provider === 'stripe' ? payout.externalTransferId : undefined,
       createdAt: withdrawal.createdAt,

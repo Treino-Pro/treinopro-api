@@ -161,11 +161,10 @@ export class ProposalJobsProcessor {
         `💸 Processando reembolso para proposta expirada: ${proposal.id}`,
       );
 
-      // Verificar se é pagamento real ou simulado
+      // Verificar se existe pagamento real registrado na plataforma
       if (proposal.paymentId.startsWith('proposal_')) {
-        // Pagamento real via Mercado Pago
         this.logger.log(
-          `💳 Processando reembolso real via MP: ${proposal.paymentId}`,
+          `💳 Processando reembolso Stripe: ${proposal.paymentId}`,
         );
 
         try {
@@ -185,7 +184,7 @@ export class ProposalJobsProcessor {
             );
           }
         } catch (error) {
-          this.logger.error(`❌ Erro no reembolso MP: ${error.message}`);
+          this.logger.error(`❌ Erro no reembolso Stripe: ${error.message}`);
         }
       } else {
         // Pagamento simulado - apenas log

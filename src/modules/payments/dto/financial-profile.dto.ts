@@ -3,7 +3,6 @@ import {
   IsEnum,
   IsOptional,
   IsNotEmpty,
-  IsEmail,
   Matches,
   Length,
 } from 'class-validator';
@@ -11,7 +10,7 @@ import {
 // Enums
 export enum PaymentMethod {
   BANK_TRANSFER = 'bank_transfer', // Transferência bancária
-  MERCADO_PAGO = 'mercado_pago', // Direto no MP
+  STRIPE_CONNECT = 'stripe_connect',
 }
 
 export enum AccountType {
@@ -54,21 +53,6 @@ export class BankAccountDto {
   document: string; // CPF ou CNPJ do titular (apenas números)
 }
 
-// DTO para dados do Mercado Pago
-export class MercadoPagoAccountDto {
-  @IsEmail()
-  @IsNotEmpty()
-  email: string; // Email da conta MP
-
-  @IsString()
-  @IsOptional()
-  userId?: string; // User ID do MP (se disponível)
-
-  @IsString()
-  @IsOptional()
-  accessToken?: string; // Token de acesso (se aplicável)
-}
-
 // DTO para perfil financeiro completo
 export class UpdateFinancialProfileDto {
   @IsEnum(PaymentMethod)
@@ -76,9 +60,6 @@ export class UpdateFinancialProfileDto {
 
   @IsOptional()
   bankAccount?: BankAccountDto; // Dados bancários (obrigatório se method = bank_transfer)
-
-  @IsOptional()
-  mercadoPagoAccount?: MercadoPagoAccountDto; // Dados MP (obrigatório se method = mercado_pago)
 
   @IsString()
   @IsOptional()
@@ -101,13 +82,6 @@ export class FinancialProfileResponseDto {
     agency: string; // Mascarado: 1234-*
     accountHolderName: string;
     document: string; // Mascarado: ***.***.***-**
-  };
-
-  // Dados do Mercado Pago (mascarados)
-  mercadoPagoAccount?: {
-    email: string; // Mascarado: j***@email.com
-    userId?: string;
-    isVerified: boolean; // Se a conta está verificada
   };
 
   // Status
@@ -152,17 +126,6 @@ export class ValidateBankAccountDto {
   document: string;
 }
 
-// DTO para teste de conectividade MP
-export class ValidateMercadoPagoDto {
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
-
-  @IsString()
-  @IsOptional()
-  accessToken?: string;
-}
-
 // DTO para solicitação de saque
 export class WithdrawalRequestDto {
   @IsString()
@@ -192,7 +155,7 @@ export class WithdrawalHistoryDto {
   urgency: string;
 
   // Dados da transferência
-  transactionId?: string; // ID da transação bancária/MP
+  transactionId?: string; // ID da transferência Stripe
   processedAt?: Date;
   completedAt?: Date;
   failureReason?: string;

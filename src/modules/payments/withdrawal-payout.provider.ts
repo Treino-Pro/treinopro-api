@@ -1,13 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { MercadoPagoService } from './mercadopago.service';
 import { StripeTransfersService } from './stripe-transfers.service';
 
 export const WITHDRAWAL_PAYOUT_PROVIDER = 'WITHDRAWAL_PAYOUT_PROVIDER';
 
 export type WithdrawalTransferMethod =
-  | 'pix'
   | 'bank_transfer'
-  | 'mercadopago_balance'
   | 'stripe_connect';
 
 export interface WithdrawalPayoutBankAccount {
@@ -18,10 +15,7 @@ export interface WithdrawalPayoutBankAccount {
 }
 
 export interface WithdrawalPayoutPersonalData {
-  pixKey?: string;
   bankAccount?: WithdrawalPayoutBankAccount;
-  mpAccountId?: string;
-  accessToken?: string;
   stripeAccountId?: string;
 }
 
@@ -55,53 +49,6 @@ export interface WithdrawalPayoutProvider {
   executePayout(
     request: WithdrawalPayoutRequest,
   ): Promise<WithdrawalPayoutResult>;
-}
-
-@Injectable()
-export class MercadoPagoWithdrawalPayoutProvider
-  implements WithdrawalPayoutProvider
-{
-  constructor(private readonly mercadoPagoService: MercadoPagoService) {}
-
-  async executePayout(
-    request: WithdrawalPayoutRequest,
-  ): Promise<WithdrawalPayoutResult> {
-    if (request.transferMethod === 'stripe_connect') {
-      return {
-        success: false,
-        provider: 'mercadopago',
-        externalStatus: 'failed',
-        failureCode: 'invalid_transfer_method',
-        failureReason: 'Use o provider Stripe para saques Stripe Connect',
-      };
-    }
-
-    const transferResult = await this.mercadoPagoService.transferToPersonal({
-      personalId: request.personalId,
-      amount: request.amount,
-      description: request.description,
-      transferMethod: request.transferMethod,
-      personalData: request.personalData,
-    });
-
-    if (!transferResult.success) {
-      return {
-        success: false,
-        provider: 'mercadopago',
-        externalStatus: 'failed',
-        failureReason: transferResult.error,
-        raw: transferResult,
-      };
-    }
-
-    return {
-      success: true,
-      provider: 'mercadopago',
-      transferId: transferResult.transferId,
-      externalStatus: 'completed',
-      raw: transferResult,
-    };
-  }
 }
 
 @Injectable()

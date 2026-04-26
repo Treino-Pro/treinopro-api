@@ -17,8 +17,6 @@ import { Type } from 'class-transformer';
 export enum StudentPaymentMethod {
   CREDIT_CARD = 'credit_card',
   DEBIT_CARD = 'debit_card',
-  MERCADO_PAGO = 'mercado_pago',
-  PIX = 'pix',
 }
 
 export enum CardBrand {
@@ -94,28 +92,10 @@ export class ConfirmStripeSetupIntentDto {
   setAsDefault?: boolean;
 }
 
-// DTO para dados do Mercado Pago do aluno
-export class StudentMercadoPagoDto {
-  @IsEmail()
-  @IsNotEmpty()
-  email: string; // Email da conta MP
-
-  @IsString()
-  @IsOptional()
-  accessToken?: string; // Token de acesso (se aplicável)
-
-  @IsBoolean()
-  @IsOptional()
-  allowSaveCard?: boolean; // Permitir salvar cartão no MP
-}
-
 // DTO para atualizar métodos de pagamento do aluno
 export class UpdateStudentPaymentMethodsDto {
   @IsEnum(StudentPaymentMethod)
   preferredMethod: StudentPaymentMethod; // Método preferido
-
-  @IsOptional()
-  mercadoPagoAccount?: StudentMercadoPagoDto; // Dados MP
 
   @IsBoolean()
   @IsOptional()
@@ -148,13 +128,6 @@ export class StudentPaymentMethodsResponseDto {
     isActive: boolean;
     createdAt: Date;
   }[];
-
-  // Dados do Mercado Pago (mascarados)
-  mercadoPagoAccount?: {
-    email: string; // Mascarado: j***@email.com
-    isVerified: boolean;
-    allowSaveCard: boolean;
-  };
 
   // Status
   canMakePayments: boolean; // Se pode fazer pagamentos
@@ -231,10 +204,7 @@ export class PaymentProcessResponseDto {
   publishableKey?: string;
   processingModel?: string;
 
-  // Dados do Mercado Pago
-  mpPreferenceId?: string;
-  mpPaymentId?: string;
-  checkoutUrl?: string; // URL para checkout
+  checkoutUrl?: string; // URL externa, se o provedor exigir
 
   // Status do pagamento
   status: string; // pending, approved, rejected, etc.
@@ -243,10 +213,6 @@ export class PaymentProcessResponseDto {
   // Dados da transação
   transactionAmount: number;
   installments?: number;
-
-  // QR Code (para PIX)
-  qrCode?: string;
-  qrCodeBase64?: string;
 
   // Dados do cartão (se aplicável)
   cardInfo?: {
@@ -303,7 +269,7 @@ export class StudentPaymentHistoryDto {
   };
 
   // Dados do pagamento
-  mpPaymentId?: string;
+  stripePaymentIntentId?: string;
   cardInfo?: {
     lastFourDigits: string;
     cardBrand: CardBrand;
