@@ -4,6 +4,7 @@ import { WebhooksService } from './webhooks.service';
 import { MercadoPagoService } from './mercadopago.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
+import { PaymentsService } from './payments.service';
 
 describe('WebhooksController', () => {
   let controller: WebhooksController;
@@ -14,6 +15,12 @@ describe('WebhooksController', () => {
 
   const stripeFinancialAccountsService = {
     handleAccountUpdated: jest.fn(),
+  };
+
+  const paymentsService = {
+    handleStripeChargeRefundedEvent: jest.fn(),
+    handleStripeDisputeCreatedEvent: jest.fn(),
+    handleStripeDisputeClosedEvent: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -58,6 +65,37 @@ describe('WebhooksController', () => {
     expect(stripeFinancialAccountsService.handleAccountUpdated).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'account.updated',
+      }),
+    );
+    expect(result).toEqual({ status: 'success' });
+  });
+
+  it('routes Stripe dispute webhooks to PaymentsService', async () => {
+    stripeWebhooksService.constructEvent.mockReturnValue({
+      id: 'evt_dispute_123',
+      type: 'charge.dispute.created',
+      data: {
+        object: {
+          id: 'dp_123',
+          charge: 'ch_123',
+        },
+      },
+    });
+    jest
+      .spyOn((controller as any).moduleRef, 'get')
+      .mockImplementation((token: unknown) => {
+        if (token === PaymentsService) return paymentsService;
+        return {};
+      });
+
+    const result = await controller.handleStripeWebhook(
+      Buffer.from('{}'),
+      't=123,v1=signature',
+    );
+
+    expect(paymentsService.handleStripeDisputeCreatedEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'dp_123',
       }),
     );
     expect(result).toEqual({ status: 'success' });

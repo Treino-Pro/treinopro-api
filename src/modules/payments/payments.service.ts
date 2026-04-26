@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, or, desc, count, sum, sql, inArray } from 'drizzle-orm';
+import Stripe from 'stripe';
 import {
   payments,
   paymentDisputes,
@@ -55,11 +56,29 @@ import {
   RejectWithdrawalDto,
   WithdrawalResponseDto,
 } from './dto/payments.dto';
+import { StripeRefundsService } from './stripe-refunds.service';
+import { StripeTransfersService } from './stripe-transfers.service';
 
 type PaymentReleaseResult = {
   released: boolean;
   alreadyReleased: boolean;
   payment: any;
+};
+
+type PersonalSettlementReversalResult = {
+  status:
+    | 'not_released'
+    | 'wallet_reversed'
+    | 'partial_wallet_reversal_recovery_required'
+    | 'recovery_required'
+    | 'stripe_transfer_reversed'
+    | 'stripe_transfer_reversal_failed';
+  personalAmount: string;
+  walletReversedAmount: string;
+  recoveryRequiredAmount: string;
+  stripeTransferId?: string;
+  stripeTransferReversalId?: string;
+  error?: string;
 };
 
 @Injectable()
@@ -70,6 +89,8 @@ export class PaymentsService {
     private readonly notificationsService: NotificationsService,
     @Inject(WITHDRAWAL_PAYOUT_PROVIDER)
     private readonly withdrawalPayoutProvider: WithdrawalPayoutProvider,
+    private readonly stripeRefundsService: StripeRefundsService,
+    private readonly stripeTransfersService: StripeTransfersService,
   ) {}
 
   // Delegador público para createPixPayment (evita acesso por string de index)
@@ -831,6 +852,360 @@ export class PaymentsService {
     return this.toMoneyNumber(value).toFixed(2);
   }
 
+  private toStripeMetadata(value: Record<string, any>): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(this.compactObject(value)).map(([key, entryValue]) => [
+        key,
+        String(entryValue).slice(0, 500),
+      ]),
+    );
+  }
+
+  private isStripePayment(payment: any): boolean {
+    return (
+      payment?.provider === 'stripe' ||
+      Boolean(
+        payment?.stripePaymentIntentId ||
+          payment?.stripeChargeId ||
+          payment?.stripeLatestChargeId,
+      )
+    );
+  }
+
+  private getStripeObjectId(value: unknown): string | undefined {
+    if (!value) return undefined;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && 'id' in value) {
+      return String((value as { id?: string }).id || '') || undefined;
+    }
+    return undefined;
+  }
+
+  private getStripeRefundIdFromCharge(charge: Stripe.Charge): string | undefined {
+    return charge.refunds?.data?.[0]?.id;
+  }
+
+  private getStripeChargePaymentIntentId(
+    charge: Stripe.Charge,
+  ): string | undefined {
+    return this.getStripeObjectId(charge.payment_intent);
+  }
+
+  private getStripeDisputeChargeId(
+    dispute: Stripe.Dispute,
+  ): string | undefined {
+    return this.getStripeObjectId(dispute.charge);
+  }
+
+  private getStripeDisputePaymentIntentId(
+    dispute: Stripe.Dispute,
+  ): string | undefined {
+    return this.getStripeObjectId((dispute as any).payment_intent);
+  }
+
+  private getStripeDisputeDeadline(dispute: Stripe.Dispute): Date {
+    const dueBy = dispute.evidence_details?.due_by;
+    if (dueBy) {
+      return new Date(dueBy * 1000);
+    }
+
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() + 7);
+    return fallback;
+  }
+
+  private getPaymentSpecificStripeTransferId(payment: any): string | undefined {
+    const splitData =
+      payment?.splitData && typeof payment.splitData === 'object'
+        ? payment.splitData
+        : {};
+
+    return (
+      splitData.stripe?.transferId ||
+      splitData.stripeTransferId ||
+      splitData.internalWalletRelease?.stripeTransferId ||
+      splitData.externalPayout?.stripeTransferId
+    );
+  }
+
+  private buildMergedSplitData(
+    payment: any,
+    key: string,
+    value: Record<string, any>,
+  ): Record<string, any> {
+    const currentSplitData =
+      payment?.splitData && typeof payment.splitData === 'object'
+        ? payment.splitData
+        : {};
+    const previousValue =
+      currentSplitData[key] && typeof currentSplitData[key] === 'object'
+        ? currentSplitData[key]
+        : {};
+
+    return {
+      ...currentSplitData,
+      [key]: this.compactObject({
+        ...previousValue,
+        ...value,
+      }),
+    };
+  }
+
+  private async findPaymentByStripeIdentifiers(input: {
+    chargeId?: string;
+    paymentIntentId?: string;
+  }): Promise<any | null> {
+    const conditions = [];
+
+    if (input.chargeId) {
+      conditions.push(
+        or(
+          eq(payments.stripeChargeId, input.chargeId),
+          eq(payments.stripeLatestChargeId, input.chargeId),
+        ),
+      );
+    }
+
+    if (input.paymentIntentId) {
+      conditions.push(eq(payments.stripePaymentIntentId, input.paymentIntentId));
+    }
+
+    if (!conditions.length) {
+      return null;
+    }
+
+    return this.db.query.payments.findFirst({
+      where: conditions.length === 1 ? conditions[0] : or(...conditions),
+      with: {
+        class: true,
+        student: true,
+        personal: true,
+      },
+    });
+  }
+
+  private async findActivePaymentDispute(paymentId: string): Promise<any | null> {
+    return this.db.query.paymentDisputes.findFirst({
+      where: and(
+        eq(paymentDisputes.paymentId, paymentId),
+        or(
+          eq(paymentDisputes.status, DisputeStatus.PENDING),
+          eq(paymentDisputes.status, DisputeStatus.UNDER_REVIEW),
+        ),
+      ),
+    });
+  }
+
+  private buildStripeDisputeMetadata(
+    dispute: Stripe.Dispute,
+    input: Record<string, any> = {},
+  ): Record<string, any> {
+    return this.compactObject({
+      provider: 'stripe',
+      stripeDisputeId: dispute.id,
+      stripeChargeId: this.getStripeDisputeChargeId(dispute),
+      stripePaymentIntentId: this.getStripeDisputePaymentIntentId(dispute),
+      amount: this.toMoneyString((dispute.amount || 0) / 100),
+      currency: dispute.currency,
+      reason: dispute.reason,
+      status: dispute.status,
+      evidenceDueBy: dispute.evidence_details?.due_by
+        ? new Date(dispute.evidence_details.due_by * 1000).toISOString()
+        : undefined,
+      ...input,
+    });
+  }
+
+  private buildStripeDisputeAdminNotes(metadata: Record<string, any>): string {
+    return JSON.stringify(metadata, null, 2);
+  }
+
+  private mapStripeDisputeResolution(status: Stripe.Dispute.Status): DisputeStatus {
+    if (status === 'lost') {
+      return DisputeStatus.RESOLVED_PRO_STUDENT;
+    }
+
+    return DisputeStatus.RESOLVED_PRO_PERSONAL;
+  }
+
+  private normalizeDisputeResolution(resolution: string): DisputeStatus {
+    if (resolution === 'RESOLVED_PRO_STUDENT') {
+      return DisputeStatus.RESOLVED_PRO_STUDENT;
+    }
+
+    if (resolution === 'RESOLVED_PRO_PERSONAL') {
+      return DisputeStatus.RESOLVED_PRO_PERSONAL;
+    }
+
+    return resolution as DisputeStatus;
+  }
+
+  private async reversePersonalSettlement(
+    payment: any,
+    input: {
+      reason: string;
+      source: string;
+      status: PaymentStatus;
+      stripeRefundId?: string;
+      stripeDisputeId?: string;
+      now?: Date;
+    },
+  ): Promise<PersonalSettlementReversalResult> {
+    const personalAmount = this.toMoneyNumber(payment.personalAmount);
+    const emptyResult: PersonalSettlementReversalResult = {
+      status: 'not_released',
+      personalAmount: this.toMoneyString(personalAmount),
+      walletReversedAmount: '0.00',
+      recoveryRequiredAmount: '0.00',
+    };
+
+    if (
+      payment.status !== PaymentStatus.CAPTURED ||
+      !payment.personalId ||
+      personalAmount <= 0
+    ) {
+      return emptyResult;
+    }
+
+    const now = input.now || new Date();
+    const stripeTransferId = this.getPaymentSpecificStripeTransferId(payment);
+
+    if (stripeTransferId) {
+      try {
+        const reversal = await this.stripeTransfersService.createTransferReversal({
+          transferId: stripeTransferId,
+          amount: personalAmount,
+          description: input.reason,
+          metadata: this.toStripeMetadata({
+            paymentId: payment.id,
+            classId: payment.classId,
+            proposalId: payment.proposalId,
+            personalId: payment.personalId,
+            source: input.source,
+            stripeRefundId: input.stripeRefundId,
+            stripeDisputeId: input.stripeDisputeId,
+          }),
+          idempotencyKey: `stripe_transfer_reversal:${payment.id}:${stripeTransferId}`,
+        });
+
+        const result: PersonalSettlementReversalResult = {
+          status: 'stripe_transfer_reversed',
+          personalAmount: this.toMoneyString(personalAmount),
+          walletReversedAmount: '0.00',
+          recoveryRequiredAmount: '0.00',
+          stripeTransferId,
+          stripeTransferReversalId: reversal.id,
+        };
+
+        await this.createTransaction({
+          paymentId: payment.id,
+          userId: payment.personalId,
+          type: PaymentType.PERSONAL_EARNINGS,
+          amount: this.toMoneyString(-personalAmount),
+          description: `Reversal Stripe do repasse do pagamento ${payment.id}`,
+          status: input.status,
+          stripeTransferId,
+          stripeRefundId: input.stripeRefundId,
+          stripeDisputeId: input.stripeDisputeId,
+          metadata: {
+            ...result,
+            transferReversalId: reversal.id,
+            source: input.source,
+            reason: input.reason,
+            processedAt: now.toISOString(),
+          },
+        });
+
+        return result;
+      } catch (error) {
+        const result: PersonalSettlementReversalResult = {
+          status: 'stripe_transfer_reversal_failed',
+          personalAmount: this.toMoneyString(personalAmount),
+          walletReversedAmount: '0.00',
+          recoveryRequiredAmount: this.toMoneyString(personalAmount),
+          stripeTransferId,
+          error: error instanceof Error ? error.message : String(error),
+        };
+
+        await this.createTransaction({
+          paymentId: payment.id,
+          userId: payment.personalId,
+          type: PaymentType.PERSONAL_EARNINGS,
+          amount: '0.00',
+          description: `Recuperação pendente do repasse do pagamento ${payment.id}`,
+          status: input.status,
+          stripeTransferId,
+          stripeRefundId: input.stripeRefundId,
+          stripeDisputeId: input.stripeDisputeId,
+          metadata: {
+            ...result,
+            source: input.source,
+            reason: input.reason,
+            processedAt: now.toISOString(),
+          },
+        });
+
+        return result;
+      }
+    }
+
+    const personalWallet = await this.getUserWallet(payment.personalId);
+    const availableBalance = this.toMoneyNumber(personalWallet.availableBalance);
+    const totalEarned = this.toMoneyNumber(personalWallet.totalEarned);
+    const walletReversedAmount = Math.min(availableBalance, personalAmount);
+    const recoveryRequiredAmount = this.toMoneyNumber(
+      personalAmount - walletReversedAmount,
+    );
+    const nextAvailableBalance = this.toMoneyNumber(
+      availableBalance - walletReversedAmount,
+    );
+    const nextTotalEarned = Math.max(
+      0,
+      this.toMoneyNumber(totalEarned - personalAmount),
+    );
+
+    await this.updateWallet(payment.personalId, {
+      availableBalance: nextAvailableBalance,
+      totalEarned: nextTotalEarned,
+    });
+
+    const result: PersonalSettlementReversalResult = {
+      status:
+        recoveryRequiredAmount > 0
+          ? walletReversedAmount > 0
+            ? 'partial_wallet_reversal_recovery_required'
+            : 'recovery_required'
+          : 'wallet_reversed',
+      personalAmount: this.toMoneyString(personalAmount),
+      walletReversedAmount: this.toMoneyString(walletReversedAmount),
+      recoveryRequiredAmount: this.toMoneyString(recoveryRequiredAmount),
+    };
+
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.personalId,
+      type: PaymentType.PERSONAL_EARNINGS,
+      amount: this.toMoneyString(-walletReversedAmount),
+      description:
+        recoveryRequiredAmount > 0
+          ? `Reversal parcial da carteira; recuperação pendente do pagamento ${payment.id}`
+          : `Reversal da carteira do pagamento ${payment.id}`,
+      status: input.status,
+      stripeRefundId: input.stripeRefundId,
+      stripeDisputeId: input.stripeDisputeId,
+      metadata: {
+        ...result,
+        source: input.source,
+        reason: input.reason,
+        previousAvailableBalance: this.toMoneyString(availableBalance),
+        previousTotalEarned: this.toMoneyString(totalEarned),
+        processedAt: now.toISOString(),
+      },
+    });
+
+    return result;
+  }
+
   // Criar disputa
   async createDispute(
     createDto: CreateDisputeDto,
@@ -1099,11 +1474,13 @@ export class PaymentsService {
       throw new BadRequestException('Disputa não está em análise');
     }
 
+    const resolution = this.normalizeDisputeResolution(resolveDto.resolution);
+
     const [updatedDispute] = await this.db
       .update(paymentDisputes)
       .set({
-        status: resolveDto.resolution,
-        resolution: resolveDto.resolution,
+        status: resolution,
+        resolution,
         adminNotes: resolveDto.adminNotes,
         resolvedBy: adminId,
         resolvedAt: new Date(),
@@ -1113,15 +1490,115 @@ export class PaymentsService {
       .returning();
 
     // Aplicar resolução
-    if (resolveDto.resolution === DisputeStatus.RESOLVED_PRO_PERSONAL) {
+    if (resolution === DisputeStatus.RESOLVED_PRO_PERSONAL) {
       // Capturar pagamento (personal ganha)
       await this.capturePayment(dispute.paymentId);
-    } else if (resolveDto.resolution === DisputeStatus.RESOLVED_PRO_STUDENT) {
+    } else if (resolution === DisputeStatus.RESOLVED_PRO_STUDENT) {
       // Reembolsar aluno
       await this.refundPayment(dispute.paymentId);
     }
 
     return this.formatDisputeResponse(updatedDispute);
+  }
+
+  private async refundStripePayment(payment: any, reason?: string): Promise<void> {
+    if (!this.stripeRefundsService.isConfigured()) {
+      throw new BadRequestException('Stripe não está configurado corretamente');
+    }
+
+    const totalAmount = this.toMoneyNumber(payment.totalAmount);
+    const refund = await this.stripeRefundsService.createRefund({
+      paymentIntentId: payment.stripePaymentIntentId,
+      chargeId: payment.stripeChargeId || payment.stripeLatestChargeId,
+      amount: totalAmount,
+      reason: 'requested_by_customer',
+      reverseTransfer: false,
+      refundApplicationFee: false,
+      metadata: this.toStripeMetadata({
+        paymentId: payment.id,
+        classId: payment.classId,
+        proposalId: payment.proposalId,
+        studentId: payment.studentId,
+        personalId: payment.personalId,
+        provider: 'stripe',
+        reason: reason || 'refund_requested',
+      }),
+      idempotencyKey: `stripe_refund:${payment.id}`,
+    });
+
+    await this.applyStripeRefundToLocalPayment(payment, {
+      refundId: refund.id,
+      refundStatus: refund.status,
+      amount: refund.amount ? refund.amount / 100 : totalAmount,
+      reason,
+      source: 'api',
+    });
+  }
+
+  private async applyStripeRefundToLocalPayment(
+    payment: any,
+    input: {
+      refundId?: string;
+      refundStatus?: string | null;
+      amount?: number;
+      reason?: string;
+      source: 'api' | 'webhook';
+    },
+  ): Promise<void> {
+    const now = new Date();
+    const refundId = input.refundId || payment.stripeRefundId;
+    const totalAmount = this.toMoneyNumber(input.amount ?? payment.totalAmount);
+    const reversal = await this.reversePersonalSettlement(payment, {
+      reason: input.reason || `Reembolso da aula ${payment.classId}`,
+      source: `stripe_refund_${input.source}`,
+      status: PaymentStatus.REFUNDED,
+      stripeRefundId: refundId,
+      now,
+    });
+
+    await this.db
+      .update(payments)
+      .set({
+        status: PaymentStatus.REFUNDED,
+        stripeRefundId: refundId,
+        splitData: this.buildMergedSplitData(payment, 'stripeRefund', {
+          refundId,
+          refundStatus: input.refundStatus,
+          amount: this.toMoneyString(totalAmount),
+          reason: input.reason,
+          source: input.source,
+          processedAt: now.toISOString(),
+          personalReversalStatus: reversal.status,
+          walletReversedAmount: reversal.walletReversedAmount,
+          recoveryRequiredAmount: reversal.recoveryRequiredAmount,
+          stripeTransferId: reversal.stripeTransferId,
+          stripeTransferReversalId: reversal.stripeTransferReversalId,
+        }),
+        refundedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(payments.id, payment.id));
+
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.studentId,
+      type: PaymentType.REFUND,
+      amount: totalAmount,
+      description: input.reason || `Reembolso da aula ${payment.classId}`,
+      status: PaymentStatus.REFUNDED,
+      stripeRefundId: refundId,
+      metadata: {
+        provider: 'stripe',
+        refundId,
+        refundStatus: input.refundStatus,
+        source: input.source,
+        personalReversal: reversal,
+      },
+    });
+
+    console.log(
+      `✅ Reembolso Stripe registrado para pagamento ${payment.id}: R$ ${this.toMoneyString(totalAmount)}`,
+    );
   }
 
   // Reembolsar pagamento
@@ -1146,6 +1623,11 @@ export class PaymentsService {
       throw new BadRequestException(
         'Pagamento já foi reembolsado ou cancelado',
       );
+    }
+
+    if (this.isStripePayment(payment)) {
+      await this.refundStripePayment(payment, reason);
+      return;
     }
 
     // Reembolsar no Mercado Pago se tiver mpPaymentId
@@ -1233,6 +1715,205 @@ export class PaymentsService {
     console.log(
       `✅ Reembolso completo para pagamento ${paymentId}: R$ ${payment.totalAmount}`,
     );
+  }
+
+  async handleStripeChargeRefundedEvent(charge: Stripe.Charge): Promise<void> {
+    const chargeId = charge.id;
+    const paymentIntentId = this.getStripeChargePaymentIntentId(charge);
+    const refundId = this.getStripeRefundIdFromCharge(charge);
+    const payment = await this.findPaymentByStripeIdentifiers({
+      chargeId,
+      paymentIntentId,
+    });
+
+    if (!payment) {
+      console.warn(
+        `⚠️ [STRIPE_REFUND] Pagamento local não encontrado para charge ${chargeId}`,
+      );
+      return;
+    }
+
+    if (payment.status === PaymentStatus.REFUNDED) {
+      if (refundId && !payment.stripeRefundId) {
+        await this.db
+          .update(payments)
+          .set({
+            stripeRefundId: refundId,
+            updatedAt: new Date(),
+          })
+          .where(eq(payments.id, payment.id));
+      }
+      return;
+    }
+
+    await this.applyStripeRefundToLocalPayment(payment, {
+      refundId,
+      refundStatus: charge.refunds?.data?.[0]?.status,
+      amount: charge.amount_refunded ? charge.amount_refunded / 100 : undefined,
+      reason: 'Refund recebido via webhook Stripe',
+      source: 'webhook',
+    });
+  }
+
+  async handleStripeDisputeCreatedEvent(
+    dispute: Stripe.Dispute,
+  ): Promise<void> {
+    const payment = await this.findPaymentByStripeIdentifiers({
+      chargeId: this.getStripeDisputeChargeId(dispute),
+      paymentIntentId: this.getStripeDisputePaymentIntentId(dispute),
+    });
+
+    if (!payment) {
+      console.warn(
+        `⚠️ [STRIPE_DISPUTE] Pagamento local não encontrado para dispute ${dispute.id}`,
+      );
+      return;
+    }
+
+    const now = new Date();
+    const stripeDisputeMetadata = this.buildStripeDisputeMetadata(dispute, {
+      event: 'created',
+    });
+    const adminNotes = this.buildStripeDisputeAdminNotes(stripeDisputeMetadata);
+    const existingDispute = await this.findActivePaymentDispute(payment.id);
+
+    if (existingDispute) {
+      await this.db
+        .update(paymentDisputes)
+        .set({
+          status: DisputeStatus.UNDER_REVIEW,
+          reason: `stripe_${dispute.reason || 'dispute'}`,
+          description:
+            existingDispute.description ||
+            `Disputa Stripe ${dispute.id} aberta para a charge ${this.getStripeDisputeChargeId(dispute) || 'desconhecida'}`,
+          adminNotes,
+          expiresAt: this.getStripeDisputeDeadline(dispute),
+          updatedAt: now,
+        })
+        .where(eq(paymentDisputes.id, existingDispute.id));
+    } else {
+      await this.db.insert(paymentDisputes).values({
+        paymentId: payment.id,
+        reportedBy: payment.studentId,
+        reason: `stripe_${dispute.reason || 'dispute'}`,
+        description: `Disputa Stripe ${dispute.id} aberta para a charge ${this.getStripeDisputeChargeId(dispute) || 'desconhecida'}`,
+        status: DisputeStatus.UNDER_REVIEW,
+        adminNotes,
+        expiresAt: this.getStripeDisputeDeadline(dispute),
+      });
+    }
+
+    await this.db
+      .update(payments)
+      .set({
+        status: PaymentStatus.DISPUTED,
+        splitData: this.buildMergedSplitData(payment, 'stripeDispute', {
+          ...stripeDisputeMetadata,
+          mappedAt: now.toISOString(),
+        }),
+        updatedAt: now,
+      })
+      .where(eq(payments.id, payment.id));
+
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.studentId,
+      type: PaymentType.REFUND,
+      amount: '0.00',
+      description: `Disputa Stripe aberta: ${dispute.reason || dispute.id}`,
+      status: PaymentStatus.DISPUTED,
+      stripeDisputeId: dispute.id,
+      metadata: stripeDisputeMetadata,
+    });
+  }
+
+  async handleStripeDisputeClosedEvent(
+    dispute: Stripe.Dispute,
+  ): Promise<void> {
+    const payment = await this.findPaymentByStripeIdentifiers({
+      chargeId: this.getStripeDisputeChargeId(dispute),
+      paymentIntentId: this.getStripeDisputePaymentIntentId(dispute),
+    });
+
+    if (!payment) {
+      console.warn(
+        `⚠️ [STRIPE_DISPUTE] Pagamento local não encontrado para dispute fechado ${dispute.id}`,
+      );
+      return;
+    }
+
+    const now = new Date();
+    const resolution = this.mapStripeDisputeResolution(dispute.status);
+    const stripeDisputeMetadata = this.buildStripeDisputeMetadata(dispute, {
+      event: 'closed',
+      resolution,
+    });
+    const adminNotes = this.buildStripeDisputeAdminNotes(stripeDisputeMetadata);
+    const existingDispute = await this.findActivePaymentDispute(payment.id);
+    const reversal =
+      resolution === DisputeStatus.RESOLVED_PRO_STUDENT
+        ? await this.reversePersonalSettlement(payment, {
+            reason: `Disputa Stripe perdida: ${dispute.id}`,
+            source: 'stripe_dispute_closed',
+            status: PaymentStatus.DISPUTE_RESOLVED,
+            stripeDisputeId: dispute.id,
+            now,
+          })
+        : undefined;
+
+    const disputeUpdateData = {
+      status: resolution,
+      resolution,
+      adminNotes,
+      resolvedAt: now,
+      updatedAt: now,
+    };
+
+    if (existingDispute) {
+      await this.db
+        .update(paymentDisputes)
+        .set(disputeUpdateData)
+        .where(eq(paymentDisputes.id, existingDispute.id));
+    } else {
+      await this.db.insert(paymentDisputes).values({
+        paymentId: payment.id,
+        reportedBy: payment.studentId,
+        reason: `stripe_${dispute.reason || 'dispute'}`,
+        description: `Disputa Stripe ${dispute.id} fechada com status ${dispute.status}`,
+        status: resolution,
+        resolution,
+        adminNotes,
+        resolvedAt: now,
+        expiresAt: this.getStripeDisputeDeadline(dispute),
+      });
+    }
+
+    await this.db
+      .update(payments)
+      .set({
+        status: PaymentStatus.DISPUTE_RESOLVED,
+        splitData: this.buildMergedSplitData(payment, 'stripeDispute', {
+          ...stripeDisputeMetadata,
+          personalReversal: reversal,
+          mappedAt: now.toISOString(),
+        }),
+        updatedAt: now,
+      })
+      .where(eq(payments.id, payment.id));
+
+    await this.createTransaction({
+      paymentId: payment.id,
+      userId: payment.studentId,
+      type: PaymentType.REFUND,
+      amount: this.toMoneyString((dispute.amount || 0) / 100),
+      description: `Disputa Stripe fechada: ${dispute.status}`,
+      status: PaymentStatus.DISPUTE_RESOLVED,
+      stripeDisputeId: dispute.id,
+      metadata: {
+        ...stripeDisputeMetadata,
+        personalReversal: reversal,
+      },
+    });
   }
 
   // Capturar pagamento após aula concluída (fluxo normal)
@@ -1874,6 +2555,14 @@ export class PaymentsService {
       personalId: payment.personalId,
       mpPaymentId: payment.mpPaymentId,
       mpPreferenceId: payment.mpPreferenceId,
+      provider: payment.provider,
+      proposalId: payment.proposalId,
+      stripePaymentIntentId: payment.stripePaymentIntentId,
+      stripeChargeId: payment.stripeChargeId,
+      stripeTransferGroup: payment.stripeTransferGroup,
+      stripeLatestChargeId: payment.stripeLatestChargeId,
+      stripeRefundId: payment.stripeRefundId,
+      processingModel: payment.processingModel,
       totalAmount: parseFloat(payment.totalAmount),
       platformFee: parseFloat(payment.platformFee),
       personalAmount: parseFloat(payment.personalAmount),

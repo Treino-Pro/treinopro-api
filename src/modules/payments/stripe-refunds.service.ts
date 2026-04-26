@@ -9,6 +9,7 @@ interface CreateStripeRefundInput {
   metadata?: Record<string, string>;
   reverseTransfer?: boolean;
   refundApplicationFee?: boolean;
+  idempotencyKey?: string;
 }
 
 @Injectable()
@@ -42,18 +43,25 @@ export class StripeRefundsService {
       );
     }
 
-    return stripe.refunds.create({
-      payment_intent: input.paymentIntentId,
-      charge: input.chargeId,
-      amount:
-        typeof input.amount === 'number'
-          ? this.toMinorUnits(input.amount)
-          : undefined,
-      reason: input.reason,
-      metadata: input.metadata,
-      reverse_transfer: input.reverseTransfer,
-      refund_application_fee: input.refundApplicationFee,
-    });
+    return stripe.refunds.create(
+      {
+        payment_intent: input.paymentIntentId,
+        charge: input.chargeId,
+        amount:
+          typeof input.amount === 'number'
+            ? this.toMinorUnits(input.amount)
+            : undefined,
+        reason: input.reason,
+        metadata: input.metadata,
+        reverse_transfer: input.reverseTransfer,
+        refund_application_fee: input.refundApplicationFee,
+      },
+      input.idempotencyKey
+        ? {
+            idempotencyKey: input.idempotencyKey,
+          }
+        : undefined,
+    );
   }
 
   async retrieveRefund(refundId: string): Promise<Stripe.Refund> {

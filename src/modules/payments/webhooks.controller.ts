@@ -15,6 +15,7 @@ import { MercadoPagoService } from './mercadopago.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 import { ProposalsService } from '../proposals/proposals.service';
+import { PaymentsService } from './payments.service';
 
 export interface WebhookPayload {
   id: number;
@@ -120,6 +121,32 @@ export class WebhooksController {
           event.type,
           event.data.object as any,
         );
+      }
+
+      if (
+        [
+          'charge.refunded',
+          'charge.dispute.created',
+          'charge.dispute.closed',
+        ].includes(event.type)
+      ) {
+        const paymentsService = this.moduleRef.get(PaymentsService, {
+          strict: false,
+        });
+
+        if (event.type === 'charge.refunded') {
+          await paymentsService.handleStripeChargeRefundedEvent(
+            event.data.object as any,
+          );
+        } else if (event.type === 'charge.dispute.created') {
+          await paymentsService.handleStripeDisputeCreatedEvent(
+            event.data.object as any,
+          );
+        } else if (event.type === 'charge.dispute.closed') {
+          await paymentsService.handleStripeDisputeClosedEvent(
+            event.data.object as any,
+          );
+        }
       }
 
       return { status: 'success' };

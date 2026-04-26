@@ -9,6 +9,8 @@ import { MercadoPagoService } from './mercadopago.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentStatus, PaymentType, DisputeStatus } from './dto/payments.dto';
 import { WITHDRAWAL_PAYOUT_PROVIDER } from './withdrawal-payout.provider';
+import { StripeRefundsService } from './stripe-refunds.service';
+import { StripeTransfersService } from './stripe-transfers.service';
 
 // Mock do banco de dados
 const mockDb = {
@@ -82,6 +84,26 @@ const mockWithdrawalPayoutProvider = {
   executePayout: jest.fn(),
 };
 
+const mockStripeRefundsService = {
+  isConfigured: jest.fn().mockReturnValue(true),
+  createRefund: jest.fn().mockResolvedValue({
+    id: 're_123',
+    amount: 10000,
+    status: 'succeeded',
+    payment_intent: 'pi_123',
+    charge: 'ch_123',
+  }),
+};
+
+const mockStripeTransfersService = {
+  isConfigured: jest.fn().mockReturnValue(true),
+  createTransferReversal: jest.fn().mockResolvedValue({
+    id: 'trr_123',
+    transfer: 'tr_123',
+    balance_transaction: 'txn_123',
+  }),
+};
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
 
@@ -110,6 +132,11 @@ describe('PaymentsService', () => {
         {
           provide: WITHDRAWAL_PAYOUT_PROVIDER,
           useValue: mockWithdrawalPayoutProvider,
+        },
+        { provide: StripeRefundsService, useValue: mockStripeRefundsService },
+        {
+          provide: StripeTransfersService,
+          useValue: mockStripeTransfersService,
         },
       ],
     }).compile();
@@ -877,6 +904,288 @@ describe('PaymentsService', () => {
       );
 
       expect(mockDb.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refundPayment - Stripe Fase 6', () => {
+    const stripePayment = {
+      id: 'pay-stripe-refund-1',
+      classId: 'class-stripe-1',
+      proposalId: 'prop-stripe-1',
+      studentId: 'student-1',
+      personalId: 'personal-1',
+      provider: 'stripe',
+      stripePaymentIntentId: 'pi_123',
+      stripeChargeId: 'ch_123',
+      stripeLatestChargeId: 'ch_123',
+      stripeTransferGroup: 'proposal_prop-stripe-1',
+      processingModel: 'separate_charges_and_transfers',
+      totalAmount: '100.00',
+      platformFee: '10.00',
+      personalAmount: '90.00',
+      status: PaymentStatus.CAPTURED,
+      type: PaymentType.CLASS_PAYMENT,
+      splitData: {
+        internalWalletRelease: {
+          releaseType: 'internal_wallet_release',
+        },
+      },
+    };
+
+    it('cria refund Stripe e reverte a carteira interna quando há saldo disponível', async () => {
+      const setMock = jest.fn().mockReturnThis();
+      mockDb.query.payments.findFirst.mockResolvedValue(stripePayment);
+      mockDb.update.mockReturnValue({
+        set: setMock,
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([]),
+      });
+      jest.spyOn(service, 'getUserWallet').mockResolvedValue({
+        id: 'wallet-1',
+        userId: 'personal-1',
+        availableBalance: 90,
+        pendingBalance: 0,
+        totalEarned: 90,
+        totalWithdrawn: 0,
+        isActive: 'true',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest.spyOn(service, 'updateWallet').mockResolvedValue({} as any);
+      const createTransactionSpy = jest
+        .spyOn(service as any, 'createTransaction')
+        .mockResolvedValue({} as any);
+
+      await service.refundPayment(
+        stripePayment.id,
+        'Cancelamento antes da aula',
+      );
+
+      expect(mockStripeRefundsService.createRefund).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paymentIntentId: 'pi_123',
+          chargeId: 'ch_123',
+          amount: 100,
+          reverseTransfer: false,
+          refundApplicationFee: false,
+          idempotencyKey: `stripe_refund:${stripePayment.id}`,
+        }),
+      );
+      expect(service.updateWallet).toHaveBeenCalledWith('personal-1', {
+        availableBalance: 0,
+        totalEarned: 0,
+      });
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: PaymentStatus.REFUNDED,
+          stripeRefundId: 're_123',
+          splitData: expect.objectContaining({
+            stripeRefund: expect.objectContaining({
+              refundId: 're_123',
+              personalReversalStatus: 'wallet_reversed',
+              recoveryRequiredAmount: '0.00',
+            }),
+          }),
+        }),
+      );
+      expect(createTransactionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'student-1',
+          type: PaymentType.REFUND,
+          stripeRefundId: 're_123',
+        }),
+      );
+    });
+
+    it('registra recuperação pendente quando o personal já sacou o saldo', async () => {
+      const setMock = jest.fn().mockReturnThis();
+      mockDb.query.payments.findFirst.mockResolvedValue(stripePayment);
+      mockDb.update.mockReturnValue({
+        set: setMock,
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([]),
+      });
+      jest.spyOn(service, 'getUserWallet').mockResolvedValue({
+        id: 'wallet-1',
+        userId: 'personal-1',
+        availableBalance: 0,
+        pendingBalance: 0,
+        totalEarned: 90,
+        totalWithdrawn: 90,
+        isActive: 'true',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest.spyOn(service, 'updateWallet').mockResolvedValue({} as any);
+      const createTransactionSpy = jest
+        .spyOn(service as any, 'createTransaction')
+        .mockResolvedValue({} as any);
+
+      await service.refundPayment(stripePayment.id, 'Chargeback preventivo');
+
+      expect(service.updateWallet).toHaveBeenCalledWith('personal-1', {
+        availableBalance: 0,
+        totalEarned: 0,
+      });
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          splitData: expect.objectContaining({
+            stripeRefund: expect.objectContaining({
+              personalReversalStatus: 'recovery_required',
+              recoveryRequiredAmount: '90.00',
+            }),
+          }),
+        }),
+      );
+      expect(createTransactionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'personal-1',
+          amount: '0.00',
+          metadata: expect.objectContaining({
+            recoveryRequiredAmount: '90.00',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('Stripe dispute webhooks - Fase 6', () => {
+    const stripePayment = {
+      id: 'pay-stripe-dispute-1',
+      classId: 'class-stripe-1',
+      proposalId: 'prop-stripe-1',
+      studentId: 'student-1',
+      personalId: 'personal-1',
+      provider: 'stripe',
+      stripePaymentIntentId: 'pi_123',
+      stripeChargeId: 'ch_123',
+      stripeLatestChargeId: 'ch_123',
+      totalAmount: '100.00',
+      personalAmount: '90.00',
+      status: PaymentStatus.CAPTURED,
+      splitData: {},
+    };
+
+    it('mapeia charge.dispute.created para uma disputa interna', async () => {
+      const disputeInsertValues = jest.fn().mockReturnValue({
+        returning: jest.fn().mockResolvedValue([]),
+      });
+      const setMock = jest.fn().mockReturnThis();
+      mockDb.query.payments.findFirst.mockResolvedValue(stripePayment);
+      mockDb.query.paymentDisputes.findFirst.mockResolvedValue(null);
+      mockDb.insert.mockReturnValue({
+        values: disputeInsertValues,
+      });
+      mockDb.update.mockReturnValue({
+        set: setMock,
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([]),
+      });
+      jest
+        .spyOn(service as any, 'createTransaction')
+        .mockResolvedValue({} as any);
+
+      await service.handleStripeDisputeCreatedEvent({
+        id: 'dp_123',
+        charge: 'ch_123',
+        amount: 10000,
+        currency: 'brl',
+        reason: 'fraudulent',
+        status: 'needs_response',
+        evidence_details: {
+          due_by: 1767225600,
+        },
+      } as any);
+
+      expect(disputeInsertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paymentId: stripePayment.id,
+          reportedBy: 'student-1',
+          reason: 'stripe_fraudulent',
+          status: DisputeStatus.UNDER_REVIEW,
+        }),
+      );
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: PaymentStatus.DISPUTED,
+          splitData: expect.objectContaining({
+            stripeDispute: expect.objectContaining({
+              stripeDisputeId: 'dp_123',
+              status: 'needs_response',
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('ao perder disputa Stripe, registra resolução e recuperação do repasse do personal', async () => {
+      const activeDispute = {
+        id: 'internal-dispute-1',
+        paymentId: stripePayment.id,
+        status: DisputeStatus.UNDER_REVIEW,
+      };
+      const setMock = jest.fn().mockReturnThis();
+      mockDb.query.payments.findFirst.mockResolvedValue(stripePayment);
+      mockDb.query.paymentDisputes.findFirst.mockResolvedValue(activeDispute);
+      mockDb.update.mockReturnValue({
+        set: setMock,
+        where: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValue([]),
+      });
+      jest.spyOn(service, 'getUserWallet').mockResolvedValue({
+        id: 'wallet-1',
+        userId: 'personal-1',
+        availableBalance: 0,
+        pendingBalance: 0,
+        totalEarned: 90,
+        totalWithdrawn: 90,
+        isActive: 'true',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      jest.spyOn(service, 'updateWallet').mockResolvedValue({} as any);
+      const createTransactionSpy = jest
+        .spyOn(service as any, 'createTransaction')
+        .mockResolvedValue({} as any);
+
+      await service.handleStripeDisputeClosedEvent({
+        id: 'dp_123',
+        charge: 'ch_123',
+        amount: 10000,
+        currency: 'brl',
+        reason: 'fraudulent',
+        status: 'lost',
+        evidence_details: {},
+      } as any);
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: DisputeStatus.RESOLVED_PRO_STUDENT,
+          resolution: DisputeStatus.RESOLVED_PRO_STUDENT,
+        }),
+      );
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: PaymentStatus.DISPUTE_RESOLVED,
+          splitData: expect.objectContaining({
+            stripeDispute: expect.objectContaining({
+              stripeDisputeId: 'dp_123',
+              resolution: DisputeStatus.RESOLVED_PRO_STUDENT,
+              personalReversal: expect.objectContaining({
+                recoveryRequiredAmount: '90.00',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(createTransactionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripeDisputeId: 'dp_123',
+          metadata: expect.objectContaining({
+            recoveryRequiredAmount: '90.00',
+          }),
+        }),
+      );
     });
   });
 

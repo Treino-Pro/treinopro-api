@@ -12,6 +12,14 @@ export interface CreateStripeTransferInput {
   currency?: string;
 }
 
+export interface CreateStripeTransferReversalInput {
+  transferId: string;
+  amount?: number;
+  description?: string;
+  metadata?: Record<string, string>;
+  idempotencyKey?: string;
+}
+
 @Injectable()
 export class StripeTransfersService {
   private readonly secretKey = process.env.STRIPE_SECRET_KEY || '';
@@ -71,6 +79,29 @@ export class StripeTransfersService {
 
   async retrieveTransfer(transferId: string): Promise<Stripe.Transfer> {
     return this.assertConfigured().transfers.retrieve(transferId);
+  }
+
+  async createTransferReversal(
+    input: CreateStripeTransferReversalInput,
+  ): Promise<Stripe.TransferReversal> {
+    const stripe = this.assertConfigured();
+
+    return stripe.transfers.createReversal(
+      input.transferId,
+      {
+        amount:
+          typeof input.amount === 'number'
+            ? this.toMinorUnits(input.amount)
+            : undefined,
+        description: input.description,
+        metadata: input.metadata,
+      },
+      input.idempotencyKey
+        ? {
+            idempotencyKey: input.idempotencyKey,
+          }
+        : undefined,
+    );
   }
 
   private assertConfigured(): Stripe {

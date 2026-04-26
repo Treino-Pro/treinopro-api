@@ -307,6 +307,54 @@ export class PaymentResponseDto {
   })
   mpPreferenceId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Provedor de pagamento',
+    example: 'stripe',
+  })
+  provider?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID da proposta vinculada ao pagamento',
+    example: '123e4567-e89b-12d3-a456-426614174004',
+  })
+  proposalId?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID do PaymentIntent no Stripe',
+    example: 'pi_123',
+  })
+  stripePaymentIntentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID da charge no Stripe',
+    example: 'ch_123',
+  })
+  stripeChargeId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Transfer group usado no Stripe Connect',
+    example: 'proposal_123e4567-e89b-12d3-a456-426614174004',
+  })
+  stripeTransferGroup?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID da charge mais recente no Stripe',
+    example: 'ch_123',
+  })
+  stripeLatestChargeId?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID do refund no Stripe',
+    example: 're_123',
+  })
+  stripeRefundId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Modelo de processamento financeiro',
+    example: 'separate_charges_and_transfers',
+  })
+  processingModel?: string;
+
   @ApiProperty({
     description: 'Valor total do pagamento',
     example: 80.0,
