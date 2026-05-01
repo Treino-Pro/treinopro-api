@@ -66,6 +66,33 @@ describe('WebhooksController', () => {
     expect(result).toEqual({ status: 'success' });
   });
 
+  it('handles Stripe v2 account status webhooks', async () => {
+    stripeWebhooksService.constructEvent.mockReturnValue({
+      id: 'evt_test_123',
+      type: 'v2.core.account.updated',
+      related_object: {
+        id: 'acct_123',
+        type: 'v2.core.account',
+      },
+      data: {},
+    });
+
+    const result = await controller.handleStripeWebhook(
+      Buffer.from('{}'),
+      't=123,v1=signature',
+    );
+
+    expect(stripeFinancialAccountsService.handleAccountUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'v2.core.account.updated',
+        related_object: expect.objectContaining({
+          id: 'acct_123',
+        }),
+      }),
+    );
+    expect(result).toEqual({ status: 'success' });
+  });
+
   it('routes Stripe dispute webhooks to PaymentsService', async () => {
     stripeWebhooksService.constructEvent.mockReturnValue({
       id: 'evt_dispute_123',

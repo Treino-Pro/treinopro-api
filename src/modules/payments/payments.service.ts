@@ -2495,6 +2495,46 @@ export class PaymentsService {
     }
   }
 
+  private async resolveWithdrawalSourceTransactionId(
+    userId: string,
+    netAmount: number,
+  ): Promise<string | undefined> {
+    const candidateTransactions =
+      await this.db.query.paymentTransactions.findMany({
+        where: and(
+          eq(paymentTransactions.userId, userId),
+          eq(paymentTransactions.type, PaymentType.PERSONAL_EARNINGS),
+          eq(paymentTransactions.status, PaymentStatus.CAPTURED),
+          sql`${paymentTransactions.amount} >= ${this.toMoneyString(netAmount)}::numeric`,
+        ),
+        orderBy: [desc(paymentTransactions.createdAt)],
+        limit: 20,
+      });
+
+    for (const transaction of candidateTransactions) {
+      const metadata =
+        transaction.metadata && typeof transaction.metadata === 'string'
+          ? this.safeParseJson(transaction.metadata)
+          : transaction.metadata;
+      const sourceTransactionId =
+        metadata?.stripeLatestChargeId || metadata?.stripeChargeId;
+
+      if (sourceTransactionId) {
+        return sourceTransactionId;
+      }
+    }
+
+    return undefined;
+  }
+
+  private safeParseJson(value: string): Record<string, any> | null {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
   async processWithdrawalPayout(
     withdrawalId: string,
     options?: {
@@ -2581,6 +2621,12 @@ export class PaymentsService {
         previousPayout.idempotencyKey ||
         `stripe_withdrawal:${withdrawalId}:${withdrawal.userId}:${this.toMoneyString(netAmount)}`;
       const stripeTransferGroup = `withdrawal_${withdrawalId}`;
+      const sourceTransactionId =
+        previousPayout.sourceTransactionId ||
+        (await this.resolveWithdrawalSourceTransactionId(
+          withdrawal.userId,
+          netAmount,
+        ));
 
       await this.db
         .update(withdrawalRequests)
@@ -2602,6 +2648,7 @@ export class PaymentsService {
               lastStatus: 'processing',
               stripeAccountId: financialProfile.stripeAccountId,
               stripeTransferGroup,
+              sourceTransactionId,
             },
           },
         })
@@ -2628,6 +2675,7 @@ export class PaymentsService {
             withdrawalId,
             initiatedBy: options?.initiatedBy || 'admin',
             idempotencyKey: payoutIdempotencyKey,
+            sourceTransactionId,
           },
         });
       }
@@ -2658,6 +2706,7 @@ export class PaymentsService {
                 payoutResult.destinationAccountId ||
                 financialProfile.stripeAccountId,
               stripeTransferGroup,
+              sourceTransactionId,
               failureCode: payoutResult.failureCode,
               failureReason: payoutResult.failureReason,
             },
@@ -2706,6 +2755,7 @@ export class PaymentsService {
               payoutResult.destinationAccountId ||
               financialProfile.stripeAccountId,
             stripeTransferGroup,
+            sourceTransactionId,
             idempotencyKey: payoutResult.idempotencyKey || payoutIdempotencyKey,
             initiatedBy: options?.initiatedBy || 'admin',
           },
@@ -2758,6 +2808,7 @@ export class PaymentsService {
                   payoutResult.destinationAccountId ||
                   financialProfile.stripeAccountId,
                 stripeTransferGroup,
+                sourceTransactionId,
               },
             },
           })
@@ -2782,6 +2833,7 @@ export class PaymentsService {
             payoutResult.destinationAccountId ||
             financialProfile.stripeAccountId,
           stripeTransferGroup,
+          sourceTransactionId,
           idempotencyKey: payoutResult.idempotencyKey || payoutIdempotencyKey,
           requestedAmount,
           netAmount,

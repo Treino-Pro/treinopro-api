@@ -23,6 +23,7 @@ describe('StripeWithdrawalPayoutProvider', () => {
         withdrawalId: 'withdrawal-1',
         initiatedBy: 'system:auto_withdrawal',
         idempotencyKey: 'stripe_withdrawal:withdrawal-1:personal-1:100.00',
+        sourceTransactionId: 'ch_123',
       },
     });
 
@@ -30,8 +31,9 @@ describe('StripeWithdrawalPayoutProvider', () => {
       expect.objectContaining({
         amount: 100,
         destinationAccountId: 'acct_123',
-        transferGroup: 'withdrawal_withdrawal-1',
         idempotencyKey: 'stripe_withdrawal:withdrawal-1:personal-1:100.00',
+        sourceTransactionId: 'ch_123',
+        transferGroup: undefined,
         metadata: expect.objectContaining({
           type: 'manual_withdrawal',
           withdrawalId: 'withdrawal-1',

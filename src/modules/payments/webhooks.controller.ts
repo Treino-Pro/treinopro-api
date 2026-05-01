@@ -43,7 +43,7 @@ export class WebhooksController {
         signature,
       );
 
-      if (event.type === 'account.updated') {
+      if (this.isStripeAccountStatusEvent(event)) {
         await this.stripeFinancialAccountsService.handleAccountUpdated(event);
       }
 
@@ -97,5 +97,12 @@ export class WebhooksController {
       );
       return { status: 'error' } as any;
     }
+  }
+
+  private isStripeAccountStatusEvent(event: { type?: string }): boolean {
+    return Boolean(
+      event.type === 'account.updated' ||
+        event.type?.startsWith('v2.core.account'),
+    );
   }
 }

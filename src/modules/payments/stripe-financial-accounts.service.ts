@@ -133,13 +133,28 @@ export class StripeFinancialAccountsService {
   async handleAccountUpdated(event: {
     type: string;
     data?: { object?: any };
+    related_object?: { id?: string; type?: string };
   }): Promise<void> {
-    if (event?.type !== 'account.updated' || !event?.data?.object?.id) {
+    if (!this.isAccountStatusEvent(event)) {
       return;
     }
 
+    const eventAccount = event?.data?.object;
+    if (eventAccount?.id) {
+      await this.syncConnectedAccountStatus({
+        account: eventAccount,
+      });
+      return;
+    }
+
+    const accountId = event?.related_object?.id;
+    if (!accountId) {
+      return;
+    }
+
+    const account = await this.stripeConnectService.retrieveAccount(accountId);
     await this.syncConnectedAccountStatus({
-      account: event.data.object,
+      account,
     });
   }
 
@@ -223,7 +238,14 @@ export class StripeFinancialAccountsService {
     const requirements = this.normalizeRequirements(account?.requirements);
     const payoutsEnabled = this.resolvePayoutsEnabled(account);
     const chargesEnabled = this.resolveChargesEnabled(account);
-    const detailsSubmitted = Boolean(account?.details_submitted);
+    const detailsSubmitted =
+      typeof account?.details_submitted === 'boolean'
+        ? account.details_submitted
+        : this.resolveV2DetailsSubmitted({
+            chargesEnabled,
+            payoutsEnabled,
+            requirements,
+          });
     const onboardingComplete =
       detailsSubmitted &&
       payoutsEnabled &&
@@ -238,6 +260,33 @@ export class StripeFinancialAccountsService {
       detailsSubmitted,
       requirements,
     };
+  }
+
+  private isAccountStatusEvent(event?: {
+    type?: string;
+    related_object?: { type?: string };
+  }): boolean {
+    if (event?.type === 'account.updated') {
+      return true;
+    }
+
+    return Boolean(
+      event?.type?.startsWith('v2.core.account') &&
+        (!event.related_object?.type ||
+          event.related_object.type === 'v2.core.account'),
+    );
+  }
+
+  private resolveV2DetailsSubmitted(input: {
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    requirements: StripeRequirementsStatus;
+  }): boolean {
+    return Boolean(
+      (input.chargesEnabled || input.payoutsEnabled) &&
+        input.requirements.currentlyDue.length === 0 &&
+        input.requirements.pastDue.length === 0,
+    );
   }
 
   private resolvePayoutsEnabled(account: any): boolean {
@@ -256,11 +305,40 @@ export class StripeFinancialAccountsService {
       return account.charges_enabled;
     }
 
-    return Boolean(account?.charges_enabled);
+    return (
+      account?.configuration?.merchant?.capabilities?.card_payments?.status ===
+      'active'
+    );
   }
 
   private normalizeRequirements(raw: any): StripeRequirementsStatus {
     const requirements = raw || {};
+    const entries = Array.isArray(requirements.entries)
+      ? requirements.entries
+      : [];
+
+    if (entries.length > 0) {
+      const toRequirement = (entry: any): string =>
+        entry?.reference || entry?.description || 'unknown_requirement';
+      const userActionEntries = entries.filter(
+        (entry: any) => entry?.awaiting_action_from === 'user',
+      );
+
+      return {
+        currentlyDue: userActionEntries.map(toRequirement),
+        eventuallyDue: [],
+        pastDue: entries
+          .filter((entry: any) => entry?.minimum_deadline?.status === 'past_due')
+          .map(toRequirement),
+        pendingVerification: entries
+          .filter((entry: any) => entry?.awaiting_action_from === 'stripe')
+          .map(toRequirement),
+        disabledReason:
+          requirements.summary?.disabled_reason ??
+          requirements.summary?.disabledReason ??
+          null,
+      };
+    }
 
     return {
       currentlyDue: Array.isArray(requirements.currently_due)

@@ -103,11 +103,18 @@ export class StripeConnectService {
           input.givenName || input.familyName
             ? {
                 given_name: input.givenName,
-                family_name: input.familyName,
+                surname: input.familyName,
               }
             : undefined,
       },
       configuration: {
+        merchant: {
+          capabilities: {
+            card_payments: {
+              requested: true,
+            },
+          },
+        },
         recipient: {
           capabilities: {
             stripe_balance: {
@@ -119,7 +126,12 @@ export class StripeConnectService {
         },
       },
       metadata: input.metadata,
-      include: ['configuration.recipient', 'identity', 'requirements'],
+      include: [
+        'configuration.merchant',
+        'configuration.recipient',
+        'identity',
+        'requirements',
+      ],
     };
 
     return this.requestJson('POST', '/v2/core/accounts', payload, {
@@ -130,11 +142,17 @@ export class StripeConnectService {
   async retrieveAccount(accountId: string): Promise<any> {
     this.assertConfigured();
 
-    const include = encodeURIComponent('configuration.recipient');
-    const requirements = encodeURIComponent('requirements');
+    const include = [
+      'configuration.merchant',
+      'configuration.recipient',
+      'requirements',
+    ]
+      .map((value, index) => `include[${index}]=${encodeURIComponent(value)}`)
+      .join('&');
+
     return this.requestJson(
       'GET',
-      `/v2/core/accounts/${accountId}?include[]=${include}&include[]=${requirements}`,
+      `/v2/core/accounts/${accountId}?${include}`,
       undefined,
       {
         'Stripe-Version': this.connectApiVersion,

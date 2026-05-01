@@ -365,5 +365,71 @@ describe('StripeFinancialAccountsService', () => {
         }),
       });
     });
+
+    it('retrieves and syncs the account when Stripe sends a v2 account event', async () => {
+      const account = {
+        id: 'acct_123',
+        object: 'v2.core.account',
+        configuration: {
+          merchant: {
+            capabilities: {
+              card_payments: {
+                status: 'active',
+              },
+            },
+          },
+          recipient: {
+            capabilities: {
+              stripe_balance: {
+                payouts: {
+                  status: 'active',
+                },
+                stripe_transfers: {
+                  status: 'active',
+                },
+              },
+            },
+          },
+        },
+        requirements: {
+          entries: [],
+          summary: null,
+        },
+      };
+      mockStripeConnectService.retrieveAccount.mockResolvedValue(account);
+      const syncSpy = jest
+        .spyOn(service, 'syncConnectedAccountStatus')
+        .mockResolvedValue({
+          accountId: 'acct_123',
+          onboardingComplete: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          detailsSubmitted: true,
+          requirements: {
+            currentlyDue: [],
+            eventuallyDue: [],
+            pastDue: [],
+            pendingVerification: [],
+            disabledReason: null,
+          },
+        });
+
+      await service.handleAccountUpdated({
+        id: 'evt_test_123',
+        type: 'v2.core.account.updated',
+        related_object: {
+          id: 'acct_123',
+          type: 'v2.core.account',
+        },
+        data: {},
+      } as any);
+
+      expect(mockStripeConnectService.retrieveAccount).toHaveBeenCalledWith(
+        'acct_123',
+      );
+      expect(syncSpy).toHaveBeenCalledWith({
+        account,
+      });
+    });
   });
 });

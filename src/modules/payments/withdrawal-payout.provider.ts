@@ -29,6 +29,7 @@ export interface WithdrawalPayoutRequest {
     withdrawalId?: string;
     initiatedBy?: string;
     idempotencyKey?: string;
+    sourceTransactionId?: string;
   };
 }
 
@@ -91,10 +92,16 @@ export class StripeWithdrawalPayoutProvider
     const transferGroup = `withdrawal_${withdrawalId}`;
 
     try {
+      // Stripe BR requires source_transaction for separate charges/transfers.
+      // When a source charge already has a transfer_group, Stripe rejects a new
+      // transfer_group on the Transfer, so we only send it for non-source flows.
       const transfer = await this.stripeTransfersService.createTransfer({
         amount: request.amount,
         destinationAccountId: stripeAccountId,
-        transferGroup,
+        sourceTransactionId: request.context?.sourceTransactionId,
+        transferGroup: request.context?.sourceTransactionId
+          ? undefined
+          : transferGroup,
         description: request.description,
         idempotencyKey,
         metadata: {
