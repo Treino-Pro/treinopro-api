@@ -58,10 +58,89 @@ export class StripeFinancialAccountsService {
     });
 
     if (profile?.stripeAccountId) {
-      const account = await this.stripeConnectService.retrieveAccount(
-        profile.stripeAccountId,
+      try {
+        const account = await this.stripeConnectService.retrieveAccount(
+          profile.stripeAccountId,
+        );
+        return this.syncConnectedAccountStatus({ userId, account });
+      } catch (error) {
+        if (!this.isRecoverableStripeAccountAccessError(error)) {
+          throw error;
+        }
+
+        this.logger.warn(
+          `Conta Stripe ${this.maskStripeAccountId(profile.stripeAccountId)} inacessível pela chave atual. Criando nova conta conectada para o personal ${userId}.`,
+        );
+
+        return this.createAndSyncConnectedAccount({ user, profile });
+      }
+    }
+
+    return this.createAndSyncConnectedAccount({ user, profile });
+  }
+
+  async createEmbeddedOnboardingSession(userId: string): Promise<{
+    accountId: string;
+    clientSecret: string;
+    expiresAt?: number;
+  }> {
+    const account = await this.ensureConnectedAccount(userId);
+    let session: any;
+
+    try {
+      session = await this.stripeConnectService.createEmbeddedOnboardingSession(
+        {
+          accountId: account.accountId,
+        },
       );
-      return this.syncConnectedAccountStatus({ userId, account });
+    } catch (error) {
+      if (!this.isRecoverableStripeAccountAccessError(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `Falha ao criar Account Session para ${this.maskStripeAccountId(account.accountId)}. Recriando conta conectada e tentando novamente.`,
+      );
+
+      const user = await this.db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+      const profile = await this.db.query.financialProfiles.findFirst({
+        where: eq(financialProfiles.userId, userId),
+      });
+      const recoveredAccount = await this.createAndSyncConnectedAccount({
+        user,
+        profile,
+      });
+
+      session = await this.stripeConnectService.createEmbeddedOnboardingSession(
+        {
+          accountId: recoveredAccount.accountId,
+        },
+      );
+
+      return {
+        accountId: recoveredAccount.accountId,
+        clientSecret: session.client_secret,
+        expiresAt: session.expires_at,
+      };
+    }
+
+    return {
+      accountId: account.accountId,
+      clientSecret: session.client_secret,
+      expiresAt: session.expires_at,
+    };
+  }
+
+  private async createAndSyncConnectedAccount(input: {
+    user: any;
+    profile?: any;
+  }): Promise<StripeConnectedAccountStatus> {
+    const { user, profile } = input;
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
     }
 
     const account = await this.stripeConnectService.createRecipientAccount({
@@ -77,25 +156,19 @@ export class StripeFinancialAccountsService {
       },
     });
 
-    return this.syncConnectedAccountStatus({ userId, account, profile });
-  }
+    const status = await this.syncConnectedAccountStatus({
+      userId: user.id,
+      account,
+      profile,
+    });
 
-  async createEmbeddedOnboardingSession(userId: string): Promise<{
-    accountId: string;
-    clientSecret: string;
-    expiresAt?: number;
-  }> {
-    const account = await this.ensureConnectedAccount(userId);
-    const session =
-      await this.stripeConnectService.createEmbeddedOnboardingSession({
-        accountId: account.accountId,
-      });
+    if (!status) {
+      throw new NotFoundException(
+        'Perfil financeiro não encontrado para sincronizar conta Stripe',
+      );
+    }
 
-    return {
-      accountId: account.accountId,
-      clientSecret: session.client_secret,
-      expiresAt: session.expires_at,
-    };
+    return status;
   }
 
   async syncConnectedAccountStatus(input: {
@@ -328,7 +401,9 @@ export class StripeFinancialAccountsService {
         currentlyDue: userActionEntries.map(toRequirement),
         eventuallyDue: [],
         pastDue: entries
-          .filter((entry: any) => entry?.minimum_deadline?.status === 'past_due')
+          .filter(
+            (entry: any) => entry?.minimum_deadline?.status === 'past_due',
+          )
           .map(toRequirement),
         pendingVerification: entries
           .filter((entry: any) => entry?.awaiting_action_from === 'stripe')
@@ -364,5 +439,35 @@ export class StripeFinancialAccountsService {
       disabledReason:
         requirements.disabled_reason ?? requirements.disabledReason ?? null,
     };
+  }
+
+  private isRecoverableStripeAccountAccessError(error: any): boolean {
+    const response =
+      typeof error?.getResponse === 'function'
+        ? error.getResponse()
+        : error?.response;
+    const messages = [
+      error?.message,
+      typeof response === 'string' ? response : undefined,
+      response?.message,
+      response?.error,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return (
+      messages.includes('permission denied') ||
+      messages.includes('does not have permission to access account') ||
+      messages.includes('no such account')
+    );
+  }
+
+  private maskStripeAccountId(accountId?: string | null): string {
+    if (!accountId || accountId.length <= 8) {
+      return accountId || 'sem_conta';
+    }
+
+    return `${accountId.slice(0, 7)}...${accountId.slice(-4)}`;
   }
 }

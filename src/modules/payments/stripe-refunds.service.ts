@@ -43,10 +43,16 @@ export class StripeRefundsService {
       );
     }
 
+    const refundTarget: Pick<
+      Stripe.RefundCreateParams,
+      'payment_intent' | 'charge'
+    > = input.paymentIntentId
+      ? { payment_intent: input.paymentIntentId }
+      : { charge: input.chargeId };
+
     return stripe.refunds.create(
       {
-        payment_intent: input.paymentIntentId,
-        charge: input.chargeId,
+        ...refundTarget,
         amount:
           typeof input.amount === 'number'
             ? this.toMinorUnits(input.amount)
@@ -90,9 +96,7 @@ export class StripeRefundsService {
 
   private assertConfigured(): Stripe {
     if (!this.stripe) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
+      throw new BadRequestException('Stripe não está configurado corretamente');
     }
 
     return this.stripe;
