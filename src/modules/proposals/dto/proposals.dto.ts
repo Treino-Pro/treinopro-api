@@ -213,10 +213,10 @@ export class CreateProposalDto {
   @ApiProperty({
     description: 'Método de pagamento escolhido',
     example: 'credit_card',
-    enum: ['credit_card', 'debit_card'],
+    enum: ['credit_card', 'debit_card', 'pix'],
   })
   @IsString()
-  @IsIn(['credit_card', 'debit_card'])
+  @IsIn(['credit_card', 'debit_card', 'pix'])
   paymentMethod: string;
 
   @ApiProperty({
@@ -463,6 +463,10 @@ export class ProposalResponseDto {
     customerId?: string;
     customerEphemeralKeySecret?: string;
     publishableKey?: string;
+    qrCode?: string;
+    qrCodeImageUrl?: string;
+    qrCodeSvgUrl?: string;
+    hostedInstructionsUrl?: string;
     processingModel?: string;
     platformFee?: number; // Taxa da plataforma
     personalAmount?: number; // Valor para o personal

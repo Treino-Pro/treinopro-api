@@ -103,6 +103,34 @@ export class ProposalsService {
     return typeof latestCharge === 'string' ? latestCharge : latestCharge.id;
   }
 
+  private normalizePixTaxId(value?: string | null): string | undefined {
+    const digits = String(value || '').replace(/\D/g, '');
+    return digits.length === 11 || digits.length === 14 ? digits : undefined;
+  }
+
+  private getStripePixQrData(paymentIntent: Stripe.PaymentIntent): {
+    qrCode?: string;
+    qrCodeImageUrl?: string;
+    qrCodeSvgUrl?: string;
+    hostedInstructionsUrl?: string;
+    expiresAt?: Date;
+  } {
+    const pixQr = paymentIntent.next_action?.pix_display_qr_code;
+    if (!pixQr) {
+      return {};
+    }
+
+    return {
+      qrCode: pixQr.data || undefined,
+      qrCodeImageUrl: pixQr.image_url_png || undefined,
+      qrCodeSvgUrl: pixQr.image_url_svg || undefined,
+      hostedInstructionsUrl: pixQr.hosted_instructions_url || undefined,
+      expiresAt: pixQr.expires_at
+        ? new Date(pixQr.expires_at * 1000)
+        : undefined,
+    };
+  }
+
   private mapStripePaymentIntentStatus(paymentIntent: Stripe.PaymentIntent): {
     proposalStatus: string;
     paymentStatus: 'authorized' | 'pending' | 'cancelled';
@@ -530,6 +558,10 @@ export class ProposalsService {
           customerId: paymentResult.customerId,
           customerEphemeralKeySecret: paymentResult.customerEphemeralKeySecret,
           publishableKey: paymentResult.publishableKey,
+          qrCode: paymentResult.qrCode,
+          qrCodeImageUrl: paymentResult.qrCodeImageUrl,
+          qrCodeSvgUrl: paymentResult.qrCodeSvgUrl,
+          hostedInstructionsUrl: paymentResult.hostedInstructionsUrl,
           processingModel: paymentResult.processingModel,
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
@@ -801,6 +833,10 @@ export class ProposalsService {
           customerId: paymentResult.customerId,
           customerEphemeralKeySecret: paymentResult.customerEphemeralKeySecret,
           publishableKey: paymentResult.publishableKey,
+          qrCode: paymentResult.qrCode,
+          qrCodeImageUrl: paymentResult.qrCodeImageUrl,
+          qrCodeSvgUrl: paymentResult.qrCodeSvgUrl,
+          hostedInstructionsUrl: paymentResult.hostedInstructionsUrl,
           processingModel: paymentResult.processingModel,
           platformFee: paymentResult.platformFee,
           personalAmount: paymentResult.personalAmount,
@@ -2466,6 +2502,123 @@ export class ProposalsService {
     };
   }
 
+  private async createStripeProposalPixPaymentIntent(input: {
+    createProposalDto: CreateProposalDto;
+    userData: any;
+    trainingDate: Date;
+    proposalId: string;
+    platformFee: number;
+    personalAmount: number;
+  }): Promise<any> {
+    const {
+      createProposalDto,
+      userData,
+      trainingDate,
+      proposalId,
+      platformFee,
+      personalAmount,
+    } = input;
+
+    const customerSession =
+      await this.studentPaymentService.createStripeCustomerSession(userData.id);
+    const transferGroup = buildStripeProposalTransferGroup(proposalId);
+    const targetPersonalId: string | undefined = (createProposalDto as any)
+      .personalId;
+    const payerName = `${userData.firstName || ''} ${userData.lastName || ''}`
+      .trim()
+      .slice(0, 255);
+    const payerEmail =
+      createProposalDto.payerEmail || userData.email || undefined;
+    const payerTaxId = this.normalizePixTaxId(
+      createProposalDto.payerCpf || userData.documentNumber,
+    );
+    const pixExpiresAfterSeconds = Number(
+      process.env.STRIPE_PIX_EXPIRES_AFTER_SECONDS || 1800,
+    );
+
+    const paymentIntent =
+      await this.stripePaymentIntentsService.createPaymentIntent({
+        amount: createProposalDto.price,
+        currency: process.env.STRIPE_DEFAULT_CURRENCY || 'brl',
+        customerId: customerSession.customerId,
+        description: `${createProposalDto.locationName} - ${trainingDate.toLocaleDateString('pt-BR')}`,
+        confirm: true,
+        paymentMethodTypes: ['pix'],
+        paymentMethodData: {
+          type: 'pix',
+          billing_details: {
+            name: payerName || undefined,
+            email: payerEmail,
+            tax_id: payerTaxId,
+          },
+        },
+        paymentMethodOptions: {
+          pix: {
+            expires_after_seconds: Number.isFinite(pixExpiresAfterSeconds)
+              ? Math.min(Math.max(pixExpiresAfterSeconds, 10), 1209600)
+              : 1800,
+          },
+        },
+        transferGroup,
+        metadata: {
+          proposalId,
+          studentId: userData.id,
+          targetPersonalId: targetPersonalId || '',
+          paymentProvider: 'stripe',
+          processingModel: 'separate_charges_and_transfers',
+          paymentMethod: 'pix',
+          transferGroup,
+        },
+      });
+
+    const latestChargeId = this.getStripeLatestChargeId(paymentIntent);
+    const pixData = this.getStripePixQrData(paymentIntent);
+    const [newPayment] = await this.db
+      .insert(payments)
+      .values({
+        proposalId,
+        studentId: userData.id,
+        personalId: targetPersonalId || null,
+        totalAmount: createProposalDto.price.toString(),
+        platformFee: platformFee.toString(),
+        personalAmount: personalAmount.toString(),
+        status: 'pending',
+        type: 'class_payment',
+        provider: 'stripe',
+        stripePaymentIntentId: paymentIntent.id,
+        stripeTransferGroup: transferGroup,
+        stripeLatestChargeId: latestChargeId,
+        processingModel: 'separate_charges_and_transfers',
+      })
+      .returning();
+
+    console.log('✅ [PROPOSALS][STRIPE][PIX] PaymentIntent criado:', {
+      paymentId: newPayment.id,
+      stripePaymentIntentId: paymentIntent.id,
+      proposalId,
+      transferGroup,
+      hasQrCode: Boolean(pixData.qrCode || pixData.qrCodeImageUrl),
+    });
+
+    return {
+      success: true,
+      paymentId: newPayment.id,
+      status: 'pending',
+      method: 'pix',
+      amount: createProposalDto.price,
+      provider: 'stripe',
+      stripePaymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      customerId: customerSession.customerId,
+      processingModel: 'separate_charges_and_transfers',
+      platformFee,
+      personalAmount,
+      message:
+        'Pague o PIX para confirmar a proposta. A busca por personal começa após a confirmação.',
+      ...pixData,
+    };
+  }
+
   // ===== INTEGRAÇÃO STRIPE PARA PROPOSTAS =====
 
   private async createProposalPaymentPreference(
@@ -2529,8 +2682,19 @@ export class ProposalsService {
         });
       }
 
+      if (createProposalDto.paymentMethod === 'pix') {
+        return this.createStripeProposalPixPaymentIntent({
+          createProposalDto,
+          userData,
+          trainingDate,
+          proposalId,
+          platformFee,
+          personalAmount,
+        });
+      }
+
       throw new BadRequestException(
-        'Metodo de pagamento removido no cutover Stripe. Use credit_card ou debit_card.',
+        'Metodo de pagamento removido no cutover Stripe. Use credit_card, debit_card ou pix.',
       );
     } catch (error) {
       console.error('❌ [PROPOSALS] Erro ao criar pagamento Stripe:', error);

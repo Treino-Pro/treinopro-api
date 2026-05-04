@@ -6,6 +6,9 @@ interface CreateStripePaymentIntentInput {
   currency?: string;
   customerId?: string;
   paymentMethodId?: string;
+  paymentMethodTypes?: string[];
+  paymentMethodData?: Stripe.PaymentIntentCreateParams.PaymentMethodData;
+  paymentMethodOptions?: Stripe.PaymentIntentCreateParams.PaymentMethodOptions;
   description?: string;
   confirm?: boolean;
   captureMethod?: Stripe.PaymentIntentCreateParams.CaptureMethod;
@@ -54,21 +57,29 @@ export class StripePaymentIntentsService {
   ): Promise<Stripe.PaymentIntent> {
     const stripe = this.assertConfigured();
 
-    return stripe.paymentIntents.create({
+    const params: Stripe.PaymentIntentCreateParams = {
       amount: this.toMinorUnits(input.amount),
       currency: input.currency || this.defaultCurrency,
       customer: input.customerId,
       payment_method: input.paymentMethodId,
+      payment_method_types: input.paymentMethodTypes,
+      payment_method_data: input.paymentMethodData,
+      payment_method_options: input.paymentMethodOptions,
       description: input.description,
       confirm: input.confirm,
       capture_method: input.captureMethod,
       setup_future_usage: input.setupFutureUsage,
-      automatic_payment_methods: {
-        enabled: true,
-      },
       metadata: input.metadata,
       transfer_group: input.transferGroup,
-    });
+    };
+
+    if (!input.paymentMethodTypes?.length) {
+      params.automatic_payment_methods = {
+        enabled: true,
+      };
+    }
+
+    return stripe.paymentIntents.create(params);
   }
 
   async retrievePaymentIntent(
@@ -114,9 +125,7 @@ export class StripePaymentIntentsService {
 
   private assertConfigured(): Stripe {
     if (!this.stripe) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
+      throw new BadRequestException('Stripe não está configurado corretamente');
     }
 
     return this.stripe;
