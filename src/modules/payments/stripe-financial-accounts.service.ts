@@ -269,6 +269,7 @@ export class StripeFinancialAccountsService {
     profile: any,
     status: StripeConnectedAccountStatus,
   ): Promise<any> {
+    const payoutReady = this.isStatusPayoutReady(status);
     const updateData = {
       preferredMethod: profile.preferredMethod || PaymentMethod.BANK_TRANSFER,
       stripeAccountId: status.accountId,
@@ -278,10 +279,10 @@ export class StripeFinancialAccountsService {
       stripePayoutsEnabled: status.payoutsEnabled,
       stripeDetailsSubmitted: status.detailsSubmitted,
       stripeRequirements: status.requirements,
-      canReceivePayments: status.onboardingComplete,
+      canReceivePayments: payoutReady,
       isComplete: Boolean(profile.isComplete || status.detailsSubmitted),
-      verificationStatus: status.onboardingComplete ? 'verified' : 'pending',
-      verifiedAt: status.onboardingComplete ? new Date() : profile.verifiedAt,
+      verificationStatus: payoutReady ? 'verified' : 'pending',
+      verifiedAt: payoutReady ? new Date() : profile.verifiedAt,
       lastUpdatedAt: new Date(),
       updatedAt: new Date(),
     };
@@ -315,13 +316,10 @@ export class StripeFinancialAccountsService {
       typeof account?.details_submitted === 'boolean'
         ? account.details_submitted
         : this.resolveV2DetailsSubmitted({
-            chargesEnabled,
-            payoutsEnabled,
             requirements,
           });
     const onboardingComplete =
       detailsSubmitted &&
-      payoutsEnabled &&
       requirements.currentlyDue.length === 0 &&
       requirements.pastDue.length === 0;
 
@@ -351,13 +349,10 @@ export class StripeFinancialAccountsService {
   }
 
   private resolveV2DetailsSubmitted(input: {
-    chargesEnabled: boolean;
-    payoutsEnabled: boolean;
     requirements: StripeRequirementsStatus;
   }): boolean {
     return Boolean(
-      (input.chargesEnabled || input.payoutsEnabled) &&
-        input.requirements.currentlyDue.length === 0 &&
+      input.requirements.currentlyDue.length === 0 &&
         input.requirements.pastDue.length === 0,
     );
   }
@@ -385,7 +380,7 @@ export class StripeFinancialAccountsService {
   }
 
   private normalizeRequirements(raw: any): StripeRequirementsStatus {
-    const requirements = raw || {};
+    const requirements = this.parseRequirements(raw);
     const entries = Array.isArray(requirements.entries)
       ? requirements.entries
       : [];
@@ -396,18 +391,19 @@ export class StripeFinancialAccountsService {
       const userActionEntries = entries.filter(
         (entry: any) => entry?.awaiting_action_from === 'user',
       );
+      const stripeActionEntries = entries.filter(
+        (entry: any) => entry?.awaiting_action_from === 'stripe',
+      );
 
       return {
         currentlyDue: userActionEntries.map(toRequirement),
         eventuallyDue: [],
-        pastDue: entries
+        pastDue: userActionEntries
           .filter(
             (entry: any) => entry?.minimum_deadline?.status === 'past_due',
           )
           .map(toRequirement),
-        pendingVerification: entries
-          .filter((entry: any) => entry?.awaiting_action_from === 'stripe')
-          .map(toRequirement),
+        pendingVerification: stripeActionEntries.map(toRequirement),
         disabledReason:
           requirements.summary?.disabled_reason ??
           requirements.summary?.disabledReason ??
@@ -441,6 +437,18 @@ export class StripeFinancialAccountsService {
     };
   }
 
+  private parseRequirements(raw: any): any {
+    if (typeof raw !== 'string') {
+      return raw || {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
   private isRecoverableStripeAccountAccessError(error: any): boolean {
     const response =
       typeof error?.getResponse === 'function'
@@ -460,6 +468,15 @@ export class StripeFinancialAccountsService {
       messages.includes('permission denied') ||
       messages.includes('does not have permission to access account') ||
       messages.includes('no such account')
+    );
+  }
+
+  private isStatusPayoutReady(status: StripeConnectedAccountStatus): boolean {
+    return Boolean(
+      status.detailsSubmitted &&
+        status.payoutsEnabled &&
+        status.requirements.currentlyDue.length === 0 &&
+        status.requirements.pastDue.length === 0,
     );
   }
 

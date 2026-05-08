@@ -58,6 +58,41 @@ describe('StripeRefundsService', () => {
     );
   });
 
+  it('retries with charge when the stored payment_intent no longer exists', async () => {
+    createRefundMock
+      .mockRejectedValueOnce({
+        code: 'resource_missing',
+        message: "No such payment_intent: 'pi_missing'",
+      })
+      .mockResolvedValueOnce({
+        id: 're_456',
+        status: 'succeeded',
+        amount: 1000,
+      });
+
+    await service.createRefund({
+      paymentIntentId: 'pi_missing',
+      chargeId: 'ch_123',
+      amount: 10,
+      idempotencyKey: 'stripe_refund:payment-1',
+    });
+
+    expect(createRefundMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        payment_intent: 'pi_missing',
+      }),
+      { idempotencyKey: 'stripe_refund:payment-1' },
+    );
+    expect(createRefundMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        charge: 'ch_123',
+      }),
+      { idempotencyKey: 'stripe_refund:payment-1:charge' },
+    );
+  });
+
   it('requires a payment_intent or charge', async () => {
     await expect(service.createRefund({ amount: 10 })).rejects.toThrow(
       BadRequestException,

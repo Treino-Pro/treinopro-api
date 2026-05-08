@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { and, eq, ne } from 'drizzle-orm';
@@ -30,6 +31,8 @@ import {
 
 @Injectable()
 export class StudentPaymentMethodsService {
+  private readonly logger = new Logger(StudentPaymentMethodsService.name);
+
   constructor(
     private readonly stripeCustomersService: StripeCustomersService,
   ) {}
@@ -100,9 +103,29 @@ export class StudentPaymentMethodsService {
     }
 
     if (paymentMethods.stripeCustomerId) {
-      return paymentMethods.stripeCustomerId;
+      try {
+        await this.stripeCustomersService.retrieveCustomer(
+          paymentMethods.stripeCustomerId,
+        );
+        return paymentMethods.stripeCustomerId;
+      } catch (error) {
+        if (!this.isRecoverableStripeCustomerError(error)) {
+          throw error;
+        }
+
+        this.logger.warn(
+          `Customer Stripe ${this.maskStripeCustomerId(paymentMethods.stripeCustomerId)} inacessível para aluno ${userId}. Criando novo customer.`,
+        );
+      }
     }
 
+    return this.createAndPersistStripeCustomerForStudent(user, userId);
+  }
+
+  private async createAndPersistStripeCustomerForStudent(
+    user: any,
+    userId: string,
+  ): Promise<string> {
     const customer = await this.stripeCustomersService.createCustomer({
       email: user.email || undefined,
       name:
@@ -122,6 +145,23 @@ export class StudentPaymentMethodsService {
       .where(eq(studentPaymentMethods.userId, userId));
 
     return customer.id;
+  }
+
+  private isRecoverableStripeCustomerError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      error?.code === 'resource_missing' ||
+      message.includes('no such customer') ||
+      message.includes('cliente stripe removido')
+    );
+  }
+
+  private maskStripeCustomerId(customerId?: string | null): string {
+    if (!customerId || customerId.length <= 8) {
+      return customerId || 'sem_customer';
+    }
+
+    return `${customerId.slice(0, 7)}...${customerId.slice(-4)}`;
   }
 
   async createStripeCustomerSession(userId: string): Promise<{

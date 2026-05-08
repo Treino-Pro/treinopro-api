@@ -76,6 +76,7 @@ export class FileStorageUtil {
     const publicUrl = this.getPublicUrl(category, storedName);
 
     try {
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, buffer);
       this.logger.log(`💾 Arquivo salvo: ${filePath} (${mimeType})`);
 

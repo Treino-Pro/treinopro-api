@@ -112,6 +112,10 @@ describe('FileStorageUtil', () => {
       expect(result).toHaveProperty('path');
       expect(result).toHaveProperty('url');
       expect(result.storedName).toMatch(/^[0-9a-f-]+\.jpg$/);
+      expect(mockedFs.mkdir).toHaveBeenCalledWith(
+        expect.stringContaining('images/profiles'),
+        { recursive: true },
+      );
       expect(mockedFs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('images/profiles'),
         buffer,

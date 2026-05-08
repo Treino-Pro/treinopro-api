@@ -2892,7 +2892,7 @@ export class PaymentsService {
     currentlyDue: string[];
     pastDue: string[];
   } {
-    const requirements = raw || {};
+    const requirements = this.parseStripeRequirements(raw);
     return {
       currentlyDue: Array.isArray(requirements.currently_due)
         ? requirements.currently_due
@@ -2903,8 +2903,20 @@ export class PaymentsService {
         ? requirements.past_due
         : Array.isArray(requirements.pastDue)
           ? requirements.pastDue
-          : [],
+        : [],
     };
+  }
+
+  private parseStripeRequirements(raw: any): any {
+    if (typeof raw !== 'string') {
+      return raw || {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
   }
 
   private async createWithdrawalHistory(data: {

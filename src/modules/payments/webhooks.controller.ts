@@ -1,13 +1,15 @@
 import {
-  Body,
+  BadRequestException,
   Controller,
   Headers,
   HttpCode,
   HttpStatus,
   Logger,
   Post,
+  Req,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { StripeFinancialAccountsService } from './stripe-financial-accounts.service';
 import { StripeWebhooksService } from './stripe-webhooks.service';
@@ -28,18 +30,25 @@ export class WebhooksController {
   @Public()
   @HttpCode(HttpStatus.OK)
   async handleStripeWebhook(
-    @Body() rawBody: Buffer | string,
+    @Req() req: Request,
     @Headers('stripe-signature') signature: string,
   ): Promise<{ status: string }> {
     try {
-      const payload =
-        rawBody instanceof Buffer
-          ? rawBody
-          : typeof rawBody === 'string'
-            ? rawBody
-            : JSON.stringify(rawBody || {});
+      if (!signature) {
+        throw new BadRequestException(
+          'Header stripe-signature ausente no webhook Stripe',
+        );
+      }
+
+      const rawBody = req.body;
+      if (!Buffer.isBuffer(rawBody)) {
+        throw new BadRequestException(
+          'Body bruto do webhook Stripe indisponível. Verifique se express.raw está configurado antes do parser JSON.',
+        );
+      }
+
       const event = this.stripeWebhooksService.constructEvent(
-        payload,
+        rawBody,
         signature,
       );
 
@@ -95,7 +104,7 @@ export class WebhooksController {
         'Erro ao processar webhook Stripe:',
         error instanceof Error ? error.stack : error,
       );
-      return { status: 'error' } as any;
+      throw error;
     }
   }
 

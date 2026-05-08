@@ -502,13 +502,9 @@ export class FinancialProfileService {
 
   // Formatar resposta do perfil
   private formatProfileResponse(profile: any): FinancialProfileResponseDto {
-    const stripeRequirements = profile.stripeRequirements || {
-      currentlyDue: [],
-      eventuallyDue: [],
-      pastDue: [],
-      pendingVerification: [],
-      disabledReason: null,
-    };
+    const stripeRequirements = this.normalizeStripeRequirements(
+      profile.stripeRequirements,
+    );
 
     return {
       id: profile.id,
@@ -548,6 +544,53 @@ export class FinancialProfileService {
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
+  }
+
+  private normalizeStripeRequirements(raw: any): {
+    currentlyDue: string[];
+    eventuallyDue: string[];
+    pastDue: string[];
+    pendingVerification: string[];
+    disabledReason: string | null;
+  } {
+    const requirements = this.parseStripeRequirements(raw);
+
+    return {
+      currentlyDue: Array.isArray(requirements.currently_due)
+        ? requirements.currently_due
+        : Array.isArray(requirements.currentlyDue)
+          ? requirements.currentlyDue
+          : [],
+      eventuallyDue: Array.isArray(requirements.eventually_due)
+        ? requirements.eventually_due
+        : Array.isArray(requirements.eventuallyDue)
+          ? requirements.eventuallyDue
+          : [],
+      pastDue: Array.isArray(requirements.past_due)
+        ? requirements.past_due
+        : Array.isArray(requirements.pastDue)
+          ? requirements.pastDue
+          : [],
+      pendingVerification: Array.isArray(requirements.pending_verification)
+        ? requirements.pending_verification
+        : Array.isArray(requirements.pendingVerification)
+          ? requirements.pendingVerification
+          : [],
+      disabledReason:
+        requirements.disabled_reason ?? requirements.disabledReason ?? null,
+    };
+  }
+
+  private parseStripeRequirements(raw: any): any {
+    if (typeof raw !== 'string') {
+      return raw || {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
   }
 
   // Formatar resposta do saque

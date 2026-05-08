@@ -140,7 +140,12 @@ export class ProposalBackgroundService
         let shouldDeleteProposal = true;
 
         // Processar reembolso se houver pagamento
-        if (proposal.paymentId && proposal.paymentStatus !== 'refunded') {
+        if (
+          proposal.paymentId &&
+          !['refunded', 'refund_error', 'cancelled', 'canceled'].includes(
+            String(proposal.paymentStatus || '').toLowerCase(),
+          )
+        ) {
           try {
             await this.proposalsService.processAutomaticRefund(
               proposal.id,

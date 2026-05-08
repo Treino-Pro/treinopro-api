@@ -323,6 +323,91 @@ describe('StripeFinancialAccountsService', () => {
       );
       expect(result?.requirements.currentlyDue).toEqual(['external_account']);
     });
+
+    it('keeps Stripe-side verification out of user-actionable requirements', async () => {
+      mockDb.query.financialProfiles.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        userId: 'personal-1',
+        stripeAccountId: 'acct_123',
+      });
+
+      const setMock = jest.fn().mockReturnThis();
+      const whereMock = jest.fn().mockReturnThis();
+      const returningMock = jest.fn().mockResolvedValue([
+        {
+          id: 'profile-1',
+          userId: 'personal-1',
+          stripeAccountId: 'acct_123',
+          stripeOnboardingCompleted: true,
+          stripeDetailsSubmitted: true,
+          stripeChargesEnabled: false,
+          stripePayoutsEnabled: false,
+          stripeRequirements: {
+            currentlyDue: [],
+            eventuallyDue: [],
+            pastDue: [],
+            pendingVerification: ['identity.individual.political_exposure'],
+            disabledReason: null,
+          },
+          canReceivePayments: false,
+        },
+      ]);
+      mockDb.update.mockReturnValue({
+        set: setMock,
+        where: whereMock,
+        returning: returningMock,
+      });
+
+      const result = await service.syncConnectedAccountStatus({
+        account: {
+          id: 'acct_123',
+          configuration: {
+            merchant: {
+              capabilities: {
+                card_payments: { status: 'pending' },
+              },
+            },
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { status: 'pending' },
+                },
+              },
+            },
+          },
+          requirements: {
+            entries: [
+              {
+                awaiting_action_from: 'stripe',
+                description: 'identity.individual.political_exposure',
+                minimum_deadline: {
+                  status: 'past_due',
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripeOnboardingCompleted: true,
+          stripeDetailsSubmitted: true,
+          stripePayoutsEnabled: false,
+          stripeRequirements: expect.objectContaining({
+            currentlyDue: [],
+            pastDue: [],
+            pendingVerification: ['identity.individual.political_exposure'],
+          }),
+          canReceivePayments: false,
+          verificationStatus: 'pending',
+        }),
+      );
+      expect(result?.requirements.pastDue).toEqual([]);
+      expect(result?.requirements.pendingVerification).toEqual([
+        'identity.individual.political_exposure',
+      ]);
+    });
   });
 
   describe('handleAccountUpdated', () => {
