@@ -2645,7 +2645,7 @@ export class ProposalsService {
 
       // Calcular taxa da plataforma
       const platformFeePercentage =
-        parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '10') / 100;
+        parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '15') / 100;
       const platformFee = createProposalDto.price * platformFeePercentage;
       const personalAmount = createProposalDto.price - platformFee;
 
