@@ -5,10 +5,7 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, or } from 'drizzle-orm';
 import { db } from '../../database/connection';
-import {
-  payments,
-  paymentTransactions,
-} from '../../database/schema/payments';
+import { payments, paymentTransactions } from '../../database/schema/payments';
 import { PaymentsService } from './payments.service';
 
 export interface CreateRefundDto {
@@ -39,10 +36,7 @@ export class RefundsService {
     const requestedAmount = refundDto.amount;
     const paymentAmount = parseFloat(payment.totalAmount);
 
-    if (
-      payment.status !== 'captured' &&
-      payment.status !== 'authorized'
-    ) {
+    if (payment.status !== 'captured' && payment.status !== 'authorized') {
       throw new BadRequestException('Pagamento não pode ser reembolsado');
     }
 

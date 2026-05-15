@@ -24,10 +24,7 @@ export class StripeWebhooksService {
     return this.webhookSecret.trim().length > 0;
   }
 
-  constructEvent(
-    rawBody: Buffer | string,
-    signature: string,
-  ): Stripe.Event {
+  constructEvent(rawBody: Buffer | string, signature: string): Stripe.Event {
     const stripe = this.assertConfigured();
 
     if (!this.hasWebhookSecret()) {
@@ -79,9 +76,7 @@ export class StripeWebhooksService {
 
   private assertConfigured(): Stripe {
     if (!this.stripe) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
+      throw new BadRequestException('Stripe não está configurado corretamente');
     }
 
     return this.stripe;

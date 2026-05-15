@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './common/config/config.module';
 import { DatabaseModule } from './database/database.module';
@@ -28,6 +29,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ConfigModule,
     DatabaseModule,
     SharedCacheModule,
+    ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async () => ({

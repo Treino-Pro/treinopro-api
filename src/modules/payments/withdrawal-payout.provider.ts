@@ -3,9 +3,7 @@ import { StripeTransfersService } from './stripe-transfers.service';
 
 export const WITHDRAWAL_PAYOUT_PROVIDER = 'WITHDRAWAL_PAYOUT_PROVIDER';
 
-export type WithdrawalTransferMethod =
-  | 'bank_transfer'
-  | 'stripe_connect';
+export type WithdrawalTransferMethod = 'bank_transfer' | 'stripe_connect';
 
 export interface WithdrawalPayoutBankAccount {
   bank: string;

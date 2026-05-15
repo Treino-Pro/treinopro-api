@@ -43,7 +43,7 @@ import {
 import { FeatureFlags } from '../../config/feature-flags';
 
 /** @deprecated Use FeatureFlags.CLASS_MIN_COMPLETION_MINUTES at call sites */
-const MINIMUM_COMPLETION_MINUTES = 45;
+const MINIMUM_COMPLETION_MINUTES = 50;
 
 @Injectable()
 export class ClassesService {
@@ -393,7 +393,7 @@ export class ClassesService {
         const remainingMs = minimumCompletionAt.getTime() - now.getTime();
         const remainingMin = Math.ceil(remainingMs / 60000);
         throw new BadRequestException(
-          `MIN_45_RULE: A aula deve durar pelo menos ${minCompletionMinutes} minutos. Faltam ${remainingMin} minuto(s).`,
+          `MIN_50_RULE: A aula deve durar pelo menos ${minCompletionMinutes} minutos. Faltam ${remainingMin} minuto(s).`,
         );
       }
     }

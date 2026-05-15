@@ -146,7 +146,6 @@
     .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
 
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-    .info-item { }
     .info-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
     .info-value { font-size: 14px; font-weight: 500; }
 
@@ -638,6 +637,7 @@
     `;
 
     document.getElementById('modal-personal-footer').innerHTML = `
+      <button class="btn btn-warning" onclick="openAudit('${u.id}')">Auditoria Financeira</button>
       <button class="btn btn-danger" onclick="reviewPersonal('rejected')">Rejeitar/Suspender</button>
       <button class="btn btn-success" onclick="reviewPersonal('approved')">Aprovar/Ativar</button>
     `;
@@ -983,6 +983,7 @@
 
     if (canResolve) {
       document.getElementById('modal-dispute-footer').innerHTML = `
+        <button class="btn btn-danger" onclick="executeRefund('${p.id}')">Executar Reembolso</button>
         <button class="btn btn-success" onclick="resolveDispute('resolved_pro_student')">Favor do Aluno</button>
         <button class="btn btn-warning" onclick="resolveDispute('resolved_pro_personal')">Favor do Personal</button>
       `;
@@ -1085,6 +1086,94 @@
       <button class="btn btn-success" onclick="resolveClassDispute('resolved_for_student')">Favor do Aluno (reembolso)</button>
       <button class="btn btn-warning" onclick="resolveClassDispute('resolved_for_personal')">Favor do Personal (manter pagamento)</button>
     `;
+  }
+
+  // ===== FINANCIAL AUDIT =====
+  async function openAudit(userId) {
+    const body = document.getElementById('modal-personal-body');
+    const originalContent = body.innerHTML;
+    const footer = document.getElementById('modal-personal-footer');
+    const originalFooter = footer.innerHTML;
+
+    body.innerHTML = '<div class="loading">Iniciando auditoria de saldo...</div>';
+    footer.innerHTML = `<button class="btn btn-ghost" onclick="openUser('${userId}')">← Voltar ao perfil</button>`;
+
+    const { ok, data } = await api(`/admin/payments/personal/${userId}/audit`);
+    if (!ok) { 
+      body.innerHTML = `<div class="alert alert-danger">${data?.message || 'Erro ao auditar'}</div>`; 
+      return; 
+    }
+
+    const audit = data.data || data;
+    const wallet = audit.localWallet || {};
+    const stripe = audit.stripeAccountStatus || {};
+
+    body.innerHTML = `
+      <div class="section-title">Auditoria Financeira</div>
+      <div class="section-sub">Sincronização entre Carteira Interna e Stripe Connect</div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Carteira Interna (PostgreSQL)</span></div>
+        <div class="info-grid" style="padding:16px">
+          <div class="info-item"><div class="info-label">Saldo Disponível</div><div class="info-value" style="color:var(--success)">R$ ${Number(wallet.availableBalance || 0).toFixed(2)}</div></div>
+          <div class="info-item"><div class="info-label">Saldo Pendente</div><div class="info-value" style="color:var(--warning)">R$ ${Number(wallet.pendingBalance || 0).toFixed(2)}</div></div>
+          <div class="info-item"><div class="info-label">Total Ganho</div><div class="info-value">R$ ${Number(wallet.totalEarned || 0).toFixed(2)}</div></div>
+          <div class="info-item"><div class="info-label">Status Carteira</div><div class="info-value">${wallet.isActive === 'true' ? 'Ativa' : 'Suspensa'}</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Status Stripe Connect</span></div>
+        <div class="info-grid" style="padding:16px">
+          <div class="info-item"><div class="info-label">ID da Conta</div><div class="info-value" style="font-size:12px">${stripe.id || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Saques Liberados</div><div class="info-value"><span class="badge badge-${stripe.payoutsEnabled ? 'approved' : 'rejected'}">${stripe.payoutsEnabled ? 'Sim' : 'Não'}</span></div></div>
+          <div class="info-item"><div class="info-label">Recebimentos Ativos</div><div class="info-value"><span class="badge badge-${stripe.chargesEnabled ? 'approved' : 'rejected'}">${stripe.chargesEnabled ? 'Sim' : 'Não'}</span></div></div>
+          <div class="info-item"><div class="info-label">Onboarding Finalizado</div><div class="info-value"><span class="badge badge-${stripe.detailsSubmitted ? 'approved' : 'rejected'}">${stripe.detailsSubmitted ? 'Sim' : 'Não'}</span></div></div>
+        </div>
+      </div>
+
+      ${stripe.requirements?.currently_due?.length ? `
+        <div class="alert alert-danger">
+          <strong>Ação Necessária:</strong> Existem pendências na Stripe que impedem o repasse.
+          <ul style="margin-top:8px;padding-left:20px">
+            ${stripe.requirements.currently_due.map(r => `<li>${r}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+
+      <div class="alert alert-info" style="margin-top:20px">
+        Esta visualização reflete o estado atual dos registros. Use o job de reconciliação para correções automáticas de divergências.
+      </div>
+    `;
+  }
+
+  async function executeRefund(paymentId) {
+    if (!confirm('ATENÇÃO: Deseja realmente executar o reembolso TOTAL deste pagamento?\n\nIsso irá:\n1. Devolver o dinheiro ao aluno via Stripe\n2. Reverter o ganho do personal na carteira interna\n3. Anular a taxa da plataforma')) return;
+    
+    const reason = prompt('Motivo do reembolso (será enviado à Stripe):', 'Solicitado pelo Admin / Disputa resolvida');
+    if (reason === null) return;
+
+    const btn = document.querySelector('#modal-dispute-footer .btn-danger');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Processando...';
+
+    const { ok, data } = await api('/admin/payments/refund', {
+      method: 'POST',
+      body: JSON.stringify({ paymentId, reason }),
+    });
+
+    btn.disabled = false;
+    btn.textContent = originalText;
+
+    if (!ok) {
+      alert(data?.message || 'Erro ao processar reembolso');
+      return;
+    }
+
+    alert('Reembolso processado com sucesso e saldos atualizados.');
+    closeModal('modal-dispute');
+    loadPaymentDisputes();
   }
 
   async function resolveClassDispute(resolution) {

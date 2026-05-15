@@ -27,10 +27,10 @@ export const FeatureFlags = {
 
   // ===== REGRAS DE NEGÓCIO CONFIGURÁVEIS =====
 
-  /** Duração mínima de uma aula em minutos. Padrão: 45. Ex: CLASS_MIN_COMPLETION_MINUTES=30 */
+  /** Duração mínima de uma aula em minutos. Padrão: 50. Ex: CLASS_MIN_COMPLETION_MINUTES=30 */
   get CLASS_MIN_COMPLETION_MINUTES(): number {
     const v = parseInt(process.env.CLASS_MIN_COMPLETION_MINUTES ?? '', 10);
-    return isNaN(v) || v <= 0 ? 45 : v;
+    return isNaN(v) || v <= 0 ? 50 : v;
   },
 
   /** Antecedência mínima para cancelamento pelo aluno, em horas. Padrão: 2. Ex: CLASS_CANCELLATION_WINDOW_HOURS=1 */

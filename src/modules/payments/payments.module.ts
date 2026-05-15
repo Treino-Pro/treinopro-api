@@ -20,6 +20,8 @@ import {
   StripeWithdrawalPayoutProvider,
   WITHDRAWAL_PAYOUT_PROVIDER,
 } from './withdrawal-payout.provider';
+import { PaymentsAdminController } from './payments-admin.controller';
+import { PaymentsReconciliationService } from './reconciliation.service';
 
 @Module({
   imports: [DatabaseModule, AuthModule, forwardRef(() => NotificationsModule)],
@@ -27,6 +29,7 @@ import {
     PaymentsController,
     WebhooksController,
     PaymentsHealthController,
+    PaymentsAdminController,
   ],
   providers: [
     PaymentsService,
@@ -41,6 +44,7 @@ import {
     StripeRefundsService,
     StripeTransfersService,
     StripeWithdrawalPayoutProvider,
+    PaymentsReconciliationService,
     {
       provide: WITHDRAWAL_PAYOUT_PROVIDER,
       useExisting: StripeWithdrawalPayoutProvider,

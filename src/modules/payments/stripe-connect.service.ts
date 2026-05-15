@@ -61,19 +61,22 @@ interface CreateEmbeddedOnboardingSessionInput {
 @Injectable()
 export class StripeConnectService {
   private readonly logger = new Logger(StripeConnectService.name);
-  private readonly apiBaseUrl =
-    process.env.STRIPE_API_BASE_URL || 'https://api.stripe.com';
   private readonly secretKey = process.env.STRIPE_SECRET_KEY || '';
-  private readonly webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
   private readonly apiVersion =
-    process.env.STRIPE_API_VERSION || '2026-02-25.clover';
-  private readonly connectApiVersion =
-    process.env.STRIPE_CONNECT_API_VERSION || '2026-03-25.preview';
+    (process.env.STRIPE_API_VERSION as Stripe.LatestApiVersion) ||
+    '2026-02-25.clover';
   private readonly defaultCurrency =
     process.env.STRIPE_DEFAULT_CURRENCY || 'brl';
 
+  private readonly stripe =
+    this.secretKey.trim().length > 0
+      ? new Stripe(this.secretKey, {
+          apiVersion: this.apiVersion,
+        })
+      : null;
+
   isConfigured(): boolean {
-    return this.secretKey.trim().length > 0;
+    return this.stripe !== null;
   }
 
   getDefaultCurrency(): string {
@@ -84,86 +87,49 @@ export class StripeConnectService {
     return Math.round(amount * 100);
   }
 
-  async createRecipientAccount(input: CreateRecipientAccountInput): Promise<any> {
-    this.assertConfigured();
+  /**
+   * Cria uma conta Stripe Express para o Personal Trainer (V1 API)
+   */
+  async createRecipientAccount(
+    input: CreateRecipientAccountInput,
+  ): Promise<Stripe.Account> {
+    const stripe = this.assertConfigured();
 
-    const payload = {
-      contact_email: input.email,
-      display_name: input.displayName,
-      defaults: {
-        responsibilities: {
-          fees_collector: 'application',
-          losses_collector: 'application',
+    try {
+      return await stripe.accounts.create({
+        type: 'express',
+        email: input.email,
+        country: input.country || 'BR',
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
         },
-      },
-      dashboard: 'express',
-      identity: {
-        country: (input.country || 'BR').toLowerCase(),
-        individual:
-          input.givenName || input.familyName
-            ? {
-                given_name: input.givenName,
-                surname: input.familyName,
-              }
-            : undefined,
-      },
-      configuration: {
-        merchant: {
-          capabilities: {
-            card_payments: {
-              requested: true,
-            },
-          },
+        business_type: 'individual',
+        individual: {
+          first_name: input.givenName,
+          last_name: input.familyName,
+          email: input.email,
         },
-        recipient: {
-          capabilities: {
-            stripe_balance: {
-              stripe_transfers: {
-                requested: true,
-              },
-            },
-          },
-        },
-      },
-      metadata: input.metadata,
-      include: [
-        'configuration.merchant',
-        'configuration.recipient',
-        'identity',
-        'requirements',
-      ],
-    };
-
-    return this.requestJson('POST', '/v2/core/accounts', payload, {
-      'Stripe-Version': this.connectApiVersion,
-    });
+        metadata: input.metadata,
+      });
+    } catch (error) {
+      this.handleStripeError(error, 'createAccount');
+    }
   }
 
-  async retrieveAccount(accountId: string): Promise<any> {
-    this.assertConfigured();
-
-    const include = [
-      'configuration.merchant',
-      'configuration.recipient',
-      'requirements',
-    ]
-      .map((value, index) => `include[${index}]=${encodeURIComponent(value)}`)
-      .join('&');
-
-    return this.requestJson(
-      'GET',
-      `/v2/core/accounts/${accountId}?${include}`,
-      undefined,
-      {
-        'Stripe-Version': this.connectApiVersion,
-      },
-    );
+  async retrieveAccount(accountId: string): Promise<Stripe.Account> {
+    const stripe = this.assertConfigured();
+    try {
+      return await stripe.accounts.retrieve(accountId);
+    } catch (error) {
+      this.handleStripeError(error, 'retrieveAccount');
+    }
   }
 
   async createRecipientOnboardingLink(
     input: CreateRecipientOnboardingLinkInput,
-  ): Promise<any> {
-    this.assertConfigured();
+  ): Promise<Stripe.AccountLink> {
+    const stripe = this.assertConfigured();
 
     const returnUrl =
       input.returnUrl ||
@@ -176,269 +142,151 @@ export class StripeConnectService {
       process.env.FRONTEND_URL ||
       'https://app.treinopro.com';
 
-    return this.requestJson(
-      'POST',
-      '/v2/core/account_links',
-      {
+    try {
+      return await stripe.accountLinks.create({
         account: input.accountId,
-        use_case: {
-          type: 'account_onboarding',
-          account_onboarding: {
-            configurations: ['recipient'],
-            refresh_url: refreshUrl,
-            return_url: returnUrl,
-          },
-        },
-      },
-      {
-        'Stripe-Version': this.connectApiVersion,
-      },
-    );
+        refresh_url: refreshUrl,
+        return_url: returnUrl,
+        type: 'account_onboarding',
+      });
+    } catch (error) {
+      this.handleStripeError(error, 'createAccountLink');
+    }
   }
 
   async createEmbeddedOnboardingSession(
     input: CreateEmbeddedOnboardingSessionInput,
-  ): Promise<any> {
-    this.assertConfigured();
+  ): Promise<Stripe.AccountSession> {
+    const stripe = this.assertConfigured();
 
-    return this.requestForm('POST', '/v1/account_sessions', {
-      account: input.accountId,
-      components: {
-        account_onboarding: {
-          enabled: true,
+    try {
+      return await stripe.accountSessions.create({
+        account: input.accountId,
+        components: {
+          account_onboarding: {
+            enabled: true,
+          },
         },
-      },
-    });
+      });
+    } catch (error) {
+      this.handleStripeError(error, 'createAccountSession');
+    }
   }
 
   async createEscrowPaymentIntent(
     input: CreateEscrowPaymentIntentInput,
-  ): Promise<any> {
-    this.assertConfigured();
+  ): Promise<Stripe.PaymentIntent> {
+    const stripe = this.assertConfigured();
 
-    const payload: Record<string, StripePayload> = {
-      amount: this.toMinorUnits(input.amount),
-      currency: this.defaultCurrency,
-      confirm: input.confirm ?? false,
-      capture_method: 'automatic',
-      automatic_payment_methods: {
-        enabled: true,
-      },
-      description: input.description,
-      customer: input.customerId,
-      payment_method: input.paymentMethodId,
-      transfer_group: input.transferGroup,
-      metadata: input.metadata,
-    };
+    try {
+      const params: Stripe.PaymentIntentCreateParams = {
+        amount: this.toMinorUnits(input.amount),
+        currency: this.defaultCurrency,
+        confirm: input.confirm ?? false,
+        capture_method: 'automatic',
+        automatic_payment_methods: {
+          enabled: true,
+        },
+        description: input.description,
+        customer: input.customerId,
+        payment_method: input.paymentMethodId,
+        transfer_group: input.transferGroup,
+        metadata: input.metadata,
+      };
 
-    if (input.savePaymentMethod) {
-      payload.setup_future_usage = 'off_session';
+      if (input.savePaymentMethod) {
+        params.setup_future_usage = 'off_session';
+      }
+
+      return await stripe.paymentIntents.create(params);
+    } catch (error) {
+      this.handleStripeError(error, 'createPaymentIntent');
     }
-
-    return this.requestForm('POST', '/v1/payment_intents', payload);
   }
 
-  async retrievePaymentIntent(paymentIntentId: string): Promise<any> {
-    this.assertConfigured();
-    return this.requestJson('GET', `/v1/payment_intents/${paymentIntentId}`);
+  async retrievePaymentIntent(
+    paymentIntentId: string,
+  ): Promise<Stripe.PaymentIntent> {
+    const stripe = this.assertConfigured();
+    try {
+      return await stripe.paymentIntents.retrieve(paymentIntentId);
+    } catch (error) {
+      this.handleStripeError(error, 'retrievePaymentIntent');
+    }
   }
 
   async capturePaymentIntent(
     paymentIntentId: string,
     amountToCapture?: number,
-  ): Promise<any> {
-    this.assertConfigured();
-
-    const payload: Record<string, StripePayload> = {};
-    if (typeof amountToCapture === 'number') {
-      payload.amount_to_capture = this.toMinorUnits(amountToCapture);
-    }
-
-    return this.requestForm(
-      'POST',
-      `/v1/payment_intents/${paymentIntentId}/capture`,
-      payload,
-    );
-  }
-
-  async createTransfer(input: CreateTransferInput): Promise<any> {
-    this.assertConfigured();
-
-    return this.requestForm('POST', '/v1/transfers', {
-      amount: this.toMinorUnits(input.amount),
-      currency: this.defaultCurrency,
-      destination: input.destinationAccountId,
-      source_transaction: input.sourceTransaction,
-      transfer_group: input.transferGroup,
-      description: input.description,
-      metadata: input.metadata,
-    });
-  }
-
-  async createRefund(input: CreateRefundInput): Promise<any> {
-    this.assertConfigured();
-
-    return this.requestForm('POST', '/v1/refunds', {
-      payment_intent: input.paymentIntentId,
-      amount:
-        typeof input.amount === 'number'
-          ? this.toMinorUnits(input.amount)
-          : undefined,
-      reason: input.reason,
-      metadata: input.metadata,
-    });
-  }
-
-  verifyWebhookSignature(rawBody: string, signatureHeader?: string): boolean {
-    if (!this.webhookSecret || !signatureHeader) {
-      return false;
-    }
-
-    const pairs = signatureHeader.split(',').map((entry) => entry.trim());
-    const timestamp = pairs
-      .find((entry) => entry.startsWith('t='))
-      ?.slice(2)
-      ?.trim();
-    const signature = pairs
-      .find((entry) => entry.startsWith('v1='))
-      ?.slice(3)
-      ?.trim();
-
-    if (!timestamp || !signature) {
-      return false;
-    }
-
-    const payload = `${timestamp}.${rawBody}`;
-    const expected = createHmac('sha256', this.webhookSecret)
-      .update(payload, 'utf8')
-      .digest('hex');
+  ): Promise<Stripe.PaymentIntent> {
+    const stripe = this.assertConfigured();
 
     try {
-      return timingSafeEqual(
-        Buffer.from(expected, 'hex'),
-        Buffer.from(signature, 'hex'),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private assertConfigured(): void {
-    if (!this.isConfigured()) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
-    }
-  }
-
-  private async requestJson(
-    method: 'GET' | 'POST',
-    path: string,
-    body?: Record<string, StripePayload>,
-    extraHeaders?: Record<string, string>,
-  ): Promise<any> {
-    const response = await fetch(`${this.apiBaseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.secretKey}`,
-        'Content-Type': 'application/json',
-        'Stripe-Version': this.apiVersion,
-        ...extraHeaders,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    return this.parseResponse(response, path);
-  }
-
-  private async requestForm(
-    method: 'GET' | 'POST',
-    path: string,
-    payload?: Record<string, StripePayload>,
-    extraHeaders?: Record<string, string>,
-  ): Promise<any> {
-    const body = new URLSearchParams();
-
-    if (payload) {
-      this.appendFormFields(body, payload);
-    }
-
-    const response = await fetch(`${this.apiBaseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.secretKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Stripe-Version': this.apiVersion,
-        ...extraHeaders,
-      },
-      body: method === 'GET' ? undefined : body.toString(),
-    });
-
-    return this.parseResponse(response, path);
-  }
-
-  private appendFormFields(
-    form: URLSearchParams,
-    payload: Record<string, StripePayload>,
-    prefix?: string,
-  ): void {
-    for (const [key, value] of Object.entries(payload)) {
-      if (value === undefined || value === null) {
-        continue;
+      const params: Stripe.PaymentIntentCaptureParams = {};
+      if (typeof amountToCapture === 'number') {
+        params.amount_to_capture = this.toMinorUnits(amountToCapture);
       }
 
-      const formKey = prefix ? `${prefix}[${key}]` : key;
-
-      if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-          if (item === undefined || item === null) {
-            return;
-          }
-          if (typeof item === 'object') {
-            this.appendFormFields(form, item as Record<string, StripePayload>, `${formKey}[${index}]`);
-            return;
-          }
-          form.append(`${formKey}[${index}]`, String(item));
-        });
-        continue;
-      }
-
-      if (typeof value === 'object') {
-        this.appendFormFields(form, value as Record<string, StripePayload>, formKey);
-        continue;
-      }
-
-      form.append(formKey, String(value));
+      return await stripe.paymentIntents.capture(paymentIntentId, params);
+    } catch (error) {
+      this.handleStripeError(error, 'capturePaymentIntent');
     }
   }
 
-  private async parseResponse(response: Response, path: string): Promise<any> {
-    const text = await response.text();
-    const payload = text ? this.safeJsonParse(text) : {};
+  async createTransfer(input: CreateTransferInput): Promise<Stripe.Transfer> {
+    const stripe = this.assertConfigured();
 
-    if (response.ok) {
-      return payload;
+    try {
+      return await stripe.transfers.create({
+        amount: this.toMinorUnits(input.amount),
+        currency: this.defaultCurrency,
+        destination: input.destinationAccountId,
+        source_transaction: input.sourceTransaction,
+        transfer_group: input.transferGroup,
+        description: input.description,
+        metadata: input.metadata,
+      });
+    } catch (error) {
+      this.handleStripeError(error, 'createTransfer');
     }
+  }
 
-    const message =
-      payload?.error?.message ||
-      payload?.message ||
-      `Stripe respondeu com status ${response.status}`;
+  async createRefund(input: CreateRefundInput): Promise<Stripe.Refund> {
+    const stripe = this.assertConfigured();
 
-    this.logger.error(`[STRIPE] ${path} -> ${response.status}: ${message}`);
+    try {
+      return await stripe.refunds.create({
+        payment_intent: input.paymentIntentId,
+        amount:
+          typeof input.amount === 'number'
+            ? this.toMinorUnits(input.amount)
+            : undefined,
+        reason: input.reason,
+        metadata: input.metadata,
+      });
+    } catch (error) {
+      this.handleStripeError(error, 'createRefund');
+    }
+  }
 
-    if (response.status >= 400 && response.status < 500) {
-      throw new BadRequestException(message);
+  private assertConfigured(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe não está configurado corretamente');
+    }
+    return this.stripe;
+  }
+
+  private handleStripeError(error: any, action: string): never {
+    const message = error.message || 'Erro desconhecido na Stripe';
+    this.logger.error(`[STRIPE] Error in ${action}: ${message}`, error.stack);
+
+    if (error instanceof Stripe.errors.StripeError) {
+      if (error.type === 'StripeInvalidRequestError') {
+        throw new BadRequestException(message);
+      }
+      throw new BadGatewayException(message);
     }
 
     throw new BadGatewayException(message);
-  }
-
-  private safeJsonParse(value: string): any {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return { raw: value };
-    }
   }
 }

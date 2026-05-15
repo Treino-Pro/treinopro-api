@@ -15,6 +15,9 @@ import { StripeFinancialAccountsService } from './stripe-financial-accounts.serv
 import { StripeWebhooksService } from './stripe-webhooks.service';
 import { PaymentsService } from './payments.service';
 import { ProposalsService } from '../proposals/proposals.service';
+import { Inject } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { stripeEvents } from '../../database/schema';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -24,6 +27,7 @@ export class WebhooksController {
     private readonly stripeWebhooksService: StripeWebhooksService,
     private readonly stripeFinancialAccountsService: StripeFinancialAccountsService,
     private readonly moduleRef: ModuleRef,
+    @Inject('DATABASE_CONNECTION') private readonly db: any,
   ) {}
 
   @Post('stripe')
@@ -52,53 +56,115 @@ export class WebhooksController {
         signature,
       );
 
-      if (this.isStripeAccountStatusEvent(event)) {
-        await this.stripeFinancialAccountsService.handleAccountUpdated(event);
-      }
+      // --- VERIFICAÇÃO DE IDEMPOTÊNCIA ---
+      const existingEvent = await this.db.query.stripeEvents.findFirst({
+        where: eq(stripeEvents.id, event.id),
+      });
 
-      if (
-        [
-          'payment_intent.succeeded',
-          'payment_intent.payment_failed',
-          'payment_intent.canceled',
-        ].includes(event.type)
-      ) {
-        const proposalsService = this.moduleRef.get(ProposalsService, {
-          strict: false,
-        });
-        await proposalsService.handleStripePaymentIntentEvent(
-          event.type,
-          event.data.object as any,
+      if (existingEvent && existingEvent.status === 'processed') {
+        this.logger.log(
+          `Evento ${event.id} (${event.type}) já processado. Ignorando.`,
         );
+        return { status: 'success' };
       }
 
-      if (
-        [
-          'charge.refunded',
-          'charge.dispute.created',
-          'charge.dispute.closed',
-        ].includes(event.type)
-      ) {
-        const paymentsService = this.moduleRef.get(PaymentsService, {
-          strict: false,
+      // Registrar ou atualizar para 'processing'
+      await this.db
+        .insert(stripeEvents)
+        .values({
+          id: event.id,
+          type: event.type,
+          status: 'processing',
+          payload: event.data.object,
+          createdAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: stripeEvents.id,
+          set: { status: 'processing', updatedAt: new Date() },
         });
 
-        if (event.type === 'charge.refunded') {
-          await paymentsService.handleStripeChargeRefundedEvent(
-            event.data.object as any,
-          );
-        } else if (event.type === 'charge.dispute.created') {
-          await paymentsService.handleStripeDisputeCreatedEvent(
-            event.data.object as any,
-          );
-        } else if (event.type === 'charge.dispute.closed') {
-          await paymentsService.handleStripeDisputeClosedEvent(
+      try {
+        if (this.isStripeAccountStatusEvent(event)) {
+          await this.stripeFinancialAccountsService.handleAccountUpdated(event);
+        }
+
+        if (
+          [
+            'payment_intent.succeeded',
+            'payment_intent.payment_failed',
+            'payment_intent.canceled',
+          ].includes(event.type)
+        ) {
+          const proposalsService = this.moduleRef.get(ProposalsService, {
+            strict: false,
+          });
+          await proposalsService.handleStripePaymentIntentEvent(
+            event.type,
             event.data.object as any,
           );
         }
-      }
 
-      return { status: 'success' };
+        // Handlers de Pagamentos, Reembolsos, Disputas e Repasses
+        if (
+          [
+            'charge.refunded',
+            'charge.dispute.created',
+            'charge.dispute.closed',
+            'transfer.reversed',
+            'payout.failed',
+          ].includes(event.type)
+        ) {
+          const paymentsService = this.moduleRef.get(PaymentsService, {
+            strict: false,
+          });
+
+          if (event.type === 'charge.refunded') {
+            await paymentsService.handleStripeChargeRefundedEvent(
+              event.data.object as any,
+            );
+          } else if (event.type === 'charge.dispute.created') {
+            await paymentsService.handleStripeDisputeCreatedEvent(
+              event.data.object as any,
+            );
+          } else if (event.type === 'charge.dispute.closed') {
+            await paymentsService.handleStripeDisputeClosedEvent(
+              event.data.object as any,
+            );
+          } else if (event.type === 'transfer.reversed') {
+            this.logger.warn(`⚠️ [Stripe] Transfer Revertido: ${event.id}`);
+            await paymentsService.handleStripeTransferReversedEvent(
+              event.data.object as any,
+            );
+          } else if (event.type === 'payout.failed') {
+            this.logger.error(`❌ [Stripe] Payout Falhou: ${event.id}`);
+            await paymentsService.handleStripePayoutFailedEvent(
+              event.data.object as any,
+            );
+          }
+        }
+
+        // Marcar como processado
+        await this.db
+          .update(stripeEvents)
+          .set({ status: 'processed', processedAt: new Date() })
+          .where(eq(stripeEvents.id, event.id));
+
+        return { status: 'success' };
+      } catch (processingError) {
+        // Marcar como falha
+        await this.db
+          .update(stripeEvents)
+          .set({
+            status: 'failed',
+            error:
+              processingError instanceof Error
+                ? processingError.message
+                : String(processingError),
+          })
+          .where(eq(stripeEvents.id, event.id));
+
+        throw processingError;
+      }
     } catch (error) {
       this.logger.error(
         'Erro ao processar webhook Stripe:',

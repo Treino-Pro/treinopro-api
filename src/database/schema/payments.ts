@@ -26,6 +26,14 @@ export const paymentStatusEnum = pgEnum('payment_status', [
   'dispute_resolved', // Disputa resolvida
 ]);
 
+// Enum para status de eventos do Stripe (Idempotência)
+export const stripeEventStatusEnum = pgEnum('stripe_event_status', [
+  'pending',
+  'processing',
+  'processed',
+  'failed',
+]);
+
 // Enum para tipo de pagamento
 export const paymentTypeEnum = pgEnum('payment_type', [
   'class_payment', // Pagamento de aula
@@ -304,6 +312,7 @@ export const withdrawalRequests = pgTable('withdrawal_requests', {
 
   // Dados da transferência (snapshot dos dados no momento do saque)
   transferData: jsonb('transfer_data'), // Snapshot dos dados de transferência
+  metadata: jsonb('metadata'), // Dados adicionais flexíveis
 
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -419,6 +428,17 @@ export const autoPaymentSettings = pgTable('auto_payment_settings', {
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Tabela de log de eventos do Stripe para idempotência
+export const stripeEvents = pgTable('stripe_events', {
+  id: varchar('id', { length: 255 }).primaryKey(), // Stripe Event ID
+  type: varchar('type', { length: 255 }).notNull(),
+  status: stripeEventStatusEnum('status').default('pending').notNull(),
+  payload: jsonb('payload'),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  processedAt: timestamp('processed_at'),
 });
 
 // Relacionamentos

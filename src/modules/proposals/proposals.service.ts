@@ -1237,7 +1237,8 @@ export class ProposalsService {
         .select()
         .from(proposals)
         .where(eq(proposals.id, id))
-        .limit(1);
+        .limit(1)
+        .for('update');
 
       if (!proposal) {
         throw new NotFoundException('Proposta não encontrada');
@@ -1291,6 +1292,10 @@ export class ProposalsService {
             'Nonce inválido ou expirado. Por favor, recarregue a notificação.',
           );
         }
+
+        // ✅ LOCKS: Bloquear registros do personal e do aluno para garantir ACID na agenda
+        await tx.select({ id: users.id }).from(users).where(eq(users.id, personalId)).for('update');
+        await tx.select({ id: users.id }).from(users).where(eq(users.id, proposal.studentId)).for('update');
 
         // Registrar nonce como usado
         await tx.insert(usedNonces).values({

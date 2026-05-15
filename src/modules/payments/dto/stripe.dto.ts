@@ -99,7 +99,8 @@ export class CreateStripePaymentIntentDto {
   confirm?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Indica se o método de pagamento deve ser reutilizado no futuro',
+    description:
+      'Indica se o método de pagamento deve ser reutilizado no futuro',
     example: true,
   })
   @IsBoolean()
@@ -107,7 +108,8 @@ export class CreateStripePaymentIntentDto {
   savePaymentMethod?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Grupo de transferência usado para associar cobrança e repasse',
+    description:
+      'Grupo de transferência usado para associar cobrança e repasse',
     example: 'proposal_123',
   })
   @IsString()

@@ -106,9 +106,7 @@ export class StripeTransfersService {
 
   private assertConfigured(): Stripe {
     if (!this.stripe) {
-      throw new BadRequestException(
-        'Stripe não está configurado corretamente',
-      );
+      throw new BadRequestException('Stripe não está configurado corretamente');
     }
 
     return this.stripe;

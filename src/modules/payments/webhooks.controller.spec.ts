@@ -58,7 +58,9 @@ describe('WebhooksController', () => {
     );
 
     expect(stripeWebhooksService.constructEvent).toHaveBeenCalled();
-    expect(stripeFinancialAccountsService.handleAccountUpdated).toHaveBeenCalledWith(
+    expect(
+      stripeFinancialAccountsService.handleAccountUpdated,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'account.updated',
       }),
@@ -82,7 +84,9 @@ describe('WebhooksController', () => {
       't=123,v1=signature',
     );
 
-    expect(stripeFinancialAccountsService.handleAccountUpdated).toHaveBeenCalledWith(
+    expect(
+      stripeFinancialAccountsService.handleAccountUpdated,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'v2.core.account.updated',
         related_object: expect.objectContaining({
@@ -116,7 +120,9 @@ describe('WebhooksController', () => {
       't=123,v1=signature',
     );
 
-    expect(paymentsService.handleStripeDisputeCreatedEvent).toHaveBeenCalledWith(
+    expect(
+      paymentsService.handleStripeDisputeCreatedEvent,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'dp_123',
       }),

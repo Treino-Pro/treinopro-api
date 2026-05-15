@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, or, desc, count, sum, sql, inArray } from 'drizzle-orm';
@@ -29,7 +30,6 @@ import {
   WithdrawalTransferMethod,
 } from './withdrawal-payout.provider';
 import {
-  CreatePaymentPreferenceDto,
   CreateDisputeDto,
   SubmitEvidenceDto,
   ResolveDisputeDto,
@@ -76,6 +76,8 @@ type PersonalSettlementReversalResult = {
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @Inject('DATABASE_CONNECTION') private db: any,
     private readonly notificationsService: NotificationsService,
@@ -173,85 +175,6 @@ export class PaymentsService {
   }
 
   // Atualizar carteiras dos usuários
-  async updateWallets(payment: any): Promise<void> {
-    console.log(
-      '💰 [UPDATE_WALLETS] ===== INÍCIO DO REPASSE PARA O PERSONAL =====',
-    );
-    console.log('💰 [UPDATE_WALLETS] Payment ID:', payment.id);
-    console.log('💰 [UPDATE_WALLETS] Class ID:', payment.classId);
-    console.log('💰 [UPDATE_WALLETS] Personal ID:', payment.personalId);
-    console.log('💰 [UPDATE_WALLETS] Student ID:', payment.studentId);
-    console.log('💰 [UPDATE_WALLETS] Valores:', {
-      totalAmount: payment.totalAmount,
-      platformFee: payment.platformFee,
-      personalAmount: payment.personalAmount,
-      status: payment.status,
-    });
-
-    // Buscar carteira atual do personal
-    const personalWallet = await this.getUserWallet(payment.personalId);
-    console.log('💰 [UPDATE_WALLETS] Carteira atual do personal:', {
-      personalId: payment.personalId,
-      availableBalance: personalWallet.availableBalance,
-      totalEarned: personalWallet.totalEarned,
-    });
-
-    // Calcular novos valores
-    const newAvailableBalance =
-      personalWallet.availableBalance + parseFloat(payment.personalAmount);
-    const newTotalEarned =
-      personalWallet.totalEarned + parseFloat(payment.personalAmount);
-
-    console.log('💰 [UPDATE_WALLETS] Novos valores calculados:', {
-      valorAdicionado: payment.personalAmount,
-      novoSaldoDisponivel: newAvailableBalance,
-      novoTotalGanho: newTotalEarned,
-    });
-
-    // Atualizar carteira do personal (somar ganhos)
-    await this.updateWallet(payment.personalId, {
-      availableBalance: newAvailableBalance,
-      totalEarned: newTotalEarned,
-    });
-
-    console.log(
-      '✅ [UPDATE_WALLETS] Carteira do personal atualizada com sucesso',
-    );
-    console.log(
-      `💳 [UPDATE_WALLETS] Personal ${payment.personalId} recebeu: +R$ ${payment.personalAmount}`,
-    );
-
-    // Criar transações
-    console.log(
-      '📝 [UPDATE_WALLETS] Criando transação de ganhos do personal...',
-    );
-    await this.createTransaction({
-      paymentId: payment.id,
-      userId: payment.personalId,
-      type: PaymentType.PERSONAL_EARNINGS,
-      amount: parseFloat(payment.personalAmount),
-      description: `Ganhos da aula ${payment.classId}`,
-      status: PaymentStatus.CAPTURED,
-    });
-    console.log('✅ [UPDATE_WALLETS] Transação de ganhos do personal criada');
-
-    console.log(
-      '📝 [UPDATE_WALLETS] Criando transação de pagamento do aluno...',
-    );
-    await this.createTransaction({
-      paymentId: payment.id,
-      userId: payment.studentId,
-      type: PaymentType.CLASS_PAYMENT,
-      amount: -parseFloat(payment.totalAmount),
-      description: `Pagamento da aula ${payment.classId}`,
-      status: PaymentStatus.CAPTURED,
-    });
-    console.log('✅ [UPDATE_WALLETS] Transação de pagamento do aluno criada');
-
-    console.log(
-      '💰 [UPDATE_WALLETS] ===== REPASSE CONCLUÍDO COM SUCESSO =====',
-    );
-  }
 
   private async releasePaymentToInternalWallet(
     payment: any,
@@ -539,7 +462,9 @@ export class PaymentsService {
     return undefined;
   }
 
-  private getStripeRefundIdFromCharge(charge: Stripe.Charge): string | undefined {
+  private getStripeRefundIdFromCharge(
+    charge: Stripe.Charge,
+  ): string | undefined {
     return charge.refunds?.data?.[0]?.id;
   }
 
@@ -625,7 +550,9 @@ export class PaymentsService {
     }
 
     if (input.paymentIntentId) {
-      conditions.push(eq(payments.stripePaymentIntentId, input.paymentIntentId));
+      conditions.push(
+        eq(payments.stripePaymentIntentId, input.paymentIntentId),
+      );
     }
 
     if (!conditions.length) {
@@ -642,7 +569,9 @@ export class PaymentsService {
     });
   }
 
-  private async findActivePaymentDispute(paymentId: string): Promise<any | null> {
+  private async findActivePaymentDispute(
+    paymentId: string,
+  ): Promise<any | null> {
     return this.db.query.paymentDisputes.findFirst({
       where: and(
         eq(paymentDisputes.paymentId, paymentId),
@@ -678,7 +607,9 @@ export class PaymentsService {
     return JSON.stringify(metadata, null, 2);
   }
 
-  private mapStripeDisputeResolution(status: Stripe.Dispute.Status): DisputeStatus {
+  private mapStripeDisputeResolution(
+    status: Stripe.Dispute.Status,
+  ): DisputeStatus {
     if (status === 'lost') {
       return DisputeStatus.RESOLVED_PRO_STUDENT;
     }
@@ -710,6 +641,7 @@ export class PaymentsService {
     },
   ): Promise<PersonalSettlementReversalResult> {
     const personalAmount = this.toMoneyNumber(payment.personalAmount);
+    const now = input.now || new Date();
     const emptyResult: PersonalSettlementReversalResult = {
       status: 'not_released',
       personalAmount: this.toMoneyString(personalAmount),
@@ -725,143 +657,105 @@ export class PaymentsService {
       return emptyResult;
     }
 
-    const now = input.now || new Date();
-    const stripeTransferId = this.getPaymentSpecificStripeTransferId(payment);
+    return this.db.transaction(async (tx: any) => {
+      const stripeTransferId = this.getPaymentSpecificStripeTransferId(payment);
 
-    if (stripeTransferId) {
-      try {
-        const reversal = await this.stripeTransfersService.createTransferReversal({
-          transferId: stripeTransferId,
-          amount: personalAmount,
-          description: input.reason,
-          metadata: this.toStripeMetadata({
+      if (stripeTransferId) {
+        try {
+          const reversal =
+            await this.stripeTransfersService.createTransferReversal({
+              transferId: stripeTransferId,
+              amount: personalAmount,
+              description: input.reason,
+              metadata: this.toStripeMetadata({
+                paymentId: payment.id,
+                classId: payment.classId,
+                proposalId: payment.proposalId,
+                personalId: payment.personalId,
+                source: input.source,
+                stripeRefundId: input.stripeRefundId,
+                stripeDisputeId: input.stripeDisputeId,
+              }),
+              idempotencyKey: `stripe_transfer_reversal:${payment.id}:${stripeTransferId}`,
+            });
+
+          const result: PersonalSettlementReversalResult = {
+            status: 'stripe_transfer_reversed',
+            personalAmount: this.toMoneyString(personalAmount),
+            walletReversedAmount: '0.00',
+            recoveryRequiredAmount: '0.00',
+            stripeTransferId,
+            stripeTransferReversalId: reversal.id,
+          };
+
+          await this.createTransactionInTx(tx, {
             paymentId: payment.id,
-            classId: payment.classId,
-            proposalId: payment.proposalId,
-            personalId: payment.personalId,
-            source: input.source,
+            userId: payment.personalId,
+            type: PaymentType.PERSONAL_EARNINGS,
+            amount: this.toMoneyString(-personalAmount),
+            description: `Reversal Stripe do repasse do pagamento ${payment.id}`,
+            status: input.status,
+            stripeTransferId,
             stripeRefundId: input.stripeRefundId,
             stripeDisputeId: input.stripeDisputeId,
-          }),
-          idempotencyKey: `stripe_transfer_reversal:${payment.id}:${stripeTransferId}`,
-        });
+            metadata: {
+              ...result,
+              transferReversalId: reversal.id,
+              source: input.source,
+              reason: input.reason,
+              processedAt: now.toISOString(),
+            },
+          });
 
-        const result: PersonalSettlementReversalResult = {
-          status: 'stripe_transfer_reversed',
-          personalAmount: this.toMoneyString(personalAmount),
-          walletReversedAmount: '0.00',
-          recoveryRequiredAmount: '0.00',
-          stripeTransferId,
-          stripeTransferReversalId: reversal.id,
-        };
-
-        await this.createTransaction({
-          paymentId: payment.id,
-          userId: payment.personalId,
-          type: PaymentType.PERSONAL_EARNINGS,
-          amount: this.toMoneyString(-personalAmount),
-          description: `Reversal Stripe do repasse do pagamento ${payment.id}`,
-          status: input.status,
-          stripeTransferId,
-          stripeRefundId: input.stripeRefundId,
-          stripeDisputeId: input.stripeDisputeId,
-          metadata: {
-            ...result,
-            transferReversalId: reversal.id,
-            source: input.source,
-            reason: input.reason,
-            processedAt: now.toISOString(),
-          },
-        });
-
-        return result;
-      } catch (error) {
-        const result: PersonalSettlementReversalResult = {
-          status: 'stripe_transfer_reversal_failed',
-          personalAmount: this.toMoneyString(personalAmount),
-          walletReversedAmount: '0.00',
-          recoveryRequiredAmount: this.toMoneyString(personalAmount),
-          stripeTransferId,
-          error: error instanceof Error ? error.message : String(error),
-        };
-
-        await this.createTransaction({
-          paymentId: payment.id,
-          userId: payment.personalId,
-          type: PaymentType.PERSONAL_EARNINGS,
-          amount: '0.00',
-          description: `Recuperação pendente do repasse do pagamento ${payment.id}`,
-          status: input.status,
-          stripeTransferId,
-          stripeRefundId: input.stripeRefundId,
-          stripeDisputeId: input.stripeDisputeId,
-          metadata: {
-            ...result,
-            source: input.source,
-            reason: input.reason,
-            processedAt: now.toISOString(),
-          },
-        });
-
-        return result;
+          return result;
+        } catch (error) {
+          this.logger.error(
+            `❌ [REVERSE_PERSONAL] Falha na reversão do Stripe Transfer ${stripeTransferId}:`,
+            error,
+          );
+          // Prossegue para debitar da carteira interna se a reversão no Stripe falhar
+          // ou se houver necessidade de registro de dívida interna
+        }
       }
-    }
 
-    const personalWallet = await this.getUserWallet(payment.personalId);
-    const availableBalance = this.toMoneyNumber(personalWallet.availableBalance);
-    const totalEarned = this.toMoneyNumber(personalWallet.totalEarned);
-    const walletReversedAmount = Math.min(availableBalance, personalAmount);
-    const recoveryRequiredAmount = this.toMoneyNumber(
-      personalAmount - walletReversedAmount,
-    );
-    const nextAvailableBalance = this.toMoneyNumber(
-      availableBalance - walletReversedAmount,
-    );
-    const nextTotalEarned = Math.max(
-      0,
-      this.toMoneyNumber(totalEarned - personalAmount),
-    );
+      // Reversão na carteira interna (Permite saldo negativo conforme diretriz)
+      const personalAmountString = this.toMoneyString(personalAmount);
 
-    await this.updateWallet(payment.personalId, {
-      availableBalance: nextAvailableBalance,
-      totalEarned: nextTotalEarned,
+      await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} - ${personalAmountString}::numeric`,
+          totalEarned: sql`${userWallets.totalEarned} - ${personalAmountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(eq(userWallets.userId, payment.personalId));
+
+      const result: PersonalSettlementReversalResult = {
+        status: 'wallet_reversed',
+        personalAmount: personalAmountString,
+        walletReversedAmount: personalAmountString,
+        recoveryRequiredAmount: '0.00',
+      };
+
+      await this.createTransactionInTx(tx, {
+        paymentId: payment.id,
+        userId: payment.personalId,
+        type: PaymentType.PERSONAL_EARNINGS,
+        amount: this.toMoneyString(-personalAmount),
+        description: `Reversal da carteira do pagamento ${payment.id} (Débito direto)`,
+        status: input.status,
+        stripeRefundId: input.stripeRefundId,
+        stripeDisputeId: input.stripeDisputeId,
+        metadata: {
+          ...result,
+          source: input.source,
+          reason: input.reason,
+          processedAt: now.toISOString(),
+        },
+      });
+
+      return result;
     });
-
-    const result: PersonalSettlementReversalResult = {
-      status:
-        recoveryRequiredAmount > 0
-          ? walletReversedAmount > 0
-            ? 'partial_wallet_reversal_recovery_required'
-            : 'recovery_required'
-          : 'wallet_reversed',
-      personalAmount: this.toMoneyString(personalAmount),
-      walletReversedAmount: this.toMoneyString(walletReversedAmount),
-      recoveryRequiredAmount: this.toMoneyString(recoveryRequiredAmount),
-    };
-
-    await this.createTransaction({
-      paymentId: payment.id,
-      userId: payment.personalId,
-      type: PaymentType.PERSONAL_EARNINGS,
-      amount: this.toMoneyString(-walletReversedAmount),
-      description:
-        recoveryRequiredAmount > 0
-          ? `Reversal parcial da carteira; recuperação pendente do pagamento ${payment.id}`
-          : `Reversal da carteira do pagamento ${payment.id}`,
-      status: input.status,
-      stripeRefundId: input.stripeRefundId,
-      stripeDisputeId: input.stripeDisputeId,
-      metadata: {
-        ...result,
-        source: input.source,
-        reason: input.reason,
-        previousAvailableBalance: this.toMoneyString(availableBalance),
-        previousTotalEarned: this.toMoneyString(totalEarned),
-        processedAt: now.toISOString(),
-      },
-    });
-
-    return result;
   }
 
   // Criar disputa
@@ -1159,7 +1053,10 @@ export class PaymentsService {
     return this.formatDisputeResponse(updatedDispute);
   }
 
-  private async refundStripePayment(payment: any, reason?: string): Promise<void> {
+  private async refundStripePayment(
+    payment: any,
+    reason?: string,
+  ): Promise<void> {
     if (!this.stripeRefundsService.isConfigured()) {
       throw new BadRequestException('Stripe não está configurado corretamente');
     }
@@ -1293,6 +1190,65 @@ export class PaymentsService {
     );
   }
 
+  /**
+   * Executa um reembolso manual total ou parcial (Admin)
+   */
+  async handleManualRefund(
+    paymentId: string,
+    amount?: number,
+    reason?: string,
+  ): Promise<any> {
+    const payment = await this.db.query.payments.findFirst({
+      where: eq(payments.id, paymentId),
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    const refundAmount = amount || this.toMoneyNumber(payment.totalAmount);
+    const reasonText = reason || 'Reembolso manual solicitado pelo admin';
+
+    this.logger.log(
+      `💸 [MANUAL_REFUND] Iniciando reembolso de R$ ${refundAmount} para pagamento ${paymentId}`,
+    );
+
+    // 1. Reembolsar no Stripe
+    const stripeRefund = await this.stripeRefundsService.createRefund({
+      paymentIntentId: payment.stripePaymentIntentId,
+      amount: refundAmount,
+      reason: 'requested_by_customer',
+      metadata: this.toStripeMetadata({
+        paymentId: payment.id,
+        reason: reasonText,
+        source: 'admin_manual_refund',
+      }),
+    });
+
+    // 2. Reverter repasse do personal (Interno + Stripe se aplicável)
+    const reversal = await this.reversePersonalSettlement(payment, {
+      reason: reasonText,
+      source: 'admin_manual_refund',
+      status: PaymentStatus.REFUNDED,
+      stripeRefundId: stripeRefund.id,
+    });
+
+    // 3. Atualizar status do pagamento
+    await this.db
+      .update(payments)
+      .set({
+        status: PaymentStatus.REFUNDED,
+        updatedAt: new Date(),
+      })
+      .where(eq(payments.id, paymentId));
+
+    return {
+      success: true,
+      stripeRefundId: stripeRefund.id,
+      reversal,
+    };
+  }
+
   async handleStripeChargeRefundedEvent(charge: Stripe.Charge): Promise<void> {
     const chargeId = charge.id;
     const paymentIntentId = this.getStripeChargePaymentIntentId(charge);
@@ -1403,9 +1359,7 @@ export class PaymentsService {
     });
   }
 
-  async handleStripeDisputeClosedEvent(
-    dispute: Stripe.Dispute,
-  ): Promise<void> {
+  async handleStripeDisputeClosedEvent(dispute: Stripe.Dispute): Promise<void> {
     const payment = await this.findPaymentByStripeIdentifiers({
       chargeId: this.getStripeDisputeChargeId(dispute),
       paymentIntentId: this.getStripeDisputePaymentIntentId(dispute),
@@ -1492,6 +1446,169 @@ export class PaymentsService {
     });
   }
 
+  /**
+   * Trata o evento de reversão de transferência (Transfer Reversed)
+   */
+  async handleStripeTransferReversedEvent(
+    transfer: Stripe.Transfer,
+  ): Promise<void> {
+    const transferId = transfer.id;
+    const sourceTransaction =
+      typeof transfer.source_transaction === 'string'
+        ? transfer.source_transaction
+        : (transfer.source_transaction as any)?.id;
+
+    console.log(
+      `[STRIPE_TRANSFER_REVERSED] Transfer ${transferId} revertido. Source Transaction: ${sourceTransaction}`,
+    );
+
+    const payment = await this.findPaymentByStripeIdentifiers({
+      chargeId: sourceTransaction,
+    });
+
+    if (!payment) {
+      console.warn(
+        `⚠️ [STRIPE_TRANSFER_REVERSED] Pagamento local não encontrado para transfer ${transferId}`,
+      );
+      return;
+    }
+
+    const reversedAmount = transfer.amount_reversed / 100;
+    const reversedAmountString = this.toMoneyString(reversedAmount);
+    const now = new Date();
+
+    await this.db.transaction(async (tx: any) => {
+      // 1. Debitar da carteira (Atômico, permite saldo negativo)
+      await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} - ${reversedAmountString}::numeric`,
+          totalEarned: sql`${userWallets.totalEarned} - ${reversedAmountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(eq(userWallets.userId, payment.personalId));
+
+      // 2. Registrar transação de débito
+      await this.createTransactionInTx(tx, {
+        paymentId: payment.id,
+        userId: payment.personalId,
+        type: PaymentType.PERSONAL_EARNINGS,
+        amount: this.toMoneyString(-reversedAmount),
+        description: `Reversão de repasse Stripe (Transfer ${transferId})`,
+        status: PaymentStatus.REFUNDED,
+        stripeTransferId: transferId,
+        metadata: {
+          event: 'transfer.reversed',
+          transferId: transferId,
+          amountReversed: transfer.amount_reversed,
+          processedAt: now.toISOString(),
+        },
+      });
+    });
+
+    this.logger.log(
+      `✅ [STRIPE_TRANSFER_REVERSED] Carteira do personal ${payment.personalId} debitada em R$ ${reversedAmountString}`,
+    );
+  }
+
+  /**
+   * Trata o evento de falha de pagamento (Payout Failed)
+   */
+  async handleStripePayoutFailedEvent(payout: Stripe.Payout): Promise<void> {
+    const payoutId = payout.id;
+    const accountId = payout.destination as string;
+
+    this.logger.error(`❌ [STRIPE_PAYOUT_FAILED] Payout ${payoutId} falhou.`);
+
+    const profile = await this.db.query.financialProfiles.findFirst({
+      where: eq(financialProfiles.stripeAccountId, accountId),
+    });
+
+    if (!profile) {
+      this.logger.error(
+        `⚠️ [STRIPE_PAYOUT_FAILED] Perfil financeiro não encontrado para conta Stripe ${accountId}`,
+      );
+      return;
+    }
+
+    const amount = payout.amount / 100;
+    const amountString = this.toMoneyString(amount);
+    const now = new Date();
+
+    await this.db.transaction(async (tx: any) => {
+      // 1. Localizar o saque original
+      const withdrawal = await tx.query.withdrawalRequests.findFirst({
+        where: and(
+          eq(withdrawalRequests.userId, profile.userId),
+          eq(withdrawalRequests.status, 'processing'),
+          sql`${withdrawalRequests.metadata}->>'stripePayoutId' = ${payoutId}`,
+        ),
+      });
+
+      if (!withdrawal) {
+        this.logger.warn(
+          `⚠️ [STRIPE_PAYOUT_FAILED] Saque local correspondente ao Payout ${payoutId} não encontrado.`,
+        );
+        return;
+      }
+
+      // 2. Estornar valor para saldo disponível (Atômico)
+      await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} + ${amountString}::numeric`,
+          totalWithdrawn: sql`${userWallets.totalWithdrawn} - ${amountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(eq(userWallets.userId, profile.userId));
+
+      // 3. Atualizar status do saque
+      await tx
+        .update(withdrawalRequests)
+        .set({
+          status: 'failed',
+          updatedAt: now,
+          metadata: {
+            ...withdrawal.metadata,
+            failureReason: payout.failure_code || 'unknown_stripe_failure',
+            failedAt: now.toISOString(),
+          },
+        })
+        .where(eq(withdrawalRequests.id, withdrawal.id));
+
+      // 4. Registrar transação de estorno
+      await this.createTransactionInTx(tx, {
+        userId: profile.userId,
+        type: PaymentType.REFUND,
+        amount: amountString,
+        description: `Estorno de saque falhado (Payout ${payoutId})`,
+        status: PaymentStatus.CAPTURED,
+        metadata: {
+          event: 'payout.failed',
+          payoutId,
+          failureCode: payout.failure_code,
+        },
+      });
+
+      // 5. Registrar no histórico de saque
+      await tx.insert(withdrawalHistory).values({
+        withdrawalId: withdrawal.id,
+        userId: withdrawal.userId,
+        action: 'failed',
+        description: `Saque falhou na Stripe: ${payout.failure_message || payout.failure_code}`,
+        metadata: {
+          payoutId,
+          failureCode: payout.failure_code,
+        },
+        createdAt: now,
+      });
+    });
+
+    this.logger.log(
+      `✅ [STRIPE_PAYOUT_FAILED] Saldo de R$ ${amountString} restaurado para personal ${profile.userId}`,
+    );
+  }
+
   // Capturar pagamento após aula concluída (fluxo normal)
   async capturePaymentAfterClass(
     classId: string,
@@ -1575,7 +1692,8 @@ export class PaymentsService {
     }
 
     const isStripePayment = this.isStripePayment(payment);
-    const canCapture = isStripePayment && payment.status === PaymentStatus.AUTHORIZED;
+    const canCapture =
+      isStripePayment && payment.status === PaymentStatus.AUTHORIZED;
 
     if (!canCapture) {
       console.error(
@@ -1844,29 +1962,49 @@ export class PaymentsService {
     userId: string,
     withdrawDto: WithdrawRequestDto,
   ): Promise<TransactionResponseDto> {
-    const wallet = await this.getUserWallet(userId);
+    const amount = withdrawDto.amount;
+    const amountString = this.toMoneyString(amount);
+    const now = new Date();
 
-    if (wallet.availableBalance < withdrawDto.amount) {
-      throw new BadRequestException('Saldo insuficiente para saque');
-    }
+    return this.db.transaction(async (tx: any) => {
+      // 1. Lock da carteira e verificação de saldo
+      const [wallet] = await tx
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, userId))
+        .for('update'); // Row-level lock para prevenir race conditions
 
-    // Criar transação de saque
-    const transaction = await this.createTransaction({
-      paymentId: null, // Saque não está vinculado a um pagamento
-      userId,
-      type: PaymentType.REFUND, // Usando REFUND para saque
-      amount: -withdrawDto.amount,
-      description: withdrawDto.description || 'Solicitação de saque',
-      status: PaymentStatus.PENDING,
+      if (!wallet) {
+        throw new NotFoundException('Carteira não encontrada');
+      }
+
+      if (parseFloat(wallet.availableBalance) < amount) {
+        throw new BadRequestException('Saldo insuficiente para saque');
+      }
+
+      // 2. Criar transação de saque (pendente)
+      const transaction = await this.createTransactionInTx(tx, {
+        paymentId: null,
+        userId,
+        type: PaymentType.REFUND, // Usando REFUND para saque interno
+        amount: this.toMoneyString(-amount),
+        description: withdrawDto.description || 'Solicitação de saque',
+        status: PaymentStatus.PENDING,
+        processedAt: now,
+      });
+
+      // 3. Atualizar saldo da carteira (atômico)
+      await tx
+        .update(userWallets)
+        .set({
+          availableBalance: sql`${userWallets.availableBalance} - ${amountString}::numeric`,
+          totalWithdrawn: sql`${userWallets.totalWithdrawn} + ${amountString}::numeric`,
+          updatedAt: now,
+        })
+        .where(eq(userWallets.userId, userId));
+
+      return transaction;
     });
-
-    // Atualizar carteira
-    await this.updateWallet(userId, {
-      availableBalance: wallet.availableBalance - withdrawDto.amount,
-      totalWithdrawn: wallet.totalWithdrawn + withdrawDto.amount,
-    });
-
-    return transaction;
   }
 
   // Obter transações da carteira do personal
@@ -1965,31 +2103,24 @@ export class PaymentsService {
 
   // Métodos auxiliares privados
   private async createTransaction(data: any): Promise<TransactionResponseDto> {
-    console.log('📝 [CREATE_TRANSACTION] ===== CRIANDO TRANSAÇÃO =====');
-    console.log('📝 [CREATE_TRANSACTION] Dados da transação:', {
-      paymentId: data.paymentId,
-      userId: data.userId,
-      type: data.type,
-      amount: data.amount,
-      description: data.description,
-      status: data.status,
-    });
+    return this.createTransactionInTx(this.db, data);
+  }
 
-    const [transaction] = await this.db
+  private async createTransactionInTx(
+    tx: any,
+    data: any,
+  ): Promise<TransactionResponseDto> {
+    console.log('📝 [CREATE_TRANSACTION] ===== CRIANDO TRANSAÇÃO =====');
+
+    const [transaction] = await tx
       .insert(paymentTransactions)
       .values({
         ...data,
-        processedAt: data.status === PaymentStatus.CAPTURED ? new Date() : null,
+        processedAt:
+          data.processedAt ||
+          (data.status === PaymentStatus.CAPTURED ? new Date() : null),
       })
       .returning();
-
-    console.log(
-      '✅ [CREATE_TRANSACTION] Transação criada no banco:',
-      transaction,
-    );
-    console.log(
-      '📝 [CREATE_TRANSACTION] ===== TRANSAÇÃO CRIADA COM SUCESSO =====',
-    );
 
     return this.formatTransactionResponse(transaction);
   }
@@ -2903,7 +3034,7 @@ export class PaymentsService {
         ? requirements.past_due
         : Array.isArray(requirements.pastDue)
           ? requirements.pastDue
-        : [],
+          : [],
     };
   }
 

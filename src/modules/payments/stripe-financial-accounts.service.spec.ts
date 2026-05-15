@@ -81,7 +81,9 @@ describe('StripeFinancialAccountsService', () => {
           canReceivePayments: false,
         },
       ]);
-      const valuesMock = jest.fn().mockReturnValue({ returning: returningMock });
+      const valuesMock = jest
+        .fn()
+        .mockReturnValue({ returning: returningMock });
       mockDb.insert.mockReturnValue({ values: valuesMock });
 
       mockStripeConnectService.createRecipientAccount.mockResolvedValue({
@@ -109,7 +111,9 @@ describe('StripeFinancialAccountsService', () => {
 
       const result = await service.ensureConnectedAccount('personal-1');
 
-      expect(mockStripeConnectService.createRecipientAccount).toHaveBeenCalledWith(
+      expect(
+        mockStripeConnectService.createRecipientAccount,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'personal@treinopro.com',
           displayName: 'Maria Silva',
@@ -202,7 +206,9 @@ describe('StripeFinancialAccountsService', () => {
 
       const result = await service.ensureConnectedAccount('personal-1');
 
-      expect(mockStripeConnectService.createRecipientAccount).not.toHaveBeenCalled();
+      expect(
+        mockStripeConnectService.createRecipientAccount,
+      ).not.toHaveBeenCalled();
       expect(mockStripeConnectService.retrieveAccount).toHaveBeenCalledWith(
         'acct_existing',
       );
@@ -212,9 +218,9 @@ describe('StripeFinancialAccountsService', () => {
     it('throws when the user does not exist', async () => {
       mockDb.query.users.findFirst.mockResolvedValue(null);
 
-      await expect(service.ensureConnectedAccount('missing-user')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.ensureConnectedAccount('missing-user'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -237,12 +243,15 @@ describe('StripeFinancialAccountsService', () => {
           },
         });
 
-      mockStripeConnectService.createEmbeddedOnboardingSession.mockResolvedValue({
-        client_secret: 'acctsess_secret_123',
-        expires_at: 1_760_000_000,
-      });
+      mockStripeConnectService.createEmbeddedOnboardingSession.mockResolvedValue(
+        {
+          client_secret: 'acctsess_secret_123',
+          expires_at: 1_760_000_000,
+        },
+      );
 
-      const result = await service.createEmbeddedOnboardingSession('personal-1');
+      const result =
+        await service.createEmbeddedOnboardingSession('personal-1');
 
       expect(ensureSpy).toHaveBeenCalledWith('personal-1');
       expect(
