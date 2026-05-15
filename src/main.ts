@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join, isAbsolute } from 'path';
 import * as express from 'express';
+import { runMigrations } from './database/run-migrations';
+import { seedAdmin } from './database/seed-admin';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -90,6 +92,9 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const port = configService.get('PORT') || 3001;
+
+  // Seed de admin antes de ouvir na porta (migrações agora rodam via package.json)
+  await seedAdmin();
 
   await app.listen(port);
   console.log(`🚀 TreinoPRO API rodando na porta ${port}`);
