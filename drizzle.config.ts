@@ -1,10 +1,14 @@
 import { defineConfig } from 'drizzle-kit';
+import * as fs from 'fs';
 
-// drizzle-kit roda do host, não dentro do Docker.
-// Se DATABASE_URL aponta para um hostname de container (ex: treinopro-postgres),
-// substitui por localhost para que o CLI consiga conectar pela porta mapeada.
+// drizzle-kit pode rodar tanto do host quanto de dentro do Docker.
+// Se estiver rodando no host, substitui o hostname pelo localhost.
+// Se estiver rodando dentro do container Docker (detectado via /.dockerenv), mantém o hostname original (ex: treinopro-postgres).
 const rawUrl = process.env.DATABASE_URL!;
-const connectionString = rawUrl?.replace(/(@)[^:@/]+(:)/, '$1localhost$2');
+const isInsideContainer = fs.existsSync('/.dockerenv');
+const connectionString = isInsideContainer
+  ? rawUrl
+  : rawUrl?.replace(/(@)[^:@/]+(:)/, '$1localhost$2');
 
 export default defineConfig({
   schema: './src/database/schema/*',
