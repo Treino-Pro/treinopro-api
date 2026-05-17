@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
+import Stripe from 'stripe';
 
 type StripePrimitive = string | number | boolean | null | undefined;
 type StripePayload =
